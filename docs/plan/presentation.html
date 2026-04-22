@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RS Ticketing System — Team Presentation</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&family=Source+Sans+3:wght@300;400;600;700&display=swap');
+
+  :root {
+    --rs-blue: #0069D9;
+    --rs-blue-dark: #004A99;
+    --rs-blue-light: #E8F0FE;
+    --rs-orange: #D97B00;
+    --rs-orange-light: #FFF3E0;
+    --rs-gray-900: #1A1A2E;
+    --rs-gray-700: #333333;
+    --rs-gray-500: #666666;
+    --rs-gray-300: #CCCCCC;
+    --rs-gray-100: #F5F5F7;
+    --rs-white: #FFFFFF;
+    --rs-red: #DC3545;
+    --rs-red-light: #FFF0F0;
+    --rs-green: #28A745;
+    --rs-green-light: #F0FFF4;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Source Sans 3', 'Segoe UI', sans-serif;
+    background: var(--rs-gray-900);
+    color: var(--rs-gray-700);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  .slide {
+    display: none;
+    width: 100vw;
+    height: 100vh;
+    padding: 60px 80px;
+    position: absolute;
+    top: 0; left: 0;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .slide.active { display: flex; }
+
+  h1, h2, h3 { font-family: 'Merriweather', Georgia, serif; }
+  h1 { font-size: 3.2rem; line-height: 1.2; }
+  h2 { font-size: 2.4rem; line-height: 1.3; margin-bottom: 40px; }
+  h3 { font-size: 1.4rem; line-height: 1.4; }
+  p, li { font-size: 1.25rem; line-height: 1.7; }
+
+  .slide-number {
+    position: fixed;
+    bottom: 20px;
+    right: 30px;
+    font-size: 0.9rem;
+    color: var(--rs-gray-500);
+    font-family: 'Source Sans 3', sans-serif;
+    z-index: 100;
+  }
+
+  .footer-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--rs-blue), var(--rs-orange));
+    z-index: 100;
+  }
+
+  /* Slide 1: Title */
+  .slide-title {
+    background: linear-gradient(135deg, var(--rs-blue) 0%, var(--rs-blue-dark) 100%);
+    color: var(--rs-white);
+    text-align: center;
+    justify-content: center;
+    align-items: center;
+  }
+  .slide-title h1 { font-size: 3.8rem; margin-bottom: 20px; }
+  .slide-title .subtitle { font-size: 1.6rem; font-weight: 300; opacity: 0.9; margin-bottom: 60px; }
+  .slide-title .org { font-size: 1.1rem; opacity: 0.7; letter-spacing: 2px; text-transform: uppercase; }
+  .slide-title .logo-mark {
+    width: 80px; height: 80px; border-radius: 16px;
+    background: var(--rs-orange); color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Merriweather', serif; font-weight: 900; font-size: 2rem;
+    margin-bottom: 30px;
+  }
+
+  /* Slide 2: Problem */
+  .slide-problem { background: var(--rs-white); }
+  .pain-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; margin-top: 10px; }
+  .pain-card {
+    background: var(--rs-gray-100); border-radius: 16px; padding: 36px;
+    border-left: 4px solid var(--rs-orange);
+  }
+  .pain-card .pain-icon { font-size: 2.4rem; margin-bottom: 16px; }
+  .pain-card h3 { color: var(--rs-gray-900); margin-bottom: 12px; font-size: 1.3rem; }
+  .pain-card p { color: var(--rs-gray-500); font-size: 1.1rem; }
+
+  /* Slide 3: Solution */
+  .slide-solution { background: var(--rs-white); }
+  .wins-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 36px; }
+  .win-card {
+    background: var(--rs-blue-light); border-radius: 16px; padding: 36px;
+    border-top: 4px solid var(--rs-blue);
+  }
+  .win-card .win-icon { font-size: 2.4rem; margin-bottom: 12px; }
+  .win-card h3 { color: var(--rs-blue-dark); margin-bottom: 16px; }
+  .win-card p { color: var(--rs-gray-700); font-size: 1.05rem; }
+
+  /* Slide 4: Before/After */
+  .slide-compare { background: var(--rs-white); }
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+  .compare-col { border-radius: 16px; padding: 36px; }
+  .compare-before { background: var(--rs-red-light); border-top: 4px solid var(--rs-red); }
+  .compare-after { background: var(--rs-green-light); border-top: 4px solid var(--rs-green); }
+  .compare-col h3 { margin-bottom: 20px; font-size: 1.5rem; }
+  .compare-before h3 { color: var(--rs-red); }
+  .compare-after h3 { color: var(--rs-green); }
+  .compare-col li { margin-bottom: 12px; font-size: 1.15rem; color: var(--rs-gray-700); list-style: none; padding-left: 28px; position: relative; }
+  .compare-before li::before { content: "✗"; position: absolute; left: 0; color: var(--rs-red); font-weight: 700; }
+  .compare-after li::before { content: "✓"; position: absolute; left: 0; color: var(--rs-green); font-weight: 700; }
+  .compare-note {
+    margin-top: 30px; padding: 16px 24px; background: var(--rs-blue-light);
+    border-radius: 10px; text-align: center; color: var(--rs-blue-dark);
+    font-size: 1.1rem; font-weight: 600;
+  }
+
+  /* Slide 5: Features */
+  .slide-features { background: var(--rs-white); }
+  .features-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+  .feature-card {
+    background: var(--rs-gray-100); border-radius: 16px; padding: 32px;
+    display: flex; gap: 20px; align-items: flex-start;
+  }
+  .feature-card .feat-icon {
+    width: 52px; height: 52px; border-radius: 12px;
+    background: var(--rs-blue); color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.5rem; flex-shrink: 0;
+  }
+  .feature-card h3 { color: var(--rs-gray-900); margin-bottom: 8px; font-size: 1.2rem; }
+  .feature-card p { color: var(--rs-gray-500); font-size: 1.05rem; }
+
+  /* Slide 6: Roles */
+  .slide-roles { background: var(--rs-white); }
+  .roles-stack { display: flex; flex-direction: column; gap: 20px; }
+  .role-row {
+    display: flex; gap: 24px; align-items: center;
+    background: var(--rs-gray-100); border-radius: 14px; padding: 24px 32px;
+  }
+  .role-badge {
+    background: var(--rs-blue); color: white; border-radius: 10px;
+    padding: 8px 20px; font-weight: 700; font-size: 1rem;
+    white-space: nowrap; min-width: 140px; text-align: center;
+  }
+  .role-row:nth-child(2) .role-badge { background: var(--rs-orange); }
+  .role-row:nth-child(3) .role-badge { background: var(--rs-blue-dark); }
+  .role-row:nth-child(4) .role-badge { background: var(--rs-gray-700); }
+  .role-row p { font-size: 1.15rem; color: var(--rs-gray-700); }
+
+  /* Slide 7: Timeline */
+  .slide-timeline { background: var(--rs-white); }
+  .timeline { display: flex; gap: 0; margin-top: 10px; position: relative; }
+  .timeline::before {
+    content: ""; position: absolute; top: 36px; left: 40px; right: 40px;
+    height: 4px; background: linear-gradient(90deg, var(--rs-blue), var(--rs-orange));
+    border-radius: 2px;
+  }
+  .tl-step {
+    flex: 1; text-align: center; position: relative; padding: 0 12px;
+  }
+  .tl-dot {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--rs-blue); border: 4px solid var(--rs-white);
+    box-shadow: 0 0 0 3px var(--rs-blue);
+    margin: 22px auto 20px;
+    position: relative; z-index: 2;
+  }
+  .tl-step:nth-child(2) .tl-dot { background: var(--rs-blue); box-shadow: 0 0 0 3px var(--rs-blue); }
+  .tl-step:nth-child(3) .tl-dot { background: var(--rs-orange); box-shadow: 0 0 0 3px var(--rs-orange); }
+  .tl-step:nth-child(4) .tl-dot { background: var(--rs-green); box-shadow: 0 0 0 3px var(--rs-green); }
+  .tl-step .tl-label { font-weight: 700; color: var(--rs-blue-dark); font-size: 1.1rem; margin-bottom: 8px; }
+  .tl-step .tl-desc { color: var(--rs-gray-500); font-size: 1rem; }
+  .cost-banner {
+    margin-top: 50px; padding: 24px 36px; background: var(--rs-orange-light);
+    border-radius: 14px; border-left: 5px solid var(--rs-orange);
+    display: flex; align-items: center; gap: 16px;
+  }
+  .cost-banner .cost-zero {
+    font-family: 'Merriweather', serif; font-size: 2.2rem;
+    font-weight: 900; color: var(--rs-orange);
+  }
+  .cost-banner p { font-size: 1.1rem; color: var(--rs-gray-700); }
+
+  /* Slide 8: Close */
+  .slide-close {
+    background: linear-gradient(135deg, var(--rs-blue) 0%, var(--rs-blue-dark) 100%);
+    color: var(--rs-white); text-align: center;
+    justify-content: center; align-items: center;
+  }
+  .slide-close h1 { font-size: 3.2rem; margin-bottom: 20px; }
+  .slide-close .close-sub { font-size: 1.4rem; opacity: 0.85; margin-bottom: 50px; font-weight: 300; }
+  .slide-close .close-info { font-size: 1rem; opacity: 0.6; }
+  .slide-close .close-info span { display: block; margin-top: 6px; }
+
+  /* Navigation hint */
+  .nav-hint {
+    position: fixed; bottom: 16px; left: 30px;
+    font-size: 0.8rem; color: var(--rs-gray-500); z-index: 100;
+  }
+
+  /* Animations */
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .slide.active > * { animation: fadeIn 0.5s ease-out forwards; }
+  .slide.active > *:nth-child(2) { animation-delay: 0.1s; }
+  .slide.active > *:nth-child(3) { animation-delay: 0.2s; }
+</style>
+</head>
+<body>
+
+<!-- Slide 1: Title -->
+<div class="slide slide-title active" id="s1">
+  <div class="logo-mark">RS</div>
+  <h1>Introducing the<br>RS Ticketing System</h1>
+  <p class="subtitle">One place for tasks. One click for reports.</p>
+  <p class="org">Romega Solutions &mdash; Internal Tools Initiative</p>
+</div>
+
+<!-- Slide 2: Problem -->
+<div class="slide slide-problem" id="s2">
+  <h2>Sound familiar?</h2>
+  <div class="pain-grid">
+    <div class="pain-card">
+      <div class="pain-icon">&#128197;</div>
+      <h3>"It's Friday again..."</h3>
+      <p>Your weekly report takes 30&ndash;60 minutes &mdash; re-typing things you already tracked in Trello or your TODO list.</p>
+    </div>
+    <div class="pain-card">
+      <div class="pain-icon">&#128269;</div>
+      <h3>"Where is that task?"</h3>
+      <p>Tasks are scattered across markdown files, Trello boards, Google Sheets, and chat messages. No single place to check.</p>
+    </div>
+    <div class="pain-card">
+      <div class="pain-icon">&#129300;</div>
+      <h3>"Who's doing what?"</h3>
+      <p>No way to see team workload, blockers, or project status at a glance. You have to ask around or dig through files.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 3: Solution -->
+<div class="slide slide-solution" id="s3">
+  <h2>One tool, three wins</h2>
+  <div class="wins-grid">
+    <div class="win-card">
+      <div class="win-icon">&#9776;</div>
+      <h3>Your Tasks</h3>
+      <p>Kanban board + list view for all 4 projects (C1&ndash;C4). Assign, prioritize, and track &mdash; all in one place.</p>
+    </div>
+    <div class="win-card">
+      <div class="win-icon">&#128196;</div>
+      <h3>Your Reports</h3>
+      <p>Weekly report auto-generates from your tasks. Just fill in Client Engagement, Risks, and Ideas &mdash; the rest writes itself.</p>
+    </div>
+    <div class="win-card">
+      <div class="win-icon">&#128202;</div>
+      <h3>Your Dashboard</h3>
+      <p>See all projects, deadlines, and blockers on one screen. Know who's working on what without asking.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 4: Before/After -->
+<div class="slide slide-compare" id="s4">
+  <h2>From 60 minutes to 10</h2>
+  <div class="compare-grid">
+    <div class="compare-col compare-before">
+      <h3>Before</h3>
+      <ul>
+        <li>Open Excel template</li>
+        <li>Remember what you did this week</li>
+        <li>Re-type every task, project, accomplishment</li>
+        <li>Fill all 7 sections manually</li>
+        <li>30&ndash;60 minutes every Friday</li>
+      </ul>
+    </div>
+    <div class="compare-col compare-after">
+      <h3>After</h3>
+      <ul>
+        <li>Open your report &mdash; 2 sections already filled</li>
+        <li>Pending Projects pulled from your active tasks</li>
+        <li>Key Accomplishments pulled from completed tasks</li>
+        <li>You only type: Client Engagement, Risks, Ideas</li>
+        <li>Under 10 minutes</li>
+      </ul>
+    </div>
+  </div>
+  <div class="compare-note">Reports still export to the same Excel format management expects.</div>
+</div>
+
+<!-- Slide 5: Features -->
+<div class="slide slide-features" id="s5">
+  <h2>Familiar tools, better workflow</h2>
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feat-icon">&#9744;</div>
+      <div>
+        <h3>Kanban Board</h3>
+        <p>Drag tasks between Backlog, To Do, In Progress, In Review, and Done. Just like Trello, but connected to your reports.</p>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feat-icon">&#9673;</div>
+      <div>
+        <h3>Dashboard</h3>
+        <p>Project cards for C1&ndash;C4, upcoming deadlines, team workload bars, and active blockers &mdash; all on one screen.</p>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feat-icon">&#9998;</div>
+      <div>
+        <h3>Report Editor</h3>
+        <p>7 sections, same as the Excel template. Sections 4 and 5 auto-fill. Auto-saves every 30 seconds &mdash; no more lost work.</p>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feat-icon">&#128229;</div>
+      <div>
+        <h3>Excel Export</h3>
+        <p>One click to export as .xlsx. Same format, same sections, same layout management is used to.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 6: Roles -->
+<div class="slide slide-roles" id="s6">
+  <h2>What this means for you</h2>
+  <div class="roles-stack">
+    <div class="role-row">
+      <div class="role-badge">IC</div>
+      <p><strong>Ken, Jenn, Duane, Mich</strong> &mdash; Track your tasks in one place. Friday reports auto-populate. Just review + fill 3 sections + submit.</p>
+    </div>
+    <div class="role-row">
+      <div class="role-badge">Manager</div>
+      <p><strong>Mark, Cherry Ann</strong> &mdash; See team workload and blockers on the dashboard. Review submitted reports and add Management Remarks.</p>
+    </div>
+    <div class="role-row">
+      <div class="role-badge">Approval</div>
+      <p><strong>Robbie</strong> &mdash; One-screen view of all project statuses and blockers. Approve reports without opening Excel files.</p>
+    </div>
+    <div class="role-row">
+      <div class="role-badge">Everyone</div>
+      <p>No more re-typing. No more "where's that task?" No more invisible workload.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Slide 7: Timeline -->
+<div class="slide slide-timeline" id="s7">
+  <h2>When is this happening?</h2>
+  <div class="timeline">
+    <div class="tl-step">
+      <div class="tl-dot"></div>
+      <div class="tl-label">Done</div>
+      <div class="tl-desc">Product spec &<br>tool selection complete</div>
+    </div>
+    <div class="tl-step">
+      <div class="tl-dot"></div>
+      <div class="tl-label">May 2026</div>
+      <div class="tl-desc">Ken deploys on<br>our VPS (1&ndash;2 days)</div>
+    </div>
+    <div class="tl-step">
+      <div class="tl-dot"></div>
+      <div class="tl-label">Week 1&ndash;2</div>
+      <div class="tl-desc">Parallel operation:<br>new tool + current workflow</div>
+    </div>
+    <div class="tl-step">
+      <div class="tl-dot"></div>
+      <div class="tl-label">Week 3+</div>
+      <div class="tl-desc">Full switch:<br>reports from new system</div>
+    </div>
+  </div>
+  <div class="cost-banner" style="margin-bottom: 20px;">
+    <div class="cost-zero">$0</div>
+    <p>Built on Plane.so (free, open-source) running on our existing server.<br>No subscriptions. No trials. No hidden fees.</p>
+  </div>
+  <div class="cost-banner" style="border-left-color: var(--rs-blue);">
+    <div class="cost-zero" style="color: var(--rs-blue); font-size: 1.6rem;">175 hrs</div>
+    <p>Saved per year across the team. 7 people &times; ~25 min saved/week &times; 50 weeks.<br>That's <strong>4+ full work weeks</strong> returned to actual project work.</p>
+  </div>
+</div>
+
+<!-- Slide 8: Close -->
+<div class="slide slide-close" id="s8">
+  <div class="logo-mark" style="background:var(--rs-orange);">RS</div>
+  <h1>Let's make Fridays easier.</h1>
+  <p class="close-sub">Questions, concerns, or ideas? Let's discuss.</p>
+  <p class="close-info">
+    Product spec: RS_Tool-Ticketing-System/docs/plan/
+    <span>Mark Siazon &mdash; Product Design / PM</span>
+  </p>
+</div>
+
+<div class="slide-number" id="slideNum">1 / 8</div>
+<div class="nav-hint">Arrow keys or click to navigate</div>
+<div class="footer-bar"></div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const slideNum = document.getElementById('slideNum');
+  let current = 0;
+
+  function show(n) {
+    slides[current].classList.remove('active');
+    current = (n + slides.length) % slides.length;
+    slides[current].classList.add('active');
+    slideNum.textContent = (current + 1) + ' / ' + slides.length;
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'Enter') show(current + 1);
+    if (e.key === 'ArrowLeft' || e.key === 'Backspace') show(current - 1);
+    if (e.key === 'Home') show(0);
+    if (e.key === 'End') show(slides.length - 1);
+    if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (e.clientX > window.innerWidth / 2) show(current + 1);
+    else show(current - 1);
+  });
+</script>
+</body>
+</html>
