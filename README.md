@@ -1,72 +1,143 @@
 # RS Ticketing System
 
-Internal task management + automated weekly report generation for Romega Solutions.
+Internal reporting and visibility layer for Romega Solutions. Sits on top of Plane.so — it does not replace it.
 
-**Status:** **APPROVED by Robbie (Apr 22).** Spec complete. Ready for Ken's deployment post-Apr 30.
-**Approach:** Self-host [Plane.so](https://plane.so) (free, open-source) + custom report script.
-**Cost:** $0 — runs on existing VPS via Docker.
+## Architecture
+
+```
+Plane.so (source of truth)
+    ↓
+Python report script / Next.js API (transformation layer)
+    ↓
+Excel reports + Web dashboard (presentation layer)
+```
+
+### Who uses what
+
+| Role | Tool | What they do |
+|------|------|-------------|
+| **ICs** (Ken, Jenn, Duane, Mich) | Plane only | Create/update tasks, set status, due dates, labels |
+| **Team Leads** (Mark, Cherry Ann) | Plane + reports | Review tasks, generate/receive weekly reports, add context |
+| **Admin/CEO** (Robbie) | Custom web app | Dashboard view, download reports, see risks across org |
+
+ICs never touch this app. Plane is their system. This app is for visibility and reporting only.
 
 ---
 
-## The Problem
+## Components
 
-| Pain | Impact |
-|------|--------|
-| Weekly reports take 30-60 min per person per Friday | ~26 ICs re-type data from Trello/markdown into a 7-section Excel template |
-| Tasks scattered across 5 markdown files, Trello, Sheets, emails | No single source of truth |
-| No dashboard or workload visibility | Ken has 33 tasks, Mark is sole designer — invisible to leadership |
-| No automation | No notifications, no dependency tracking, manual Trello → Sheets pipeline |
+### 1. Report Script (`report-script/`)
 
-## The Solution
+Python script that pulls task data from Plane's API and generates the 7-section weekly report as `.xlsx`.
 
-**Plane.so** handles task management (Kanban, list views, projects, roles, priorities) — free, self-hosted, unlimited users.
+**Auto-populated sections:**
+- Section 4: Pending Projects (active tasks: backlog/unstarted/started and todo/in_progress/in_review)
+- Section 5: Key Accomplishments (tasks completed this week)
 
-**Custom report script** pulls task data from Plane's API and generates the 7-section Excel weekly report:
-- Sections 4 (Pending Projects) and 5 (Key Accomplishments) auto-populated from tasks
-- Sections 2, 3, 6, 7 filled manually by the IC (requires human input)
-- Export to `.xlsx` matching the current template format
+**Manually filled by ICs:**
+- Section 2: Client Engagement Activities
+- Section 3: Risks / Issues / Roadblocks
+- Section 6: Ideas / Recommendations
+- Section 7: Management Remarks (filled by supervisor)
 
-**Time savings:** Friday report drops from 30-60 min to under 10 min per person.
+**Setup:**
+```bash
+cd report-script
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# Fill in PLANE_BASE_URL, PLANE_API_KEY, PLANE_WORKSPACE_SLUG
+```
+
+**Usage:**
+```bash
+python generate_report.py                      # current week, all users
+python generate_report.py --user "Ken Garcia"  # one user
+python generate_report.py --user "ken@romega-solutions.com"   # one user by email
+python generate_report.py --user "135f22ae-dd76-402b-a54f-a9aa6d28af8d"  # one user by id
+python generate_report.py --week 2026-05-05    # specific week (Monday date)
+python generate_report.py --bulk               # all users, one workbook
+python generate_report.py --dry-run            # validate config only
+python generate_report.py --debug-members --user "ken"  # debug member matching
+python generate_report.py --debug-issues --user "ken"   # debug issue/status mapping
+python check_members.py                         # show member count
+python check_members.py --show-all             # list all members
+```
+
+**Automate (cron — every Friday 3pm):**
+```bash
+0 15 * * 5 cd /path/to/report-script && /path/to/venv/bin/python generate_report.py --bulk
+```
+
+---
+
+### 2. Web App (`src/`)
+
+Next.js 16 app (App Router). Built for leads and admin only — not for ICs.
+
+**Stack:** Next.js 16 · Drizzle ORM · SQLite · shadcn/ui · Tailwind v4
+
+**Core features (MVP):**
+- Admin dashboard: completed vs. pending tasks per person, risks flagged in Plane
+- Generate reports: select user + week → download Excel
+- Bulk reports: generate all users → download ZIP
+- Report history: list of past generated reports, download anytime
+
+**Dev (from project root):**
+```bash
+cd /Users/kuya/Documents/WORK/RS_Workspace/RS_Tools/RS-Tool-Ticketing-System
+npm install
+npm run dev     # http://localhost:3000
+npm run build
+npm run lint
+```
+
+If you see `Can't resolve 'tailwindcss' in '/.../RS_Tools'`, you're running from the parent folder instead of this repository root. `cd` into this project path first, then run the npm commands above.
+
+---
+
+## Plane.so Configuration
+
+Self-hosted at: `https://romega-projects-rs-plane.ikuuwb.easypanel.host`
+
+Workspace slug: `romega-solutions`
+
+**Projects:** C1 (Romega Digital v3) · C2 (PinayMate) · C3 (Internal Tools) · C4 (Upskilling)
+
+**Workflow states:** Backlog → To Do → In Progress → In Review → Done / Cancelled
+
+**Labels ICs must use for reports to work:**
+- `client-engagement`
+- `risk` or `blocked`
+- `idea`
+
+> Sections 2/3/6 are currently manual in the generated Excel. These labels are for process consistency and future automation.
+
+**Minimum task fields required (enforce this with team):**
+- Assignee (must be set)
+- Status (must be kept current)
+- Due date (must be set)
+
+Without these, report auto-population breaks.
+
+---
+
+## Failure Modes
+
+**Garbage in → garbage out.** If ICs don't assign tasks, set status, or add due dates, reports will be empty or wrong. Enforce the minimum fields above.
+
+**Leads ignoring reports.** Automate delivery via n8n or cron so it doesn't depend on someone manually generating.
 
 ---
 
 ## Docs
 
-| Document | Summary |
-|----------|---------|
-| [TODO.md](TODO.md) | Action items for Mark, Ken, and Robbie |
-| [Product Vision](docs/plan/product-vision.md) | Why this tool exists, what it replaces, success criteria |
-| [Features](docs/plan/features.md) | MVP / Phase 2 / Phase 3 feature breakdown |
-| [Data Model](docs/plan/data-model.md) | 9 tables, entity relationships, JSON structures |
-| [Screens](docs/plan/screens.md) | 15 screens with ASCII mockups, navigation, roles/permissions |
-| [Weekly Report Workflow](docs/plan/weekly-report-workflow.md) | 7-section template, auto-population logic, Excel export format |
-| [Migration](docs/plan/migration.md) | Import from markdown/Excel, parallel operation, cutover |
-| [Feasibility](docs/plan/feasibility.md) | 14 tools evaluated, team capacity analysis, 5 options compared |
-| [Plane Configuration](docs/plan/plane-configuration.md) | Plug-and-play setup: projects, statuses, labels, members, deployment checklist |
-| [Executive Summary](docs/plan/executive-summary.md) | 1-page pitch for Robbie — problem, solution, cost, ask |
-| [Ken's Handoff](docs/plan/handoff-ken.md) | Deployment brief for Ken — step-by-step with time estimates |
-| [Presentation Content](docs/plan/presentation-content.md) | 8-slide presentation content for team intro (Canva-ready) |
-| [Presentation (HTML)](docs/plan/presentation.html) | Self-contained HTML presentation (browser-viewable) |
-
-**DOCX exports** available in `docs/exports/` for offline sharing (8 key docs).
-
----
-
-## Quick Facts
-
-| | |
-|---|---|
-| **Tool** | Plane.so Community Edition (AGPL, self-hosted) |
-| **Infra** | Existing VPS, Docker Compose (needs 4GB+ RAM) |
-| **Users** | 7 core team initially, ~26 total capacity |
-| **Resolves** | C3 tasks A.2, A.3, A.4, F.5 |
-| **Deploy effort** | ~1 day (Ken, May 2026) |
-| **Report script** | Pre-built — `report-script/generate_report.py` (Python + openpyxl) |
-
----
-
-## Next Steps
-
-1. ~~**Mark** → Share feasibility doc with Robbie for buy-in~~ — ✅ Approved (Apr 22)
-2. **Mark** → Share docs folder with Ken for VPS RAM check + deployment prep
-3. **Ken** (May 2026) → Deploy Plane.so, configure report script (pre-built), import tasks
+| Doc | What it covers |
+|-----|---------------|
+| `docs/plan/handoff-ken.md` | Step-by-step deployment checklist |
+| `docs/plan/plane-configuration.md` | Projects, states, labels, members setup |
+| `docs/plan/weekly-report-workflow.md` | Report sections, auto-population logic |
+| `docs/plan/migration.md` | Task import from markdown TODOs, parallel run, cutover |
+| `docs/plan/data-model.md` | DB schema reference (web app) |
+| `docs/plan/features.md` | Web app feature spec (Option A reference) |
+| `report-script/README.md` | Report script full usage and config |

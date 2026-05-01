@@ -1,0 +1,30 @@
+<h2>RS Ticketing System Setup</h2>
+<p class="subtitle">Based on Option A from docs/plan/</p>
+
+<div class="section">
+  <h3>Tech Stack Confirmation</h3>
+  <ul>
+    <li><strong>Framework:</strong> Next.js App Router</li>
+    <li><strong>Database:</strong> SQLite</li>
+    <li><strong>ORM:</strong> Drizzle (or Prisma, if you prefer)</li>
+    <li><strong>UI Components:</strong> shadcn/ui + Tailwind CSS</li>
+  </ul>
+</div>
+
+<h3>Where should we start the initial scaffolding?</h3>
+<div class="options">
+  <div class="option" data-choice="auth" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Database & Auth Foundation</h3>
+      <p>Setup SQLite, schemas, and custom multi-user JWT login as specified in the docs.</p>
+    </div>
+  </div>
+  <div class="option" data-choice="ui" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Frontend Shell & Dashboard</h3>
+      <p>Scaffold the sidebar, layout, and static dashboard to nail down the UI first before wiring the backend.</p>
+    </div>
+  </div>
+</div>

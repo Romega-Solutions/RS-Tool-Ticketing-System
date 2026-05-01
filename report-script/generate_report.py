@@ -21,6 +21,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import sys
 from datetime import datetime, timedelta
@@ -38,17 +39,29 @@ load_dotenv()
 PLANE_BASE_URL = os.getenv("PLANE_BASE_URL", "").rstrip("/")
 PLANE_API_KEY = os.getenv("PLANE_API_KEY", "")
 PLANE_WORKSPACE_SLUG = os.getenv("PLANE_WORKSPACE_SLUG", "romega")
+PLANE_PROJECT_SLUG = os.getenv("PLANE_PROJECT_SLUG", "")
 OUTPUT_DIR = os.getenv("REPORT_OUTPUT_DIR", "./reports")
 
 # Status mapping: Plane status → report display value
 STATUS_MAP = {
+    "backlog": "Drafted",
+    "unstarted": "Drafted",
+    "started": "On-going",
     "todo": "Drafted",
     "in_progress": "On-going",
     "in_review": "For Approval",
+    "completed": "Completed",
 }
 
 # Statuses that count as "pending" (shown in Section 4)
-PENDING_STATUSES = {"todo", "in_progress", "in_review"}
+PENDING_STATUSES = {
+    "backlog",
+    "unstarted",
+    "started",
+    "todo",
+    "in_progress",
+    "in_review",
+}
 
 # --- Styling ---
 
@@ -111,6 +124,10 @@ class PlaneClient:
         data = self._get(f"/projects/{project_id}/issues/", params=params)
         return data.get("results", data) if isinstance(data, dict) else data
 
+    def get_project_states(self, project_id: str) -> list[dict]:
+        data = self._get(f"/projects/{project_id}/states/")
+        return data.get("results", data) if isinstance(data, dict) else data
+
     def get_project_name(self, projects: list[dict], project_id: str) -> str:
         for p in projects:
             if p.get("id") == project_id:
@@ -136,10 +153,93 @@ def get_week_range(week_start_str: str | None = None) -> tuple[datetime, datetim
 # --- Data Fetching ---
 
 
+def normalize_status(value: str) -> str:
+    return str(value).strip().lower().replace(" ", "_")
+
+
+def build_state_group_lookup(states: list[dict]) -> dict[str, str]:
+    """Map Plane state UUID -> normalized status group for a project."""
+    lookup: dict[str, str] = {}
+    for state in states:
+        state_id = state.get("id")
+        if not state_id:
+            continue
+        group = state.get("group") or state.get("key") or state.get("name")
+        if group:
+            lookup[str(state_id)] = normalize_status(group)
+    return lookup
+
+
+def extract_assignee_ids(issue: dict) -> set[str] | None:
+    """
+    Return assignee IDs when determinable.
+    - set(...) when explicit assignee fields exist
+    - None when fields are absent/unknown
+    """
+    has_assignee_fields = "assignees" in issue or "assignee_ids" in issue
+    if not has_assignee_fields:
+        return None
+
+    result: set[str] = set()
+    assignees = issue.get("assignees")
+    assignee_ids = issue.get("assignee_ids")
+
+    if isinstance(assignees, list):
+        for item in assignees:
+            if isinstance(item, str):
+                result.add(item)
+            elif isinstance(item, dict) and item.get("id"):
+                result.add(str(item.get("id")))
+
+    if isinstance(assignee_ids, list):
+        for item in assignee_ids:
+            if item:
+                result.add(str(item))
+
+    return result
+
+
+def extract_status_group(issue: dict, state_group_lookup: dict[str, str] | None = None) -> str:
+    """Normalize Plane issue state/group across dict and string payload shapes."""
+    state_detail = issue.get("state_detail")
+    state_group = issue.get("state_group")
+    state = issue.get("state")
+
+    if isinstance(state_detail, dict):
+        value = state_detail.get("group")
+        if value:
+            return normalize_status(value)
+
+    if state_group:
+        return normalize_status(state_group)
+
+    if isinstance(state, dict):
+        state_id = state.get("id")
+        if state_id and state_group_lookup:
+            mapped = state_group_lookup.get(str(state_id))
+            if mapped:
+                return mapped
+
+        for key in ("group", "key", "name"):
+            value = state.get(key)
+            if value:
+                return normalize_status(value)
+
+    if isinstance(state, str):
+        if state_group_lookup:
+            mapped = state_group_lookup.get(state)
+            if mapped:
+                return mapped
+        return normalize_status(state)
+
+    return ""
+
+
 def fetch_user_tasks(
     client: PlaneClient,
     projects: list[dict],
     user_id: str,
+    debug: bool = False,
 ) -> tuple[list[dict], list[dict]]:
     """Fetch pending tasks and completed tasks for a user across all projects."""
     pending = []
@@ -148,19 +248,46 @@ def fetch_user_tasks(
     for project in projects:
         pid = project["id"]
         pname = project.get("name", "Unknown")
+        states = client.get_project_states(pid)
+        state_group_lookup = build_state_group_lookup(states)
 
         issues = client.get_issues(pid, params={"assignee": user_id})
 
         for issue in issues:
-            status_group = (issue.get("state_detail", {}).get("group", "")
-                           or issue.get("state_group", ""))
+            issue_assignees = extract_assignee_ids(issue)
+            if issue_assignees is not None and user_id not in issue_assignees:
+                continue
+
+            status_group = extract_status_group(issue, state_group_lookup=state_group_lookup)
+            completed_at = issue.get("completed_at")
+
+            if debug:
+                print(json.dumps({
+                    "project": pname,
+                    "name": issue.get("name"),
+                    "state": issue.get("state"),
+                    "state_detail": issue.get("state_detail"),
+                    "state_group": issue.get("state_group"),
+                    "assignees": issue.get("assignees"),
+                    "assignee_ids": issue.get("assignee_ids"),
+                    "target_date": issue.get("target_date"),
+                    "completed_at": issue.get("completed_at"),
+                    "updated_at": issue.get("updated_at"),
+                    "_state_group_lookup_hit": state_group_lookup.get(str(issue.get("state"))),
+                    "_issue_assignee_ids": sorted(issue_assignees) if issue_assignees is not None else None,
+                    "_normalized_status_group": status_group,
+                }, indent=2, ensure_ascii=False))
+
             issue["_project_name"] = pname
             issue["_status_group"] = status_group
 
-            if status_group in PENDING_STATUSES:
-                pending.append(issue)
-            elif status_group == "completed":
+            if status_group == "completed" or completed_at:
                 completed.append(issue)
+            elif status_group in {"cancelled", "canceled", "archived"}:
+                continue
+            else:
+                # Keep unknown non-terminal states visible in Pending Projects.
+                pending.append(issue)
 
     return pending, completed
 
@@ -181,6 +308,30 @@ def filter_completed_this_week(
         except (ValueError, TypeError):
             continue
     return result
+
+
+def extract_member_user(member: dict) -> dict:
+    """Normalize member payload across API shapes: {member:{}}, {user:{}}, or flat."""
+    if not isinstance(member, dict):
+        return {}
+    return member.get("member") or member.get("user") or member
+
+
+def member_matches_query(member: dict, query: str) -> bool:
+    """Match user query against id, display name, username, name, or email."""
+    user_info = extract_member_user(member)
+    q = query.lower()
+    candidates = [
+        user_info.get("id"),
+        user_info.get("display_name"),
+        user_info.get("username"),
+        user_info.get("name"),
+        user_info.get("email"),
+    ]
+    for value in candidates:
+        if value and q in str(value).lower():
+            return True
+    return False
 
 
 # --- Excel Generation ---
@@ -381,11 +532,16 @@ def sanitize_sheet_name(name: str) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate RS Weekly Report from Plane.so")
+    parser = argparse.ArgumentParser(
+        description="Generate RS Weekly Report from Plane.so",
+        allow_abbrev=False,
+    )
     parser.add_argument("--week", help="Monday date of the week (YYYY-MM-DD). Default: current week.")
-    parser.add_argument("--user", help="Generate report for a specific user (display name). Default: all users.")
+    parser.add_argument("--user", help="Generate report for a specific user (name, username, email, or id). Default: all users.")
     parser.add_argument("--bulk", action="store_true", help="Generate one workbook with all users (one sheet per IC).")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be generated without calling the API.")
+    parser.add_argument("--debug-members", action="store_true", help="Print member matching fields and raw member payload.")
+    parser.add_argument("--debug-issues", action="store_true", help="Print Plane issue payload/status fields.")
     args = parser.parse_args()
 
     week_start, week_end = get_week_range(args.week)
@@ -400,15 +556,41 @@ def main():
 
     client = PlaneClient(PLANE_BASE_URL, PLANE_API_KEY, PLANE_WORKSPACE_SLUG)
     projects = client.get_projects()
+
+    # Filter by project slug/identifier if configured
+    if PLANE_PROJECT_SLUG:
+        projects = [
+            p for p in projects
+            if p.get("identifier") == PLANE_PROJECT_SLUG or p.get("slug") == PLANE_PROJECT_SLUG
+        ]
+        if not projects:
+            print(f"No project found matching '{PLANE_PROJECT_SLUG}'")
+            sys.exit(1)
+        print(f"Filtering to project: {projects[0].get('name')} ({PLANE_PROJECT_SLUG})")
+
     members = client.get_members()
 
     print(f"Found {len(projects)} projects, {len(members)} members")
+
+    if args.debug_members:
+        print("\n[DEBUG] Member candidates:")
+        for idx, member in enumerate(members, start=1):
+            user_info = extract_member_user(member)
+            print(
+                f"  {idx}. id={user_info.get('id', '-')}, "
+                f"display_name={user_info.get('display_name', '-')}, "
+                f"username={user_info.get('username', '-')}, "
+                f"name={user_info.get('name', '-')}, "
+                f"email={user_info.get('email', '-')}"
+            )
+        print("\n[DEBUG] Raw member payload:")
+        print(json.dumps(members, indent=2, ensure_ascii=False))
 
     # Filter to specific user if requested
     if args.user:
         members = [
             m for m in members
-            if args.user.lower() in (m.get("member", {}).get("display_name", "")).lower()
+            if member_matches_query(m, args.user)
         ]
         if not members:
             print(f"No member found matching '{args.user}'")
@@ -423,12 +605,12 @@ def main():
         wb.remove(wb.active)
 
         for member in members:
-            user_info = member.get("member", member)
+            user_info = extract_member_user(member)
             user_id = user_info.get("id", "")
-            user_name = user_info.get("display_name", "Unknown")
+            user_name = user_info.get("display_name") or user_info.get("name") or "Unknown"
 
             print(f"  Generating sheet for {user_name}...")
-            pending, completed = fetch_user_tasks(client, projects, user_id)
+            pending, completed = fetch_user_tasks(client, projects, user_id, debug=args.debug_issues)
             completed = filter_completed_this_week(completed, week_start, week_end)
 
             sheet_name = sanitize_sheet_name(user_name)
@@ -443,12 +625,12 @@ def main():
     else:
         # Individual workbooks per user
         for member in members:
-            user_info = member.get("member", member)
+            user_info = extract_member_user(member)
             user_id = user_info.get("id", "")
-            user_name = user_info.get("display_name", "Unknown")
+            user_name = user_info.get("display_name") or user_info.get("name") or "Unknown"
 
             print(f"  Generating report for {user_name}...")
-            pending, completed = fetch_user_tasks(client, projects, user_id)
+            pending, completed = fetch_user_tasks(client, projects, user_id, debug=args.debug_issues)
             completed = filter_completed_this_week(completed, week_start, week_end)
 
             wb = Workbook()

@@ -19,6 +19,10 @@ python generate_report.py
 # Current week, one user
 python generate_report.py --user "Ken Garcia"
 
+# One user by email or id (also supported)
+python generate_report.py --user "ken@romega-solutions.com"
+python generate_report.py --user "135f22ae-dd76-402b-a54f-a9aa6d28af8d"
+
 # Specific week (use Monday's date)
 python generate_report.py --week 2026-05-05
 
@@ -27,6 +31,21 @@ python generate_report.py --bulk
 
 # Test configuration without calling API
 python generate_report.py --dry-run
+
+# Debug member payload + matching fields
+python generate_report.py --debug-members --user "ken"
+
+# Debug issue payload + status mapping for one user
+python generate_report.py --user "ken" --debug-issues
+
+# Check workspace member count
+python check_members.py
+
+# Check count + list all users
+python check_members.py --show-all
+
+# Print raw member payload for debugging
+python check_members.py --debug
 ```
 
 ## Output
@@ -41,7 +60,7 @@ Reports are saved to `./reports/` (configurable via `REPORT_OUTPUT_DIR`):
 | Section | Source |
 |---------|--------|
 | 1. Header | User profile + week dates |
-| 4. Pending Projects | Active tasks (todo, in_progress, in_review) |
+| 4. Pending Projects | Active tasks (backlog/unstarted/started and todo/in_progress/in_review) |
 | 5. Key Accomplishments | Tasks completed this week |
 
 Sections 2 (Client Engagement), 3 (Risks), 6 (Ideas), and 7 (Management Remarks) are left blank for manual input.
