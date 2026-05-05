@@ -83,12 +83,12 @@ export async function POST() {
   }
 
   const now = new Date().toISOString();
-  const result = db
+  const [inserted] = await db
     .insert(timesheets)
     .values({ userId: session.id, clockedInAt: now, date: localDateStr() })
-    .run();
+    .returning({ id: timesheets.id });
 
-  const timesheetId = Number(result.lastInsertRowid);
+  const timesheetId = inserted.id;
 
   clockIn({ userId: session.id, name: session.name, role: session.role, team: session.team, clockedInAt: now });
   await autoMarkPresent(session.id);
