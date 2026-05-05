@@ -1,17 +1,30 @@
 import path from 'path';
+import fs from 'fs';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import Database from 'better-sqlite3';
 import * as schema from './schema';
 
-// Use DATABASE_PATH env var if set (e.g. /tmp/sqlite.db on writable Vercel tmp),
-// otherwise resolve relative to the project root so it works in both dev and the
-// Vercel /var/task bundle where process.cwd() is the deployment root.
-const dbPath = process.env.DATABASE_PATH ?? path.join(process.cwd(), 'sqlite.db');
+function resolveDbPath(): string {
+  // Explicit override (e.g. for local dev pointing to a different file)
+  if (process.env.DATABASE_PATH) return process.env.DATABASE_PATH;
 
-const sqlite = new Database(dbPath);
+  const bundled = path.join(process.cwd(), 'sqlite.db');
 
-// WAL mode: better concurrency for concurrent serverless invocations
-sqlite.pragma('journal_mode = WAL');
+  // Vercel's /var/task is read-only — SQLite needs a writable path to open in
+  // read-write mode (it writes lock/WAL files alongside the db). Copy once to
+  // /tmp on cold start; subsequent invocations in the same instance reuse it.
+  if (process.env.VERCEL) {
+    const tmp = '/tmp/sqlite.db';
+    if (!fs.existsSync(tmp)) {
+      fs.copyFileSync(bundled, tmp);
+    }
+    return tmp;
+  }
+
+  return bundled;
+}
+
+const sqlite = new Database(resolveDbPath());
 sqlite.pragma('foreign_keys = ON');
 
 export const db = drizzle(sqlite, { schema });
