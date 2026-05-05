@@ -5,18 +5,20 @@ import Database from 'better-sqlite3';
 import * as schema from './schema';
 
 function resolveDbPath(): string {
-  // Explicit override (e.g. for local dev pointing to a different file)
   if (process.env.DATABASE_PATH) return process.env.DATABASE_PATH;
 
   const bundled = path.join(process.cwd(), 'sqlite.db');
 
-  // Vercel's /var/task is read-only — SQLite needs a writable path to open in
-  // read-write mode (it writes lock/WAL files alongside the db). Copy once to
-  // /tmp on cold start; subsequent invocations in the same instance reuse it.
   if (process.env.VERCEL) {
     const tmp = '/tmp/sqlite.db';
     if (!fs.existsSync(tmp)) {
+      if (!fs.existsSync(bundled)) {
+        console.error(`[db] FATAL: sqlite.db not found at ${bundled} — outputFileTracingIncludes may not have worked.`);
+        // Return bundled path anyway; Database() will throw a clear error
+        return bundled;
+      }
       fs.copyFileSync(bundled, tmp);
+      console.log(`[db] Copied sqlite.db → ${tmp}`);
     }
     return tmp;
   }
@@ -24,7 +26,10 @@ function resolveDbPath(): string {
   return bundled;
 }
 
-const sqlite = new Database(resolveDbPath());
+const dbPath = resolveDbPath();
+console.log(`[db] Opening database at: ${dbPath}`);
+
+const sqlite = new Database(dbPath);
 sqlite.pragma('foreign_keys = ON');
 
 export const db = drizzle(sqlite, { schema });

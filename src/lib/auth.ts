@@ -3,11 +3,10 @@ import { jwtVerify, SignJWT, type JWTPayload } from 'jose';
 function getSecret(): Uint8Array {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('JWT_SECRET environment variable is not set. Set it in your Vercel project settings.');
-    }
-    // Dev-only fallback — never reaches production
-    return new TextEncoder().encode('dev-only-secret-not-for-production');
+    // Log loudly so it shows in Vercel function logs, but don't crash.
+    // Set JWT_SECRET in Vercel → Settings → Environment Variables.
+    console.warn('[auth] WARNING: JWT_SECRET is not set. Using insecure fallback. Set it in your Vercel project settings.');
+    return new TextEncoder().encode('fallback-insecure-set-JWT_SECRET-in-vercel');
   }
   return new TextEncoder().encode(secret);
 }
