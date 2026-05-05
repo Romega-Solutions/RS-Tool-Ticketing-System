@@ -1,18 +1,18 @@
 -- Run this in Supabase → SQL Editor → New query
 
 CREATE TABLE IF NOT EXISTS users (
-  id            SERIAL PRIMARY KEY,
-  username      TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  name          TEXT NOT NULL,
-  email         TEXT NOT NULL UNIQUE,
-  role          TEXT NOT NULL,
-  team          TEXT,
-  job_title     TEXT,
+  id             SERIAL PRIMARY KEY,
+  username       TEXT NOT NULL UNIQUE,
+  password_hash  TEXT NOT NULL,
+  name           TEXT NOT NULL,
+  email          TEXT NOT NULL UNIQUE,
+  role           TEXT NOT NULL,
+  team           TEXT,
+  job_title      TEXT,
   plane_member_id TEXT,
-  is_active     INTEGER NOT NULL DEFAULT 1,
-  created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  is_active      INTEGER NOT NULL DEFAULT 1,
+  created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS timesheets (
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS weekly_reports (
   ideas               TEXT,
   submitted_at        TEXT,
   updated_at          TEXT DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(user_id, week_start)
+  UNIQUE (user_id, week_start)
 );
 
 CREATE TABLE IF NOT EXISTS attendance (
@@ -49,12 +49,42 @@ CREATE TABLE IF NOT EXISTS attendance (
   notes             TEXT,
   submitted_at      TEXT,
   created_at        TEXT DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(user_id, week_start)
+  UNIQUE (user_id, week_start)
 );
 
--- Seed users (ken = password123, mark = password123)
--- Passwords are bcrypt hashes — regenerate with scripts/seed.ts if needed
-INSERT INTO users (username, password_hash, name, email, role, team, is_active) VALUES
-  ('ken',  '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'Ken Garcia',  'ken@romega.solutions',  'admin', 'Core',  1),
-  ('mark', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'Mark Siazon', 'mark@romega.solutions', 'lead',  'Core',  1)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Demo users  (all passwords = Demo@1234)
+-- Hash: $2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C
+-- ─────────────────────────────────────────────────────────────────────────────
+
+INSERT INTO users (username, password_hash, name, email, role, team, job_title, is_active) VALUES
+
+  -- CEO / Admin
+  ('ceo',       '$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
+   'Ken Garcia',       'ken@romega.solutions',    'ceo',   NULL,       'Chief Executive Officer',  1),
+
+  -- IC Leads
+  ('lead_tech', '$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
+   'Mark Siazon',      'mark@romega.solutions',   'lead',  'Tech',     'Tech Lead',                1),
+
+  ('lead_design','$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
+   'Anna Reyes',       'anna@romega.solutions',   'lead',  'Design',   'Design Lead',              1),
+
+  -- Tech ICs
+  ('ic_john',   '$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
+   'John Santos',      'john@romega.solutions',   'ic',    'Tech',     'Software Engineer',        1),
+
+  ('ic_miguel', '$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
+   'Miguel Cruz',      'miguel@romega.solutions', 'ic',    'Tech',     'Frontend Developer',       1),
+
+  ('ic_sofia',  '$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
+   'Sofia Lim',        'sofia@romega.solutions',  'ic',    'Tech',     'QA Engineer',              1),
+
+  -- Design ICs
+  ('ic_trisha', '$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
+   'Trisha Mendoza',   'trisha@romega.solutions', 'ic',    'Design',   'UI/UX Designer',           1),
+
+  ('ic_rafael', '$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
+   'Rafael Aquino',    'rafael@romega.solutions', 'ic',    'Design',   'Graphic Designer',         1)
+
 ON CONFLICT (username) DO NOTHING;
