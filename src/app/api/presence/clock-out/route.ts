@@ -1,23 +1,11 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyToken } from '@/lib/auth';
+import { getSession } from '@/lib/session';
 import { db } from '@/db';
-import { users, timesheets } from '@/db/schema';
+import { timesheets } from '@/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
 import { clockOut } from '@/lib/presence';
 
 export const runtime = 'nodejs';
-
-async function getSession() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('session_token')?.value;
-  if (!token) return null;
-  const payload = await verifyToken(token);
-  if (!payload?.id) return null;
-  const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, Number(payload.id)));
-  if (!user) return null;
-  return { id: user.id };
-}
 
 export async function POST() {
   const session = await getSession();

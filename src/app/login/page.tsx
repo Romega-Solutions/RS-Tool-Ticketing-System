@@ -4,12 +4,13 @@ import { useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, Loader2, LogIn } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
 
 const demoUsers = [
-  { username: 'techlead', password: 'Lead@1234', role: 'Lead (Tech)' },
-  { username: 'ic_anna', password: 'IC@12345', role: 'IC' },
-  { username: 'ic_john', password: 'IC@12345', role: 'IC' },
-  { username: 'ceo', password: 'CEO@12345', role: 'CEO/Admin' },
+  { email: 'ken@romega.solutions',   password: 'Demo@1234', role: 'CEO / Admin' },
+  { email: 'mark@romega.solutions',  password: 'Demo@1234', role: 'Lead (Tech)' },
+  { email: 'anna@romega.solutions',  password: 'Demo@1234', role: 'Lead (Design)' },
+  { email: 'john@romega.solutions',  password: 'Demo@1234', role: 'IC (Tech)' },
 ];
 
 export default function LoginPage() {
@@ -17,7 +18,7 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -26,20 +27,18 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      });
+      const supabase = createClient();
+      const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
 
-      if (res.ok) {
-        const data = await res.json() as { redirectPath?: string };
-        router.push(data.redirectPath || '/dashboard');
-        router.refresh();
-      } else {
-        const data = await res.json();
-        setError(data.error || 'Invalid username or password');
+      if (authError) {
+        setError(authError.message === 'Invalid login credentials'
+          ? 'Invalid email or password'
+          : authError.message);
+        return;
       }
+
+      router.push('/dashboard');
+      router.refresh();
     } catch {
       setError('An error occurred. Please try again.');
     } finally {
@@ -72,17 +71,17 @@ export default function LoginPage() {
             <div className="mt-2 grid grid-cols-1 gap-2">
               {demoUsers.map((account) => (
                 <button
-                  key={account.username}
+                  key={account.email}
                   type="button"
                   onClick={() => {
-                    setUsername(account.username);
+                    setEmail(account.email);
                     setPassword(account.password);
                     setError('');
                   }}
                   className="w-full rounded-md border border-(--rs-primary-200) bg-white px-2.5 py-2 text-left text-xs hover:bg-(--rs-primary-100)"
                 >
                   <div className="font-semibold text-(--rs-neutral-grey-900)">{account.role}</div>
-                  <div className="text-(--rs-neutral-grey-500)">user: {account.username} • pass: {account.password}</div>
+                  <div className="text-(--rs-neutral-grey-500)">{account.email} · {account.password}</div>
                 </button>
               ))}
             </div>
@@ -96,17 +95,18 @@ export default function LoginPage() {
             ) : null}
 
             <div className="space-y-1.5">
-              <label htmlFor="username" className="block text-sm font-medium text-(--color-foreground)">
-                Username
+              <label htmlFor="email" className="block text-sm font-medium text-(--color-foreground)">
+                Email
               </label>
               <input
-                id="username"
-                name="username"
-                autoComplete="username"
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
                 required
                 disabled={loading}
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-lg border border-(--color-border) bg-(--color-surface) px-3.5 py-2.5 text-sm text-(--color-foreground) outline-none transition-all focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-primary)_20%,transparent)]"
               />
             </div>
@@ -130,7 +130,7 @@ export default function LoginPage() {
                 <button
                   type="button"
                   tabIndex={-1}
-                  onClick={() => setShowPassword((value) => !value)}
+                  onClick={() => setShowPassword((v) => !v)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 rounded p-0.5 text-(--color-foreground-subtle) transition-colors"
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
@@ -148,7 +148,7 @@ export default function LoginPage() {
               {loading ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Logging in...
+                  Signing in...
                 </>
               ) : (
                 <>

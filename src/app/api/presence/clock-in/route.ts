@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyToken } from '@/lib/auth';
-import { normalizeRole } from '@/lib/rbac';
+import { getSession } from '@/lib/session';
 import { db } from '@/db';
-import { users, timesheets, attendance } from '@/db/schema';
+import { timesheets, attendance } from '@/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
 import { clockIn } from '@/lib/presence';
+
+export const runtime = 'nodejs';
 
 const DAY_COLS = ['mondayStatus', 'tuesdayStatus', 'wednesdayStatus', 'thursdayStatus', 'fridayStatus'] as const;
 
@@ -22,16 +22,15 @@ function getWeekMonday(d: Date): string {
 
 async function autoMarkPresent(userId: number) {
   const now = new Date();
-  const dow = now.getDay(); // 0=Sun, 1=Mon … 5=Fri, 6=Sat
-  if (dow === 0 || dow === 6) return; // skip weekends
-  const colName = DAY_COLS[dow - 1]; // Mon=index 0 … Fri=index 4
+  const dow = now.getDay();
+  if (dow === 0 || dow === 6) return;
+  const colName = DAY_COLS[dow - 1];
   const weekStart = getWeekMonday(now);
 
   const [existing] = await db.select().from(attendance)
     .where(and(eq(attendance.userId, userId), eq(attendance.weekStart, weekStart)));
 
   if (existing) {
-    // Only set to present if the slot is currently empty — don't override a manual entry
     if (!existing[colName]) {
       await db.update(attendance).set({ [colName]: 'present', submittedAt: now.toISOString() })
         .where(eq(attendance.id, existing.id));
@@ -41,21 +40,6 @@ async function autoMarkPresent(userId: number) {
       userId, weekStart, [colName]: 'present', submittedAt: now.toISOString(),
     });
   }
-}
-
-export const runtime = 'nodejs';
-
-async function getSession() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('session_token')?.value;
-  if (!token) return null;
-  const payload = await verifyToken(token);
-  if (!payload?.id) return null;
-  const [user] = await db.select({
-    id: users.id, name: users.name, role: users.role, team: users.team,
-  }).from(users).where(eq(users.id, Number(payload.id)));
-  if (!user) return null;
-  return { ...user, role: normalizeRole(user.role) };
 }
 
 function localDateStr(): string {
@@ -70,14 +54,12 @@ export async function POST() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  // Skip if already clocked in
   const [existing] = await db
     .select({ id: timesheets.id, clockedInAt: timesheets.clockedInAt })
     .from(timesheets)
     .where(and(eq(timesheets.userId, session.id), isNull(timesheets.clockedOutAt)));
 
   if (existing) {
-    // Already have an open session — return it and register in presence store
     clockIn({ userId: session.id, name: session.name, role: session.role, team: session.team, clockedInAt: existing.clockedInAt });
     return NextResponse.json({ timesheetId: existing.id, clockedInAt: existing.clockedInAt, resumed: true });
   }
@@ -89,7 +71,6 @@ export async function POST() {
     .returning({ id: timesheets.id });
 
   const timesheetId = inserted.id;
-
   clockIn({ userId: session.id, name: session.name, role: session.role, team: session.team, clockedInAt: now });
   await autoMarkPresent(session.id);
 

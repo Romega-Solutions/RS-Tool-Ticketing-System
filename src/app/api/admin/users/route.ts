@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyToken } from '@/lib/auth';
-import { normalizeRole, canAccessAdmin } from '@/lib/rbac';
+import { getSession } from '@/lib/session';
+import { canAccessAdmin } from '@/lib/rbac';
 import { db } from '@/db';
 import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
@@ -20,27 +19,21 @@ const USER_FIELDS = {
   isActive:      users.isActive,
 } as const;
 
-async function requireAdmin() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('session_token')?.value;
-  if (!token) return null;
-  const payload = await verifyToken(token);
-  if (!payload?.id) return null;
-  if (!canAccessAdmin(normalizeRole(payload.role))) return null;
-  return { id: Number(payload.id) };
-}
-
 export async function GET() {
-  const session = await requireAdmin();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const session = await getSession();
+  if (!session || !canAccessAdmin(session.role)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   const allUsers = await db.select(USER_FIELDS).from(users).orderBy(users.name);
   return NextResponse.json({ users: allUsers });
 }
 
 export async function PATCH(req: Request) {
-  const session = await requireAdmin();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const session = await getSession();
+  if (!session || !canAccessAdmin(session.role)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   let body: { id?: number; role?: string; planeMemberId?: string | null; isActive?: number } = {};
   try { body = await req.json(); } catch {

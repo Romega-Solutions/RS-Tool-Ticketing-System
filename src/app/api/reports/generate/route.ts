@@ -1,10 +1,6 @@
 import ExcelJS from 'exceljs';
-import { cookies } from 'next/headers';
-import { verifyToken } from '@/lib/auth';
-import { canAccessReports, normalizeRole } from '@/lib/rbac';
-import { db } from '@/db';
-import { users } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { getSession } from '@/lib/session';
+import { canAccessReports } from '@/lib/rbac';
 import {
   getProjects,
   getProjectStates,
@@ -277,13 +273,8 @@ function buildSheet(
 
 export async function POST(req: Request) {
   // Auth
-  const cookieStore = await cookies();
-  const token = cookieStore.get('session_token')?.value;
-  if (!token) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const payload = await verifyToken(token);
-  if (!payload?.id) return Response.json({ error: 'Invalid session' }, { status: 401 });
-  const role = normalizeRole(payload.role);
+  const session = await getSession();
+  if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   // Body
   let body: { targetMemberId?: string; targetMemberName?: string; week?: string } = {};
@@ -293,21 +284,20 @@ export async function POST(req: Request) {
   let memberId: string;
   let memberName: string;
 
-  if (canAccessReports(role)) {
+  if (canAccessReports(session.role)) {
     memberId = body.targetMemberId?.trim() ?? '';
     memberName = body.targetMemberName?.trim() || 'Unknown';
     if (!memberId) {
       return Response.json({ error: 'targetMemberId is required.' }, { status: 400 });
     }
   } else {
-    const [dbUser] = await db.select().from(users).where(eq(users.id, Number(payload.id)));
-    if (!dbUser?.planeMemberId) {
+    if (!session.planeMemberId) {
       return Response.json({
         error: 'Your Plane account is not linked. Ask your admin to set your Plane Member ID.',
       }, { status: 400 });
     }
-    memberId = dbUser.planeMemberId;
-    memberName = dbUser.name;
+    memberId = session.planeMemberId;
+    memberName = session.name;
   }
 
   // Week range

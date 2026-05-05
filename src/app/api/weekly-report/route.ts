@@ -1,26 +1,10 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { db } from '@/db';
-import { users, weeklyReports } from '@/db/schema';
+import { weeklyReports } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { verifyToken } from '@/lib/auth';
-import { normalizeRole } from '@/lib/rbac';
+import { getSession } from '@/lib/session';
 
 export const runtime = 'nodejs';
-
-async function requireSession() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('session_token')?.value;
-  if (!token) return null;
-  const payload = await verifyToken(token);
-  if (!payload?.id) return null;
-  const [user] = await db.select({
-    id: users.id, role: users.role, name: users.name,
-    team: users.team, planeMemberId: users.planeMemberId,
-  }).from(users).where(eq(users.id, Number(payload.id)));
-  if (!user) return null;
-  return { ...user, role: normalizeRole(user.role) };
-}
 
 function getMondayOfWeek(dateStr: string): string | null {
   const d = new Date(dateStr + 'T00:00:00');
@@ -34,7 +18,7 @@ function getMondayOfWeek(dateStr: string): string | null {
 
 // GET /api/weekly-report?week=YYYY-MM-DD — own report for the week
 export async function GET(req: Request) {
-  const session = await requireSession();
+  const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
@@ -56,7 +40,7 @@ export async function GET(req: Request) {
 
 // POST /api/weekly-report — upsert own report
 export async function POST(req: Request) {
-  const session = await requireSession();
+  const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await req.json() as {

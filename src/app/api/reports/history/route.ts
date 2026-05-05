@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { verifyToken } from '@/lib/auth';
-import { canAccessReports, normalizeRole } from '@/lib/rbac';
+import { getSession } from '@/lib/session';
+import { canAccessReports } from '@/lib/rbac';
 
 const execFileAsync = promisify(execFile);
 
@@ -24,22 +23,6 @@ async function resolvePythonBinary(): Promise<string> {
   return 'python3';
 }
 
-async function requireSession() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('session_token')?.value;
-
-  if (!token) return null;
-
-  const payload = await verifyToken(token);
-  const username = typeof payload?.username === 'string' ? payload.username : '';
-  if (!username) return null;
-
-  return {
-    username,
-    role: normalizeRole(payload?.role),
-  };
-}
-
 function resolveScriptDir(): string {
   const configured = process.env.REPORT_SCRIPT_DIR?.trim();
   if (configured) return configured;
@@ -47,13 +30,9 @@ function resolveScriptDir(): string {
 }
 
 export async function GET() {
-  const session = await requireSession();
-  if (!session) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-  if (!canAccessReports(session.role)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!canAccessReports(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const scriptDir = resolveScriptDir();
 

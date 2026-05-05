@@ -1,35 +1,19 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { getSession } from '@/lib/session';
 import { db } from '@/db';
 import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
-import { verifyToken } from '@/lib/auth';
 import { hash } from 'bcryptjs';
 import { normalizeRole } from '@/lib/rbac';
 
 export const runtime = 'nodejs';
 
-async function requireSessionUserId() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('session_token')?.value;
-  if (!token) return null;
-
-  const payload = await verifyToken(token);
-  const userId = Number(payload?.id);
-  if (!Number.isFinite(userId) || userId <= 0) return null;
-  return userId;
-}
-
 export async function GET() {
-  const userId = await requireSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const [user] = await db.select().from(users).where(eq(users.id, userId));
-  if (!user) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 });
-  }
+  const [user] = await db.select().from(users).where(eq(users.id, session.id));
+  if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
   return NextResponse.json({
     user: {
@@ -47,42 +31,31 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  const userId = await requireSessionUserId();
-  if (!userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await req.json() as {
     name?: string;
-    email?: string;
     team?: string;
     jobTitle?: string;
     password?: string;
   };
 
   const name = String(body.name || '').trim();
-  const email = String(body.email || '').trim();
   const team = String(body.team || '').trim();
   const jobTitle = String(body.jobTitle || '').trim();
   const password = String(body.password || '');
 
-  if (!name) {
-    return NextResponse.json({ error: 'Name is required' }, { status: 400 });
-  }
-  if (!email) {
-    return NextResponse.json({ error: 'Email is required' }, { status: 400 });
-  }
+  if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
 
   const payload: {
     name: string;
-    email: string;
     team: string | null;
     jobTitle: string | null;
     updatedAt: string;
     passwordHash?: string;
   } = {
     name,
-    email,
     team: team || null,
     jobTitle: jobTitle || null,
     updatedAt: new Date().toISOString(),
@@ -95,20 +68,10 @@ export async function PUT(req: Request) {
     payload.passwordHash = await hash(password, 10);
   }
 
-  try {
-    await db.update(users).set(payload).where(eq(users.id, userId));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to update profile';
-    if (message.includes('users_email_unique')) {
-      return NextResponse.json({ error: 'Email is already in use' }, { status: 409 });
-    }
-    return NextResponse.json({ error: 'Failed to update profile' }, { status: 500 });
-  }
+  await db.update(users).set(payload).where(eq(users.id, session.id));
 
-  const [updated] = await db.select().from(users).where(eq(users.id, userId));
-  if (!updated) {
-    return NextResponse.json({ error: 'User not found' }, { status: 404 });
-  }
+  const [updated] = await db.select().from(users).where(eq(users.id, session.id));
+  if (!updated) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
   return NextResponse.json({
     success: true,

@@ -1,19 +1,8 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyToken } from '@/lib/auth';
-import { normalizeRole } from '@/lib/rbac';
+import { getSession } from '@/lib/session';
 import { updateWorkItem, createWorkItem } from '@/lib/plane';
 
 export const runtime = 'nodejs';
-
-async function getSession() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('session_token')?.value;
-  if (!token) return null;
-  const payload = await verifyToken(token);
-  if (!payload?.id) return null;
-  return { id: payload.id, role: normalizeRole(payload.role) };
-}
 
 // PATCH — update a work item (state, priority, name, target_date)
 export async function PATCH(req: Request) {

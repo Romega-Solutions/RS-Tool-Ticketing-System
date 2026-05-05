@@ -1,26 +1,8 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { db } from '@/db';
-import { users } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { verifyToken } from '@/lib/auth';
-import { normalizeRole } from '@/lib/rbac';
+import { getSession } from '@/lib/session';
 import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems, isCompletedGroup } from '@/lib/plane';
 
 export const runtime = 'nodejs';
-
-async function requireSession() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('session_token')?.value;
-  if (!token) return null;
-  const payload = await verifyToken(token);
-  if (!payload?.id) return null;
-  const [user] = await db.select({
-    id: users.id, role: users.role, planeMemberId: users.planeMemberId,
-  }).from(users).where(eq(users.id, Number(payload.id)));
-  if (!user) return null;
-  return { ...user, role: normalizeRole(user.role) };
-}
 
 function parseWeekRange(weekStart: string): { start: Date; end: Date } | null {
   const d = new Date(weekStart + 'T00:00:00');
@@ -32,7 +14,7 @@ function parseWeekRange(weekStart: string): { start: Date; end: Date } | null {
 
 // GET /api/weekly-report/plane-data?week=YYYY-MM-DD
 export async function GET(req: Request) {
-  const session = await requireSession();
+  const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   if (!session.planeMemberId) {

@@ -1,20 +1,14 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { verifyToken } from '@/lib/auth';
-import { canAccessReports, normalizeRole } from '@/lib/rbac';
+import { getSession } from '@/lib/session';
+import { canAccessReports } from '@/lib/rbac';
 import { getWorkspaceMembers } from '@/lib/plane';
 
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('session_token')?.value;
-  if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const payload = await verifyToken(token);
-  const role = normalizeRole(payload?.role);
-  if (!payload?.id) return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
-  if (!canAccessReports(role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!canAccessReports(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   try {
     const members = await getWorkspaceMembers();
