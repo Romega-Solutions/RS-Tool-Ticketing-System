@@ -6,13 +6,13 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, Loader2, LogIn, UserPlus } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
-const ALLOWED_DOMAIN = 'romega.solutions';
+const ALLOWED_DOMAIN = 'romega-solutions.com';
 
 const demoUsers = [
-  { email: 'ken@romega.solutions',   password: 'Demo@1234', role: 'CEO / Admin' },
-  { email: 'mark@romega.solutions',  password: 'Demo@1234', role: 'Lead (Tech)' },
-  { email: 'anna@romega.solutions',  password: 'Demo@1234', role: 'Lead (Design)' },
-  { email: 'john@romega.solutions',  password: 'Demo@1234', role: 'IC (Tech)' },
+  { email: 'ken@romega-solutions.com',   password: 'Demo@1234', role: 'CEO / Admin' },
+  { email: 'mark@romega-solutions.com',  password: 'Demo@1234', role: 'Lead (Tech)' },
+  { email: 'anna@romega-solutions.com',  password: 'Demo@1234', role: 'Lead (Design)' },
+  { email: 'john@romega-solutions.com',  password: 'Demo@1234', role: 'IC (Tech)' },
 ];
 
 export default function LoginPage() {

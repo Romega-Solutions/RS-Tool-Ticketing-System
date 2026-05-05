@@ -268,7 +268,7 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
 
               <Field label="Email" required>
                 <input required type="email" value={newForm.email} onChange={e => setNewForm(f => ({ ...f, email: e.target.value }))}
-                  className={inputCls} placeholder="jane@romega.solutions" />
+                  className={inputCls} placeholder="jane@romega-solutions.com" />
               </Field>
 
               <Field label="Temporary Password" required>

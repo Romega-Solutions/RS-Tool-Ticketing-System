@@ -61,30 +61,30 @@ INSERT INTO users (username, password_hash, name, email, role, team, job_title, 
 
   -- CEO / Admin
   ('ceo',       '$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
-   'Ken Garcia',       'ken@romega.solutions',    'ceo',   NULL,       'Chief Executive Officer',  1),
+   'Ken Garcia',       'ken@romega-solutions.com',    'ceo',   NULL,       'Chief Executive Officer',  1),
 
   -- IC Leads
   ('lead_tech', '$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
-   'Mark Siazon',      'mark@romega.solutions',   'lead',  'Tech',     'Tech Lead',                1),
+   'Mark Siazon',      'mark@romega-solutions.com',   'lead',  'Tech',     'Tech Lead',                1),
 
   ('lead_design','$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
-   'Anna Reyes',       'anna@romega.solutions',   'lead',  'Design',   'Design Lead',              1),
+   'Anna Reyes',       'anna@romega-solutions.com',   'lead',  'Design',   'Design Lead',              1),
 
   -- Tech ICs
   ('ic_john',   '$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
-   'John Santos',      'john@romega.solutions',   'ic',    'Tech',     'Software Engineer',        1),
+   'John Santos',      'john@romega-solutions.com',   'ic',    'Tech',     'Software Engineer',        1),
 
   ('ic_miguel', '$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
-   'Miguel Cruz',      'miguel@romega.solutions', 'ic',    'Tech',     'Frontend Developer',       1),
+   'Miguel Cruz',      'miguel@romega-solutions.com', 'ic',    'Tech',     'Frontend Developer',       1),
 
   ('ic_sofia',  '$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
-   'Sofia Lim',        'sofia@romega.solutions',  'ic',    'Tech',     'QA Engineer',              1),
+   'Sofia Lim',        'sofia@romega-solutions.com',  'ic',    'Tech',     'QA Engineer',              1),
 
   -- Design ICs
   ('ic_trisha', '$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
-   'Trisha Mendoza',   'trisha@romega.solutions', 'ic',    'Design',   'UI/UX Designer',           1),
+   'Trisha Mendoza',   'trisha@romega-solutions.com', 'ic',    'Design',   'UI/UX Designer',           1),
 
   ('ic_rafael', '$2b$10$DTOKt60D2dzQF8MPAEfrP.YVSeDIlpB3/1LeAnuYjKMIocxLgxq0C',
-   'Rafael Aquino',    'rafael@romega.solutions', 'ic',    'Design',   'Graphic Designer',         1)
+   'Rafael Aquino',    'rafael@romega-solutions.com', 'ic',    'Design',   'Graphic Designer',         1)
 
 ON CONFLICT (username) DO NOTHING;

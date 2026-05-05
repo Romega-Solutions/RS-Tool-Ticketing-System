@@ -23,14 +23,14 @@ const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
 });
 
 const DEMO_USERS = [
-  { email: 'ken@romega.solutions',    password: DEFAULT_PASS },
-  { email: 'mark@romega.solutions',   password: DEFAULT_PASS },
-  { email: 'anna@romega.solutions',   password: DEFAULT_PASS },
-  { email: 'john@romega.solutions',   password: DEFAULT_PASS },
-  { email: 'miguel@romega.solutions', password: DEFAULT_PASS },
-  { email: 'sofia@romega.solutions',  password: DEFAULT_PASS },
-  { email: 'trisha@romega.solutions', password: DEFAULT_PASS },
-  { email: 'rafael@romega.solutions', password: DEFAULT_PASS },
+  { email: 'ken@romega-solutions.com',    password: DEFAULT_PASS },
+  { email: 'mark@romega-solutions.com',   password: DEFAULT_PASS },
+  { email: 'anna@romega-solutions.com',   password: DEFAULT_PASS },
+  { email: 'john@romega-solutions.com',   password: DEFAULT_PASS },
+  { email: 'miguel@romega-solutions.com', password: DEFAULT_PASS },
+  { email: 'sofia@romega-solutions.com',  password: DEFAULT_PASS },
+  { email: 'trisha@romega-solutions.com', password: DEFAULT_PASS },
+  { email: 'rafael@romega-solutions.com', password: DEFAULT_PASS },
 ];
 
 async function main() {
