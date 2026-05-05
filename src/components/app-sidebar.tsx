@@ -188,6 +188,7 @@ export function AppSidebar({ role }: { role: AppRole }) {
             height={30}
             className="object-contain brightness-0 invert shrink-0"
             priority
+            unoptimized
           />
           <Button
             variant="ghost"
@@ -249,6 +250,7 @@ export function MobileNav({ role }: { role: AppRole }) {
               height={30}
               className="object-contain brightness-0 invert"
               priority
+              unoptimized
             />
           </div>
 

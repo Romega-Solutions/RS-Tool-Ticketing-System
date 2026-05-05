@@ -10,6 +10,12 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/**': ['./sqlite.db'],
   },
+  images: {
+    // Allow SVG files to pass through the image pipeline unmodified
+    dangerouslyAllowSVG: true,
+    contentDispositionType: 'attachment',
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
+  },
 };
 
 export default nextConfig;

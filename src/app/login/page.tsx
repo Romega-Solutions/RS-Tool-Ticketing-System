@@ -58,6 +58,7 @@ export default function LoginPage() {
             height={48}
             className="object-contain"
             priority
+            unoptimized
           />
           <div>
             <h1 className="text-xl font-serif font-bold text-(--rs-neutral-grey-900)">Ticketing System</h1>
