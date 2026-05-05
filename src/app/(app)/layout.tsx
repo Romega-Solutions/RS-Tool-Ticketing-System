@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { AppSidebar, MobileNav } from "@/components/app-sidebar";
 import { getSession } from "@/lib/session";
+import { createClient } from "@/lib/supabase/server";
 import { roleLabel, canAccessPath, defaultLandingPath } from "@/lib/rbac";
 import { ClockWidget } from "@/components/clock-widget";
 import { LiveClock } from "@/components/live-clock";
@@ -9,7 +10,15 @@ import { headers } from "next/headers";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
-  if (!session) redirect('/login');
+
+  if (!session) {
+    // They may have a valid Supabase auth session but no public.users row yet
+    // (e.g. email confirmed but callback failed to write DB row)
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) redirect('/onboarding');
+    else redirect('/login');
+  }
 
   const headersList = await headers();
   const pathname = headersList.get('x-invoke-path') ?? '';
