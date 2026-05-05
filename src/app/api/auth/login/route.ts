@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/db';
+
+export const runtime = 'nodejs';
 import { users } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import { compare } from 'bcryptjs';

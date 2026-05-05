@@ -7,6 +7,8 @@ import { verifyToken } from '@/lib/auth';
 import { hash } from 'bcryptjs';
 import { normalizeRole } from '@/lib/rbac';
 
+export const runtime = 'nodejs';
+
 async function requireSessionUserId() {
   const cookieStore = await cookies();
   const token = cookieStore.get('session_token')?.value;
