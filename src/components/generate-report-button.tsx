@@ -1,79 +1,200 @@
 'use client';
 
-import { useState } from 'react';
-import { FileText, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { FileText, Loader2, Users, Check, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-type GenerateResponse = {
-  success?: boolean;
-  message?: string;
-  savedPath?: string | null;
-  stdout?: string;
-  stderr?: string;
-  error?: string;
-};
+type PlaneMember = { id: string; display_name: string; email: string };
+type MembersResponse = { members?: PlaneMember[]; error?: string };
 
-type GenerateReportButtonProps = {
-  onGenerated?: () => void | Promise<void>;
-};
+function initials(name: string): string {
+  return name.split(' ').map(w => w[0] ?? '').join('').toUpperCase().slice(0, 2);
+}
 
-export function GenerateReportButton({ onGenerated }: GenerateReportButtonProps) {
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<GenerateResponse | null>(null);
-  const [error, setError] = useState('');
+export function GenerateReportButton({ onGenerated }: { onGenerated?: () => void | Promise<void> }) {
+  const [members, setMembers] = useState<PlaneMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(true);
+  const [membersError, setMembersError] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(true);
+
+  const [selected, setSelected] = useState<PlaneMember | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [successName, setSuccessName] = useState('');
+  const [genError, setGenError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setMembersLoading(true);
+      setMembersError('');
+      try {
+        const res = await fetch('/api/reports/members');
+        const data = (await res.json()) as MembersResponse;
+        if (cancelled) return;
+        if (!res.ok) { setMembersError(data.error || 'Failed to load members.'); return; }
+        setMembers(data.members ?? []);
+      } catch {
+        if (!cancelled) setMembersError('Failed to load workspace members.');
+      } finally {
+        if (!cancelled) setMembersLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
 
   const handleGenerate = async () => {
-    setLoading(true);
-    setResult(null);
-    setError('');
+    if (!selected) return;
+    setGenerating(true);
+    setSuccessName('');
+    setGenError('');
 
     try {
       const res = await fetch('/api/reports/generate', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetMemberId: selected.id,
+          targetMemberName: selected.display_name,
+        }),
       });
-      const data = (await res.json()) as GenerateResponse;
 
       if (!res.ok) {
-        setError(data.error || 'Failed to generate report.');
+        const data = (await res.json()) as { error?: string };
+        setGenError(data.error || 'Failed to generate report.');
         return;
       }
 
-      setResult(data);
+      // Extract filename from Content-Disposition header
+      const disposition = res.headers.get('Content-Disposition') ?? '';
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match?.[1] ?? `${selected.display_name}_Weekly_Report.xlsx`;
+
+      // Trigger browser download from the binary response
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+
+      setSuccessName(selected.display_name);
       await onGenerated?.();
     } catch {
-      setError('Request failed. Please try again.');
+      setGenError('Request failed. Please try again.');
     } finally {
-      setLoading(false);
+      setGenerating(false);
     }
   };
 
   return (
-    <div className="flex flex-col items-start gap-2 w-full md:max-w-xl">
-      <Button onClick={handleGenerate} disabled={loading}>
-        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-        {loading ? 'Generating...' : 'Generate My Weekly Report'}
+    <div className="flex flex-col gap-3 w-full md:max-w-xl">
+      {/* Member picker */}
+      <div className="rounded-xl border border-(--rs-neutral-grey-200) bg-white overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setPickerOpen(o => !o)}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3 text-sm font-medium text-(--rs-neutral-grey-700) hover:bg-(--rs-neutral-grey-50) transition-colors"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            {membersLoading
+              ? <Loader2 className="w-4 h-4 text-(--rs-primary-500) shrink-0 animate-spin" />
+              : <Users className="w-4 h-4 text-(--rs-primary-500) shrink-0" />
+            }
+            {selected ? (
+              <span className="truncate">
+                <span className="text-(--rs-neutral-grey-900) font-semibold">{selected.display_name}</span>
+                <span className="text-(--rs-neutral-grey-400) ml-1.5">{selected.email}</span>
+              </span>
+            ) : membersLoading ? (
+              <span className="text-(--rs-neutral-grey-400)">Loading members…</span>
+            ) : (
+              <span className="text-(--rs-neutral-grey-400)">Select a member to generate report for…</span>
+            )}
+          </div>
+          {pickerOpen
+            ? <ChevronUp className="w-4 h-4 shrink-0 text-(--rs-neutral-grey-400)" />
+            : <ChevronDown className="w-4 h-4 shrink-0 text-(--rs-neutral-grey-400)" />
+          }
+        </button>
+
+        {pickerOpen && (
+          <div className="border-t border-(--rs-neutral-grey-100) max-h-56 overflow-y-auto divide-y divide-(--rs-neutral-grey-100)">
+            {membersLoading && (
+              <div className="flex items-center gap-2 px-4 py-3 text-(--rs-neutral-grey-400) text-sm">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading members…
+              </div>
+            )}
+            {membersError && (
+              <div className="px-4 py-3 text-sm text-red-600">{membersError}</div>
+            )}
+            {!membersLoading && !membersError && members.length === 0 && (
+              <div className="px-4 py-3 text-sm text-(--rs-neutral-grey-400) italic">No members found.</div>
+            )}
+            {members.map(m => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => {
+                  setSelected(m);
+                  setPickerOpen(false);
+                  setSuccessName('');
+                  setGenError('');
+                }}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+                  selected?.id === m.id
+                    ? 'bg-(--rs-primary-50)'
+                    : 'hover:bg-(--rs-neutral-grey-50)'
+                }`}
+              >
+                <div className="w-8 h-8 rounded-full bg-(--rs-primary-100) text-(--rs-primary-700) flex items-center justify-center text-xs font-bold shrink-0">
+                  {initials(m.display_name)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-(--rs-neutral-grey-900)">{m.display_name}</div>
+                  <div className="text-xs text-(--rs-neutral-grey-400) truncate">{m.email}</div>
+                </div>
+                {selected?.id === m.id && (
+                  <Check className="w-4 h-4 text-(--rs-primary-500) shrink-0" />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Generate button */}
+      <Button onClick={handleGenerate} disabled={generating || !selected} className="self-start">
+        {generating
+          ? <Loader2 className="w-4 h-4 animate-spin" />
+          : <FileText className="w-4 h-4" />
+        }
+        {generating
+          ? `Generating for ${selected?.display_name}…`
+          : selected
+          ? `Generate Report for ${selected.display_name}`
+          : 'Select a member first'}
       </Button>
 
-      {result ? (
-        <div className="w-full rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900 space-y-2">
-          <p className="font-medium">{result.message || 'Report generated successfully.'}</p>
-          {result.savedPath ? <p className="break-all">Saved to: {result.savedPath}</p> : null}
-          {result.stdout ? (
-            <details>
-              <summary className="cursor-pointer font-medium">Generation details</summary>
-              <pre className="mt-2 whitespace-pre-wrap text-xs bg-white/80 rounded border border-green-100 p-2">{result.stdout}</pre>
-            </details>
-          ) : null}
-          {result.stderr ? (
-            <details>
-              <summary className="cursor-pointer font-medium text-amber-700">Warnings</summary>
-              <pre className="mt-2 whitespace-pre-wrap text-xs bg-amber-50 rounded border border-amber-200 p-2 text-amber-800">{result.stderr}</pre>
-            </details>
-          ) : null}
+      {/* Success */}
+      {successName && (
+        <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-900 flex items-center gap-2">
+          <Download className="w-4 h-4 shrink-0 text-green-600" />
+          <span>
+            <span className="font-medium">Report downloaded</span> for {successName}. Check your Downloads folder.
+          </span>
         </div>
-      ) : null}
+      )}
 
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {/* Error */}
+      {genError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-700">
+          <p className="font-medium">{genError}</p>
+        </div>
+      )}
     </div>
   );
 }

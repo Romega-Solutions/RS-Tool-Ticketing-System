@@ -38,6 +38,7 @@ export async function GET() {
       role: normalizeRole(user.role),
       team: user.team,
       jobTitle: user.jobTitle,
+      planeMemberId: user.planeMemberId ?? null,
       isActive: Boolean(user.isActive),
     },
   });

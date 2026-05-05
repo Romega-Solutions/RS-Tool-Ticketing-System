@@ -18,21 +18,13 @@ export function canAccessReports(role: AppRole): boolean {
   return role === 'lead' || role === 'admin';
 }
 
+export function canAccessAdmin(role: AppRole): boolean {
+  return role === 'admin';
+}
+
 export function canAccessPath(pathname: string, role: AppRole): boolean {
-  if (pathname.startsWith('/reports') || pathname.startsWith('/attendance')) {
-    return canAccessReports(role);
-  }
-
-  if (
-    pathname.startsWith('/dashboard')
-    || pathname.startsWith('/my-tasks')
-    || pathname.startsWith('/projects')
-    || pathname.startsWith('/profile')
-    || pathname === '/'
-  ) {
-    return true;
-  }
-
+  if (pathname.startsWith('/admin'))      return canAccessAdmin(role);
+  if (pathname.startsWith('/attendance')) return canAccessReports(role);
   return true;
 }
 

@@ -20,8 +20,24 @@ const merriweather = Merriweather({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'),
   title: "RS Ticketing System",
-  description: "Task Management for Romega Solutions",
+  description: "Task management and reporting for Romega Solutions",
+  icons: {
+    icon: [
+      { url: "/images/rs-icon.png", type: "image/png" },
+      { url: "/images/rs-favicon.ico", type: "image/x-icon" },
+    ],
+    shortcut: "/images/rs-favicon.ico",
+    apple: "/images/rs-icon.png",
+  },
+  openGraph: {
+    title: "RS Ticketing System",
+    description: "Task management and reporting for Romega Solutions",
+    siteName: "Romega Solutions",
+    images: [{ url: "/images/rs-og-bg.png", width: 1200, height: 630 }],
+    type: "website",
+  },
 };
 
 export default function RootLayout({

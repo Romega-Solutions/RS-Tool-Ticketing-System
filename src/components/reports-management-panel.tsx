@@ -1,8 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Download, Loader2, RefreshCcw, Users } from 'lucide-react';
+import { Download, Loader2, RefreshCcw, Users, Copy, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 type ReportFile = {
   name: string;
@@ -10,21 +11,14 @@ type ReportFile = {
   modifiedAt: string;
 };
 
-type FilesResponse = {
-  files?: ReportFile[];
-  error?: string;
+type PlaneMember = {
+  id: string;
+  display_name: string;
+  email: string;
 };
 
-type MembersResponse = {
-  success?: boolean;
-  stdout?: string;
-  stderr?: string;
-  error?: string;
-};
-
-type ReportsManagementPanelProps = {
-  initialFiles?: ReportFile[];
-};
+type FilesResponse = { files?: ReportFile[]; error?: string };
+type MembersResponse = { members?: PlaneMember[]; error?: string };
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -32,14 +26,41 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function ReportsManagementPanel({ initialFiles = [] }: ReportsManagementPanelProps) {
+function initials(name: string): string {
+  return name
+    .split(' ')
+    .map(w => w[0] ?? '')
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <button
+      onClick={handleCopy}
+      title="Copy ID"
+      className="inline-flex items-center gap-1 text-xs text-(--rs-primary-600) hover:text-(--rs-primary-800) transition-colors"
+    >
+      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {copied ? 'Copied!' : 'Copy ID'}
+    </button>
+  );
+}
+
+export function ReportsManagementPanel({ initialFiles = [] }: { initialFiles?: ReportFile[] }) {
   const [files, setFiles] = useState<ReportFile[]>(initialFiles);
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState('');
 
+  const [members, setMembers] = useState<PlaneMember[] | null>(null);
   const [membersLoading, setMembersLoading] = useState(false);
-  const [membersOutput, setMembersOutput] = useState('');
-  const [membersWarnings, setMembersWarnings] = useState('');
   const [membersError, setMembersError] = useState('');
 
   const loadFiles = async () => {
@@ -48,13 +69,10 @@ export function ReportsManagementPanel({ initialFiles = [] }: ReportsManagementP
     try {
       const res = await fetch('/api/reports/history', { cache: 'no-store' });
       const data = (await res.json()) as FilesResponse;
-      if (!res.ok) {
-        setFilesError(data.error || 'Failed to load generated files.');
-        return;
-      }
+      if (!res.ok) { setFilesError(data.error || 'Failed to load files.'); return; }
       setFiles(data.files || []);
     } catch {
-      setFilesError('Failed to load generated files.');
+      setFilesError('Failed to load files.');
     } finally {
       setFilesLoading(false);
     }
@@ -62,18 +80,12 @@ export function ReportsManagementPanel({ initialFiles = [] }: ReportsManagementP
 
   const loadMembers = async () => {
     setMembersLoading(true);
-    setMembersOutput('');
-    setMembersWarnings('');
     setMembersError('');
     try {
-      const res = await fetch('/api/reports/members', { method: 'POST' });
+      const res = await fetch('/api/reports/members');
       const data = (await res.json()) as MembersResponse;
-      if (!res.ok) {
-        setMembersError(data.error || 'Failed to load members.');
-        return;
-      }
-      setMembersOutput(data.stdout || '');
-      setMembersWarnings(data.stderr || '');
+      if (!res.ok) { setMembersError(data.error || 'Failed to load members.'); return; }
+      setMembers(data.members || []);
     } catch {
       setMembersError('Failed to load members.');
     } finally {
@@ -83,63 +95,107 @@ export function ReportsManagementPanel({ initialFiles = [] }: ReportsManagementP
 
   return (
     <div className="space-y-6">
-      <section className="rounded-md border border-slate-200 bg-white p-4 space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="font-serif text-lg font-bold text-(--rs-neutral-grey-900)">Generated Files</h2>
-          <Button variant="outline" onClick={loadFiles} disabled={filesLoading}>
-            {filesLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
-            Refresh
-          </Button>
-        </div>
-
-        {filesError ? <p className="text-sm text-red-600">{filesError}</p> : null}
-        {!filesLoading && !filesError && files.length === 0 ? (
-          <p className="text-sm text-slate-600">No reports found yet.</p>
-        ) : null}
-
-        {files.length > 0 ? (
-          <div className="space-y-2">
-            {files.map((file) => (
-              <div
-                key={file.name}
-                className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 rounded border border-slate-200 p-3"
-              >
-                <div className="min-w-0">
-                  <p className="font-medium text-sm break-all">{file.name}</p>
-                  <p className="text-xs text-slate-500">
-                    {formatBytes(file.size)} • {new Date(file.modifiedAt).toLocaleString()}
-                  </p>
-                </div>
-                <a
-                  href={`/api/reports/download?name=${encodeURIComponent(file.name)}`}
-                  className="inline-flex items-center gap-2 text-sm text-(--rs-primary-500) hover:underline"
-                >
-                  <Download className="w-4 h-4" />
-                  Download
-                </a>
-              </div>
-            ))}
+      {/* Generated Files */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-lg font-serif">Generated Files</CardTitle>
+            <Button variant="outline" size="sm" onClick={loadFiles} disabled={filesLoading}>
+              {filesLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
+              Refresh
+            </Button>
           </div>
-        ) : null}
-      </section>
+        </CardHeader>
+        <CardContent>
+          {filesError && <p className="text-sm text-red-600 mb-3">{filesError}</p>}
+          {!filesLoading && !filesError && files.length === 0 && (
+            <p className="text-sm text-(--rs-neutral-grey-500) italic">No reports generated yet.</p>
+          )}
+          {files.length > 0 && (
+            <div className="space-y-2">
+              {files.map(file => (
+                <div
+                  key={file.name}
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-lg border border-(--rs-neutral-grey-200) p-3"
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm text-(--rs-neutral-grey-900) break-all">{file.name}</p>
+                    <p className="text-xs text-(--rs-neutral-grey-400) mt-0.5">
+                      {formatBytes(file.size)} · {new Date(file.modifiedAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <a
+                    href={`/api/reports/download?name=${encodeURIComponent(file.name)}`}
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-(--rs-primary-500) hover:text-(--rs-primary-700) shrink-0 transition-colors"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download
+                  </a>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-      <section className="rounded-md border border-slate-200 bg-white p-4 space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="font-serif text-lg font-bold text-(--rs-neutral-grey-900)">Workspace Users (Plane)</h2>
-          <Button variant="outline" onClick={loadMembers} disabled={membersLoading}>
-            {membersLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
-            Load Users
-          </Button>
-        </div>
+      {/* Workspace Members */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <CardTitle className="text-lg font-serif">Workspace Members</CardTitle>
+              <p className="text-xs text-(--rs-neutral-grey-400) mt-0.5">
+                Copy a member&apos;s Plane ID to paste into their profile.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={loadMembers} disabled={membersLoading}>
+              {membersLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
+              {members === null ? 'Load Members' : 'Refresh'}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {membersError && <p className="text-sm text-red-600">{membersError}</p>}
 
-        {membersError ? <p className="text-sm text-red-600">{membersError}</p> : null}
-        {membersOutput ? (
-          <pre className="whitespace-pre-wrap text-xs bg-slate-50 rounded border border-slate-200 p-3">{membersOutput}</pre>
-        ) : null}
-        {membersWarnings ? (
-          <pre className="whitespace-pre-wrap text-xs bg-amber-50 rounded border border-amber-200 p-3 text-amber-800">{membersWarnings}</pre>
-        ) : null}
-      </section>
+          {members === null && !membersLoading && !membersError && (
+            <p className="text-sm text-(--rs-neutral-grey-500) italic">
+              Click &ldquo;Load Members&rdquo; to fetch Plane workspace users.
+            </p>
+          )}
+
+          {members !== null && members.length === 0 && (
+            <p className="text-sm text-(--rs-neutral-grey-500) italic">No members found in workspace.</p>
+          )}
+
+          {members !== null && members.length > 0 && (
+            <div className="space-y-2">
+              {members.map(m => (
+                <div
+                  key={m.id}
+                  className="flex items-center gap-3 p-3 rounded-lg border border-(--rs-neutral-grey-200) hover:bg-(--rs-neutral-grey-50) transition-colors"
+                >
+                  {/* Avatar */}
+                  <div className="w-9 h-9 rounded-full bg-(--rs-primary-100) text-(--rs-primary-700) flex items-center justify-center text-sm font-bold shrink-0">
+                    {initials(m.display_name)}
+                  </div>
+
+                  {/* Info */}
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-sm text-(--rs-neutral-grey-900)">{m.display_name}</div>
+                    <div className="text-xs text-(--rs-neutral-grey-400) truncate">{m.email}</div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <code className="text-[10px] bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-600) px-1.5 py-0.5 rounded font-mono truncate max-w-[200px] sm:max-w-none">
+                        {m.id}
+                      </code>
+                      <CopyButton text={m.id} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

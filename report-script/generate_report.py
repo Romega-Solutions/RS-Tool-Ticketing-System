@@ -24,6 +24,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta
 
 import requests
@@ -106,11 +107,18 @@ class PlaneClient:
             "Content-Type": "application/json",
         })
 
-    def _get(self, path: str, params: dict | None = None) -> dict:
+    def _get(self, path: str, params: dict | None = None, _retries: int = 3) -> dict:
         url = f"{self.base_url}/api/v1/workspaces/{self.workspace_slug}{path}"
-        resp = self.session.get(url, params=params, timeout=30)
-        resp.raise_for_status()
-        return resp.json()
+        for attempt in range(_retries):
+            resp = self.session.get(url, params=params, timeout=30)
+            if resp.status_code == 429:
+                wait = 2 ** attempt
+                print(f"[rate limit] waiting {wait}s...", flush=True)
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        raise RuntimeError(f"Rate limit: failed after {_retries} retries: {url}")
 
     def get_projects(self) -> list[dict]:
         data = self._get("/projects/")
@@ -121,8 +129,32 @@ class PlaneClient:
         return data.get("results", data) if isinstance(data, dict) else data
 
     def get_issues(self, project_id: str, params: dict | None = None) -> list[dict]:
-        data = self._get(f"/projects/{project_id}/issues/", params=params)
-        return data.get("results", data) if isinstance(data, dict) else data
+        # /work-items/ is the current endpoint; fall back to /issues/ for older Plane instances.
+        for endpoint in (
+            f"/projects/{project_id}/work-items/",
+            f"/projects/{project_id}/issues/",
+        ):
+            try:
+                all_results: list[dict] = []
+                cursor = None
+                while True:
+                    page_params = {**(params or {}), "per_page": 100}
+                    if cursor:
+                        page_params["cursor"] = cursor
+                    data = self._get(endpoint, params=page_params)
+                    results = data.get("results", []) if isinstance(data, dict) else (data or [])
+                    all_results.extend(results)
+                    next_cursor = data.get("next_cursor") if isinstance(data, dict) else None
+                    has_more = data.get("next_page_results", False) if isinstance(data, dict) else False
+                    if not has_more or not next_cursor:
+                        break
+                    cursor = next_cursor
+                return all_results
+            except requests.exceptions.HTTPError as exc:
+                if exc.response is not None and exc.response.status_code == 404:
+                    continue
+                raise
+        raise RuntimeError(f"Neither /work-items/ nor /issues/ endpoint available for project {project_id}")
 
     def get_project_states(self, project_id: str) -> list[dict]:
         data = self._get(f"/projects/{project_id}/states/")
@@ -298,7 +330,7 @@ def filter_completed_this_week(
     """Filter completed tasks to only those completed within the given week."""
     result = []
     for task in tasks:
-        completed_at = task.get("completed_at") or task.get("updated_at", "")
+        completed_at = task.get("completed_at")
         if not completed_at:
             continue
         try:

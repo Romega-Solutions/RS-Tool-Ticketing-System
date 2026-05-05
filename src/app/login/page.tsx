@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { Eye, EyeOff, Loader2, LogIn } from 'lucide-react';
 
@@ -49,9 +50,19 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-(--rs-primary-50) px-4 py-12">
       <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <h1 className="text-2xl font-serif font-bold text-(--rs-neutral-grey-900)">RS Ticketing System</h1>
-          <p className="mt-1.5 text-sm text-(--rs-neutral-grey-600)">Sign in to your workspace</p>
+        <div className="mb-8 text-center flex flex-col items-center gap-3">
+          <Image
+            src="/images/rs-logo.svg"
+            alt="Romega Solutions"
+            width={160}
+            height={48}
+            className="object-contain"
+            priority
+          />
+          <div>
+            <h1 className="text-xl font-serif font-bold text-(--rs-neutral-grey-900)">Ticketing System</h1>
+            <p className="mt-1 text-sm text-(--rs-neutral-grey-600)">Sign in to your workspace</p>
+          </div>
         </div>
 
         <div className="rounded-2xl border border-(--color-border) bg-white p-8 shadow-[var(--shadow-elevated)]">
@@ -70,7 +81,7 @@ export default function LoginPage() {
                   className="w-full rounded-md border border-(--rs-primary-200) bg-white px-2.5 py-2 text-left text-xs hover:bg-(--rs-primary-100)"
                 >
                   <div className="font-semibold text-(--rs-neutral-grey-900)">{account.role}</div>
-                  <div className="text-slate-600">user: {account.username} • pass: {account.password}</div>
+                  <div className="text-(--rs-neutral-grey-500)">user: {account.username} • pass: {account.password}</div>
                 </button>
               ))}
             </div>

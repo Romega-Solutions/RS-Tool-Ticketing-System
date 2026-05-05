@@ -3,6 +3,8 @@ import { AppSidebar, MobileNav } from "@/components/app-sidebar";
 import { cookies } from "next/headers";
 import { verifyToken } from "@/lib/auth";
 import { normalizeRole, roleLabel } from "@/lib/rbac";
+import { ClockWidget } from "@/components/clock-widget";
+import { LiveClock } from "@/components/live-clock";
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const cookieStore = await cookies();
@@ -22,6 +24,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             <h2 className="font-serif text-xl font-bold text-(--rs-neutral-grey-900) hidden md:block">Romega Solutions</h2>
           </div>
           <div className="flex items-center gap-3">
+            <LiveClock />
+            <ClockWidget variant="topbar" />
             <span className="hidden md:inline-flex rounded-full bg-(--rs-primary-100) px-2.5 py-1 text-xs font-semibold text-(--rs-primary-700)">
               {roleLabel(role)}
             </span>
