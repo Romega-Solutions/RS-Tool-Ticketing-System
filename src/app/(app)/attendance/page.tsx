@@ -21,6 +21,7 @@ interface TeamUser { id: number; name: string; team: string | null; role: string
 interface MonthlySummary {
   userId: number; name: string; team: string | null; role: string;
   present: number; wfh: number; leave: number; absent: number; workdays: number;
+  totalSeconds: number;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -36,6 +37,14 @@ const STATUS_OPTS = [
   { value: 'leave',   label: 'Leave',   color: 'bg-yellow-100 text-yellow-700 border-yellow-300' },
   { value: 'absent',  label: 'Absent',  color: 'bg-red-100 text-red-700 border-red-300'      },
 ];
+
+function fmtSeconds(s: number): string {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
 
 function statusColor(val: string | null): string {
   return STATUS_OPTS.find(o => o.value === (val ?? ''))?.color
@@ -92,12 +101,14 @@ export default function AttendancePage() {
   const monday = getMondayDate(weekOffset);
   const friday = new Date(monday.getTime() + 4 * 86400000);
   const weekStart = toLocalISO(monday);
-  const dayDates = DAY_KEYS.map((_, i) => new Date(monday.getTime() + i * 86400000).getDate());
+  const dayDates    = DAY_KEYS.map((_, i) => new Date(monday.getTime() + i * 86400000).getDate());
+  const dayDateStrs = DAY_KEYS.map((_, i) => toLocalISO(new Date(monday.getTime() + i * 86400000)));
 
-  const [weekLoading, setWeekLoading] = useState(true);
-  const [weekError,   setWeekError]   = useState('');
-  const [teamUsers,   setTeamUsers]   = useState<TeamUser[]>([]);
-  const [teamRecords, setTeamRecords] = useState<AttendanceRecord[]>([]);
+  const [weekLoading,      setWeekLoading]      = useState(true);
+  const [weekError,        setWeekError]         = useState('');
+  const [teamUsers,        setTeamUsers]         = useState<TeamUser[]>([]);
+  const [teamRecords,      setTeamRecords]       = useState<AttendanceRecord[]>([]);
+  const [timesheetsByDay,  setTimesheetsByDay]   = useState<Record<string, number>>({});
 
   const loadWeek = useCallback(() => {
     let cancelled = false;
@@ -105,11 +116,12 @@ export default function AttendancePage() {
     setWeekError('');
     fetch(`/api/attendance?week=${weekStart}`)
       .then(r => r.json())
-      .then((d: { users?: TeamUser[]; records?: AttendanceRecord[]; error?: string }) => {
+      .then((d: { users?: TeamUser[]; records?: AttendanceRecord[]; timesheetsByDay?: Record<string, number>; error?: string }) => {
         if (cancelled) return;
         if (d.error) { setWeekError(d.error); return; }
         setTeamUsers(d.users ?? []);
         setTeamRecords(d.records ?? []);
+        setTimesheetsByDay(d.timesheetsByDay ?? {});
       })
       .catch(() => { if (!cancelled) setWeekError('Failed to load attendance data.'); })
       .finally(() => { if (!cancelled) setWeekLoading(false); });
@@ -217,33 +229,44 @@ export default function AttendancePage() {
                             <div className="text-xs font-normal text-(--rs-neutral-grey-400)">{dayDates[i]}</div>
                           </th>
                         ))}
+                        <th className="text-center py-2 px-3 font-medium text-(--rs-neutral-grey-600) w-20">Hrs/Wk</th>
                       </tr>
                     </thead>
                     <tbody>
                       {teamUsers.map(user => {
                         const rec = teamRecords.find(r => r.userId === user.id);
+                        const weekSeconds = dayDateStrs.reduce((sum, d) => sum + (timesheetsByDay[`${user.id}:${d}`] ?? 0), 0);
                         return (
                           <tr key={user.id} className="border-b border-(--rs-neutral-grey-100) hover:bg-(--rs-neutral-grey-50)">
                             <td className="py-3 pr-4">
                               <div className="font-medium text-(--rs-neutral-grey-900)">{user.name}</div>
                               {user.team && <div className="text-xs text-(--rs-neutral-grey-400)">{user.team}</div>}
                             </td>
-                            {DAY_KEYS.map(day => {
-                              const val = rec ? (rec[`${day}Status` as keyof AttendanceRecord] as string | null) : null;
+                            {DAY_KEYS.map((day, i) => {
+                              const val  = rec ? (rec[`${day}Status` as keyof AttendanceRecord] as string | null) : null;
+                              const secs = timesheetsByDay[`${user.id}:${dayDateStrs[i]}`] ?? 0;
                               return (
                                 <td key={day} className="text-center py-3 px-2">
                                   <span className={`inline-block px-2 py-0.5 rounded border text-xs font-medium ${statusColor(val)}`}>
                                     {statusLabel(val)}
                                   </span>
+                                  {secs > 0 && (
+                                    <div className="text-[10px] text-(--rs-neutral-grey-400) mt-0.5">{fmtSeconds(secs)}</div>
+                                  )}
                                 </td>
                               );
                             })}
+                            <td className="text-center py-3 px-3">
+                              {weekSeconds > 0
+                                ? <span className="text-sm font-semibold text-(--rs-primary-700)">{fmtSeconds(weekSeconds)}</span>
+                                : <span className="text-xs text-(--rs-neutral-grey-400)">—</span>}
+                            </td>
                           </tr>
                         );
                       })}
                       {teamUsers.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="text-center py-8 text-(--rs-neutral-grey-400) italic text-sm">
+                          <td colSpan={7} className="text-center py-8 text-(--rs-neutral-grey-400) italic text-sm">
                             No team members found.
                           </td>
                         </tr>
@@ -311,6 +334,7 @@ export default function AttendancePage() {
                         <th className="text-center py-2 px-3 font-medium text-yellow-700">Leave</th>
                         <th className="text-center py-2 px-3 font-medium text-red-700">Absent</th>
                         <th className="text-center py-2 px-3 font-medium text-(--rs-neutral-grey-500)">Tracked</th>
+                        <th className="text-center py-2 px-3 font-medium text-(--rs-primary-600)">Hours</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -339,12 +363,17 @@ export default function AttendancePage() {
                               <div className="text-xs text-(--rs-neutral-grey-500)">{tracked}/{monthWorkdays}</div>
                               <div className="text-[10px] text-(--rs-neutral-grey-400)">{pct}% present/WFH</div>
                             </td>
+                            <td className="text-center py-3 px-3">
+                              {row.totalSeconds > 0
+                                ? <span className="text-sm font-semibold text-(--rs-primary-700)">{fmtSeconds(row.totalSeconds)}</span>
+                                : <span className="text-xs text-(--rs-neutral-grey-400)">—</span>}
+                            </td>
                           </tr>
                         );
                       })}
                       {monthlySummary.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="text-center py-8 text-(--rs-neutral-grey-400) italic text-sm">
+                          <td colSpan={7} className="text-center py-8 text-(--rs-neutral-grey-400) italic text-sm">
                             No attendance data for this month.
                           </td>
                         </tr>

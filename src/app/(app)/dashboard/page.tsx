@@ -1,24 +1,10 @@
-import { cookies } from 'next/headers';
-import { verifyToken } from '@/lib/auth';
-import { db } from '@/db';
-import { users } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { getSession } from '@/lib/session';
 import { getProjects, getProjectStates, getWorkspaceMembers, getWorkItems, buildStateLookup, enrichWorkItems } from '@/lib/plane';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { AlertCircle, Clock } from "lucide-react";
 import Link from 'next/link';
-import { normalizeRole, canAccessReports } from '@/lib/rbac';
+import { canAccessReports } from '@/lib/rbac';
 import { PresencePanel } from '@/components/presence-panel';
-
-async function getSessionUser() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('session_token')?.value;
-  if (!token) return null;
-  const payload = await verifyToken(token);
-  if (!payload?.id) return null;
-  const [user] = await db.select().from(users).where(eq(users.id, Number(payload.id)));
-  return user ?? null;
-}
 
 function stateGroup(item: { state_detail?: { group?: string } }) {
   return (item.state_detail?.group ?? '').toLowerCase();
@@ -29,10 +15,10 @@ const PRIORITY_ICON: Record<string, string> = {
 };
 
 export default async function DashboardPage() {
-  const sessionUser = await getSessionUser();
+  const sessionUser = await getSession();
   const planeMemberId = sessionUser?.planeMemberId ?? null;
   const isFriday = new Date().getDay() === 5;
-  const isLeadOrAdmin = canAccessReports(normalizeRole(sessionUser?.role));
+  const isLeadOrAdmin = canAccessReports(sessionUser?.role ?? 'ic');
 
   type ItemMeta = {
     id: string;

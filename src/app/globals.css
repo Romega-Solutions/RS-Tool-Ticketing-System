@@ -399,3 +399,57 @@ select,
 @utility tabular-nums {
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Auth page animations ─────────────────────────────────────── */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes auth-enter {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes tab-enter {
+    from { opacity: 0; transform: translateX(6px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20%      { transform: translateX(-5px); }
+    40%      { transform: translateX(5px); }
+    60%      { transform: translateX(-3px); }
+    80%      { transform: translateX(3px); }
+  }
+
+  @keyframes pill-select {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(0.93); }
+    70%  { transform: scale(1.05); }
+    100% { transform: scale(1); }
+  }
+
+  @keyframes card-select {
+    0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--rs-primary-500) 35%, transparent); }
+    50%  { box-shadow: 0 0 0 6px color-mix(in srgb, var(--rs-primary-500) 0%, transparent); }
+    100% { box-shadow: none; }
+  }
+}
+
+@utility animate-auth-enter {
+  animation: auth-enter 0.3s ease-out both;
+}
+
+@utility animate-tab-enter {
+  animation: tab-enter 0.15s ease-out both;
+}
+
+@utility animate-shake {
+  animation: shake 0.3s ease-in-out both;
+}
+
+@utility animate-pill-select {
+  animation: pill-select 0.2s ease-out both;
+}
+
+@utility animate-card-select {
+  animation: card-select 0.35s ease-out both;
+}

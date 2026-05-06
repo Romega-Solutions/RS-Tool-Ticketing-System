@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
-import { db } from '@/db';
-import { users } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { hash } from 'bcryptjs';
 import { normalizeRole } from '@/lib/rbac';
 
@@ -12,7 +10,13 @@ export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const [user] = await db.select().from(users).where(eq(users.id, session.id));
+  const admin = createAdminClient();
+  const { data: user } = await admin
+    .from('users')
+    .select('*')
+    .eq('id', session.id)
+    .maybeSingle();
+
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
   return NextResponse.json({
@@ -23,9 +27,9 @@ export async function GET() {
       email: user.email,
       role: normalizeRole(user.role),
       team: user.team,
-      jobTitle: user.jobTitle,
-      planeMemberId: user.planeMemberId ?? null,
-      isActive: Boolean(user.isActive),
+      jobTitle: user.job_title,
+      planeMemberId: user.plane_member_id ?? null,
+      isActive: Boolean(user.is_active),
     },
   });
 }
@@ -48,29 +52,24 @@ export async function PUT(req: Request) {
 
   if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
 
-  const payload: {
-    name: string;
-    team: string | null;
-    jobTitle: string | null;
-    updatedAt: string;
-    passwordHash?: string;
-  } = {
+  const payload: Record<string, string | null> = {
     name,
     team: team || null,
-    jobTitle: jobTitle || null,
-    updatedAt: new Date().toISOString(),
+    job_title: jobTitle || null,
+    updated_at: new Date().toISOString(),
   };
 
   if (password) {
     if (password.length < 8) {
       return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
     }
-    payload.passwordHash = await hash(password, 10);
+    payload.password_hash = await hash(password, 10);
   }
 
-  await db.update(users).set(payload).where(eq(users.id, session.id));
+  const admin = createAdminClient();
+  await admin.from('users').update(payload).eq('id', session.id);
 
-  const [updated] = await db.select().from(users).where(eq(users.id, session.id));
+  const { data: updated } = await admin.from('users').select('*').eq('id', session.id).maybeSingle();
   if (!updated) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
   return NextResponse.json({
@@ -82,8 +81,8 @@ export async function PUT(req: Request) {
       email: updated.email,
       role: normalizeRole(updated.role),
       team: updated.team,
-      jobTitle: updated.jobTitle,
-      isActive: Boolean(updated.isActive),
+      jobTitle: updated.job_title,
+      isActive: Boolean(updated.is_active),
     },
   });
 }

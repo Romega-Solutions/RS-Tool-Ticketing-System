@@ -70,7 +70,10 @@ export async function GET(req: Request) {
     }));
 
     return NextResponse.json({ planeConfigured: true, pending, accomplishments });
-  } catch {
-    return NextResponse.json({ planeConfigured: true, pending: [], accomplishments: [], error: 'Failed to fetch Plane data' });
+  } catch (err) {
+    return NextResponse.json(
+      { planeConfigured: true, pending: [], accomplishments: [], error: 'Failed to fetch Plane data' },
+      { status: 502 },
+    );
   }
 }

@@ -2,24 +2,9 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
 import { canAccessAdmin } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { db } from '@/db';
-import { users } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { hash } from 'bcryptjs';
 
 export const runtime = 'nodejs';
-
-const USER_FIELDS = {
-  id:            users.id,
-  username:      users.username,
-  name:          users.name,
-  email:         users.email,
-  role:          users.role,
-  team:          users.team,
-  jobTitle:      users.jobTitle,
-  planeMemberId: users.planeMemberId,
-  isActive:      users.isActive,
-} as const;
 
 async function requireAdmin() {
   const session = await getSession();
@@ -31,8 +16,25 @@ export async function GET() {
   const session = await requireAdmin();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const allUsers = await db.select(USER_FIELDS).from(users).orderBy(users.name);
-  return NextResponse.json({ users: allUsers });
+  const admin = createAdminClient();
+  const { data: allUsers = [] } = await admin
+    .from('users')
+    .select('id, username, name, email, role, team, job_title, plane_member_id, is_active')
+    .order('name');
+
+  const mapped = allUsers.map((u: Record<string, unknown>) => ({
+    id:            u.id,
+    username:      u.username,
+    name:          u.name,
+    email:         u.email,
+    role:          u.role,
+    team:          u.team,
+    jobTitle:      u.job_title,
+    planeMemberId: u.plane_member_id,
+    isActive:      Boolean(u.is_active),
+  }));
+
+  return NextResponse.json({ users: mapped });
 }
 
 // POST — create a new user in Supabase Auth + public.users
@@ -71,10 +73,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
   }
 
+  const admin = createAdminClient();
+
   // 1. Create in Supabase Auth
   let authUserId: string;
   try {
-    const admin = createAdminClient();
     const { data, error } = await admin.auth.admin.createUser({
       email,
       password,
@@ -96,29 +99,41 @@ export async function POST(req: Request) {
   try {
     const passwordHash = await hash(password, 10);
     const now = new Date().toISOString();
-    const [inserted] = await db
-      .insert(users)
-      .values({
+    const { data: inserted, error: dbErr } = await admin
+      .from('users')
+      .insert({
         username,
-        passwordHash,
+        password_hash: passwordHash,
         name,
         email,
         role,
         team,
-        jobTitle,
-        isActive: 1,
-        createdAt: now,
-        updatedAt: now,
+        job_title:  jobTitle,
+        is_active:  1,
+        created_at: now,
+        updated_at: now,
       })
-      .returning(USER_FIELDS);
+      .select('id, username, name, email, role, team, job_title, plane_member_id, is_active')
+      .single();
 
-    return NextResponse.json({ user: inserted }, { status: 201 });
+    if (dbErr) throw new Error(dbErr.message);
+
+    return NextResponse.json({
+      user: {
+        id:            inserted.id,
+        username:      inserted.username,
+        name:          inserted.name,
+        email:         inserted.email,
+        role:          inserted.role,
+        team:          inserted.team,
+        jobTitle:      inserted.job_title,
+        planeMemberId: inserted.plane_member_id,
+        isActive:      Boolean(inserted.is_active),
+      },
+    }, { status: 201 });
   } catch (err) {
     // Roll back the Supabase Auth user if DB insert fails
-    try {
-      const admin = createAdminClient();
-      await admin.auth.admin.deleteUser(authUserId);
-    } catch { /* best-effort rollback */ }
+    try { await admin.auth.admin.deleteUser(authUserId); } catch { /* best-effort */ }
 
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('users_email_unique') || msg.includes('unique')) {
@@ -140,15 +155,39 @@ export async function PATCH(req: Request) {
   if (!body.id) return NextResponse.json({ error: 'id is required' }, { status: 400 });
 
   const updates: Record<string, unknown> = {};
-  if (body.role !== undefined)          updates.role          = body.role;
-  if (body.planeMemberId !== undefined) updates.planeMemberId = body.planeMemberId || null;
-  if (body.isActive !== undefined)      updates.isActive      = body.isActive;
+  if (body.role !== undefined)          updates.role           = body.role;
+  if (body.planeMemberId !== undefined) updates.plane_member_id = body.planeMemberId || null;
+  if (body.isActive !== undefined)      updates.is_active      = body.isActive;
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
   }
 
-  await db.update(users).set(updates).where(eq(users.id, body.id));
-  const [updated] = await db.select(USER_FIELDS).from(users).where(eq(users.id, body.id));
-  return NextResponse.json({ user: updated });
+  updates.updated_at = new Date().toISOString();
+
+  const admin = createAdminClient();
+  const { error: updateError } = await admin.from('users').update(updates).eq('id', body.id);
+  if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
+
+  const { data: updated } = await admin
+    .from('users')
+    .select('id, username, name, email, role, team, job_title, plane_member_id, is_active')
+    .eq('id', body.id)
+    .maybeSingle();
+
+  if (!updated) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
+  return NextResponse.json({
+    user: {
+      id:            updated.id,
+      username:      updated.username,
+      name:          updated.name,
+      email:         updated.email,
+      role:          updated.role,
+      team:          updated.team,
+      jobTitle:      updated.job_title,
+      planeMemberId: updated.plane_member_id,
+      isActive:      Boolean(updated.is_active),
+    },
+  });
 }

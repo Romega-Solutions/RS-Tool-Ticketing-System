@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/db';
-import { users, weeklyReports } from '@/db/schema';
-import { eq, and, inArray } from 'drizzle-orm';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
 import { canAccessReports } from '@/lib/rbac';
 
@@ -31,34 +29,47 @@ export async function GET(req: Request) {
   const weekStart = getMondayOfWeek(weekParam);
   if (!weekStart) return NextResponse.json({ error: 'week must be a Monday (YYYY-MM-DD)' }, { status: 400 });
 
-  const allUsers = session.role === 'admin'
-    ? await db.select({ id: users.id, name: users.name, role: users.role, team: users.team, jobTitle: users.jobTitle })
-        .from(users).where(eq(users.isActive, 1))
-    : await db.select({ id: users.id, name: users.name, role: users.role, team: users.team, jobTitle: users.jobTitle })
-        .from(users).where(and(eq(users.isActive, 1), eq(users.team, session.team ?? '')));
+  const admin = createAdminClient();
 
-  const userIds = allUsers.map(u => u.id);
-  const reports = userIds.length > 0
-    ? await db.select().from(weeklyReports)
-        .where(and(inArray(weeklyReports.userId, userIds), eq(weeklyReports.weekStart, weekStart)))
-    : [];
+  let usersQuery = admin
+    .from('users')
+    .select('id, name, role, team, job_title')
+    .eq('is_active', 1);
 
-  const reportMap = new Map(reports.map(r => [r.userId, r]));
+  if (session.role !== 'admin') {
+    usersQuery = usersQuery.eq('team', session.team ?? '');
+  }
+
+  const { data: allUsers = [] } = await usersQuery;
+
+  const userIds = allUsers.map((u: { id: number }) => u.id);
+  let reports: Array<Record<string, unknown>> = [];
+  if (userIds.length > 0) {
+    const { data } = await admin
+      .from('weekly_reports')
+      .select('*')
+      .in('user_id', userIds)
+      .eq('week_start', weekStart);
+    reports = data ?? [];
+  }
+
+  const reportMap = new Map(reports.map(r => [r.user_id, r]));
 
   const members = allUsers
-    .filter(u => u.id !== session.id)
-    .map(u => {
+    .filter((u: { id: number }) => u.id !== session.id)
+    .map((u: { id: number; name: string; role: string; team: string | null; job_title: string | null }) => {
       const r = reportMap.get(u.id);
       return {
-        user: u,
+        user: { id: u.id, name: u.name, role: u.role, team: u.team, jobTitle: u.job_title },
         report: r
           ? {
               id:                r.id,
-              weekStart:         r.weekStart,
-              clientEngagements: r.clientEngagements ? JSON.parse(r.clientEngagements) : [],
-              risks:             r.risks ? JSON.parse(r.risks) : [],
+              weekStart:         r.week_start,
+              clientEngagements: r.client_engagements ? JSON.parse(r.client_engagements as string) : [],
+              risks:             r.risks     ? JSON.parse(r.risks as string)     : [],
+              meetings:          r.meetings  ? JSON.parse(r.meetings as string)  : [],
               ideas:             r.ideas ?? '',
-              submittedAt:       r.submittedAt,
+              submittedAt:       r.submitted_at,
             }
           : null,
       };

@@ -1,27 +1,13 @@
-import { cookies } from 'next/headers';
-import { verifyToken } from '@/lib/auth';
-import { db } from '@/db';
-import { users } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { normalizeRole, canAccessReports } from '@/lib/rbac';
+import { getSession } from '@/lib/session';
+import { canAccessReports } from '@/lib/rbac';
 import { WeeklyReportForm } from '@/components/weekly-report-form';
 import { TeamReportsView } from '@/components/team-reports-view';
 import { CeoReportsOverview } from '@/components/ceo-reports-overview';
 import { TabSwitcher } from '@/components/weekly-report-tabs';
 
-async function getSessionUser() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('session_token')?.value;
-  if (!token) return null;
-  const payload = await verifyToken(token);
-  if (!payload?.id) return null;
-  const [user] = await db.select().from(users).where(eq(users.id, Number(payload.id)));
-  return user ?? null;
-}
-
 export default async function WeeklyReportPage() {
-  const sessionUser = await getSessionUser();
-  const role = normalizeRole(sessionUser?.role);
+  const sessionUser = await getSession();
+  const role = sessionUser?.role ?? 'ic';
   const isLeadOrAdmin = canAccessReports(role);
   const isAdmin = role === 'admin';
 

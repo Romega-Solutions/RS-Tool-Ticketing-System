@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/db';
-import { weeklyReports } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
 
 export const runtime = 'nodejs';
@@ -28,12 +26,25 @@ export async function GET(req: Request) {
   const weekStart = getMondayOfWeek(weekParam);
   if (!weekStart) return NextResponse.json({ error: 'week must be a Monday (YYYY-MM-DD)' }, { status: 400 });
 
-  const [report] = await db.select().from(weeklyReports)
-    .where(and(eq(weeklyReports.userId, session.id), eq(weeklyReports.weekStart, weekStart)));
+  const admin = createAdminClient();
+  const { data: report } = await admin
+    .from('weekly_reports')
+    .select('*')
+    .eq('user_id', session.id)
+    .eq('week_start', weekStart)
+    .maybeSingle();
 
   return NextResponse.json({
     weekStart,
-    report: report ?? null,
+    report: report ? {
+      id:                report.id as number,
+      weekStart:         report.week_start as string,
+      clientEngagements: report.client_engagements ? JSON.parse(report.client_engagements as string) : [],
+      risks:             report.risks              ? JSON.parse(report.risks as string)              : [],
+      meetings:          report.meetings           ? JSON.parse(report.meetings as string)           : [],
+      ideas:             (report.ideas as string) ?? '',
+      submittedAt:       report.submitted_at as string | null,
+    } : null,
     user: { id: session.id, name: session.name, planeMemberId: session.planeMemberId },
   });
 }
@@ -47,6 +58,7 @@ export async function POST(req: Request) {
     weekStart: string;
     clientEngagements?: Array<{ activity: string; date: string; details: string }>;
     risks?: Array<{ description: string; resolution: string; escalation: string }>;
+    meetings?: Array<{ title: string; date: string; participants: string; notes: string }>;
     ideas?: string;
   };
 
@@ -55,22 +67,27 @@ export async function POST(req: Request) {
 
   const now = new Date().toISOString();
   const payload = {
-    clientEngagements: JSON.stringify(body.clientEngagements ?? []),
-    risks:             JSON.stringify(body.risks ?? []),
-    ideas:             body.ideas?.trim() ?? '',
-    submittedAt:       now,
-    updatedAt:         now,
+    client_engagements: JSON.stringify(body.clientEngagements ?? []),
+    risks:              JSON.stringify(body.risks ?? []),
+    meetings:           JSON.stringify(body.meetings ?? []),
+    ideas:              body.ideas?.trim() ?? '',
+    submitted_at:       now,
+    updated_at:         now,
   };
 
-  const [existing] = await db.select({ id: weeklyReports.id })
-    .from(weeklyReports)
-    .where(and(eq(weeklyReports.userId, session.id), eq(weeklyReports.weekStart, weekStart)));
+  const admin = createAdminClient();
+  const { data: existing } = await admin
+    .from('weekly_reports')
+    .select('id')
+    .eq('user_id', session.id)
+    .eq('week_start', weekStart)
+    .maybeSingle();
 
   if (existing) {
-    await db.update(weeklyReports).set(payload).where(eq(weeklyReports.id, existing.id));
+    await admin.from('weekly_reports').update(payload).eq('id', existing.id);
     return NextResponse.json({ success: true, action: 'updated' });
   }
 
-  await db.insert(weeklyReports).values({ userId: session.id, weekStart, ...payload });
+  await admin.from('weekly_reports').insert({ user_id: session.id, week_start: weekStart, ...payload });
   return NextResponse.json({ success: true, action: 'created' });
 }

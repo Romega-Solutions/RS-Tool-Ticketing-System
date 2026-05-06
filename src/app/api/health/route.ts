@@ -9,11 +9,13 @@ export async function GET() {
   checks.database_url = process.env.DATABASE_URL  ? 'SET' : 'MISSING — set in Vercel env vars';
 
   try {
-    const { db } = await import('@/db');
-    const { users } = await import('@/db/schema');
-    const { sql } = await import('drizzle-orm');
-    const result = await db.select({ count: sql<number>`count(*)` }).from(users);
-    checks.db_connection = `OK — ${result[0]?.count ?? 0} users`;
+    const { createAdminClient } = await import('@/lib/supabase/admin');
+    const admin = createAdminClient();
+    const { count, error } = await admin
+      .from('users')
+      .select('*', { count: 'exact', head: true });
+    if (error) throw new Error(error.message);
+    checks.db_connection = `OK — ${count ?? 0} users`;
   } catch (e) {
     checks.db_connection = `ERROR: ${e instanceof Error ? e.message : String(e)}`;
   }

@@ -9,12 +9,13 @@ import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, CheckCircle
 
 interface ClientEngagement { activity: string; date: string; details: string; }
 interface Risk { description: string; resolution: string; escalation: string; }
+interface Meeting { title: string; date: string; participants: string; notes: string; }
 
 interface MemberReport {
   user: { id: number; name: string; role: string; team: string | null; jobTitle: string | null };
   report: {
     id: number; weekStart: string; submittedAt: string | null;
-    clientEngagements: ClientEngagement[]; risks: Risk[]; ideas: string;
+    clientEngagements: ClientEngagement[]; risks: Risk[]; meetings: Meeting[]; ideas: string;
   } | null;
 }
 
@@ -75,6 +76,7 @@ function MemberRow({ member }: { member: MemberReport }) {
         {r && (
           <div className="hidden sm:flex items-center gap-4 text-xs text-(--rs-neutral-grey-500) shrink-0">
             <span>{r.clientEngagements.length} engagement{r.clientEngagements.length !== 1 ? 's' : ''}</span>
+            {r.meetings.length > 0 && <span>{r.meetings.length} meeting{r.meetings.length !== 1 ? 's' : ''}</span>}
             <span>{r.risks.length} risk{r.risks.length !== 1 ? 's' : ''}</span>
             {r.ideas && <span>Has ideas</span>}
           </div>
@@ -129,6 +131,35 @@ function MemberRow({ member }: { member: MemberReport }) {
             </div>
           )}
 
+          {/* Meetings */}
+          {r.meetings.length > 0 && (
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-(--rs-neutral-grey-500) mb-2">Meetings</h4>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs min-w-[460px]">
+                  <thead>
+                    <tr className="border-b border-(--rs-neutral-grey-200) text-left">
+                      <th className="pb-1.5 pr-3 font-medium text-(--rs-neutral-grey-500) w-[28%]">Title</th>
+                      <th className="pb-1.5 pr-3 font-medium text-(--rs-neutral-grey-500) w-24">Date</th>
+                      <th className="pb-1.5 pr-3 font-medium text-(--rs-neutral-grey-500) w-[25%]">Participants</th>
+                      <th className="pb-1.5 font-medium text-(--rs-neutral-grey-500)">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-(--rs-neutral-grey-100)">
+                    {r.meetings.map((m, i) => (
+                      <tr key={i}>
+                        <td className="py-1.5 pr-3 text-(--rs-neutral-grey-800)">{m.title || '—'}</td>
+                        <td className="py-1.5 pr-3 text-(--rs-neutral-grey-500)">{m.date || '—'}</td>
+                        <td className="py-1.5 pr-3 text-(--rs-neutral-grey-700)">{m.participants || '—'}</td>
+                        <td className="py-1.5 text-(--rs-neutral-grey-700)">{m.notes || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* Risks */}
           {r.risks.length > 0 && (
             <div>
@@ -166,7 +197,7 @@ function MemberRow({ member }: { member: MemberReport }) {
             </div>
           )}
 
-          {r.clientEngagements.length === 0 && r.risks.length === 0 && !r.ideas && (
+          {r.clientEngagements.length === 0 && r.meetings.length === 0 && r.risks.length === 0 && !r.ideas && (
             <p className="text-xs text-(--rs-neutral-grey-400) italic">Report submitted with no entries.</p>
           )}
         </div>

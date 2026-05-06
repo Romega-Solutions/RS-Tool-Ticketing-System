@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { Pencil, Check, X, Loader2, UserPlus, Eye, EyeOff } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Pencil, Check, X, Loader2, UserPlus, Eye, EyeOff, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { createClient } from '@/lib/supabase/client';
 
 export type UserRow = {
   id: number;
@@ -17,6 +18,19 @@ export type UserRow = {
 };
 
 const ROLE_OPTIONS = ['ic', 'lead', 'admin'];
+
+const DEPARTMENTS = [
+  'AI & Technology',
+  'Design',
+  'Social Media',
+  'Marketing & Brand Content',
+  'Sales & Account Management',
+  'Recruitment',
+  'Human Resources',
+  'Finance & Bookkeeping',
+  'Market Research & Analytics',
+  'Executive & Admin',
+];
 
 const ROLE_BADGE: Record<string, string> = {
   admin:   'bg-purple-100 text-purple-700 border-purple-200',
@@ -45,6 +59,39 @@ const EMPTY_FORM: NewUserForm = {
 
 export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] }) {
   const [userList, setUserList] = useState<UserRow[]>(initialUsers);
+  const [liveAlert, setLiveAlert] = useState<string | null>(null);
+  const alertTimer = useRef<ReturnType<typeof setTimeout>>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+    const channel = supabase
+      .channel('users-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'users' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newUser = payload.new as UserRow;
+            setUserList(prev => {
+              if (prev.some(u => u.id === newUser.id)) return prev;
+              return [...prev, newUser].sort((a, b) => a.name.localeCompare(b.name));
+            });
+            setLiveAlert(`${newUser.name || 'Someone'} just joined!`);
+            if (alertTimer.current) clearTimeout(alertTimer.current);
+            alertTimer.current = setTimeout(() => setLiveAlert(null), 6000);
+          } else if (payload.eventType === 'UPDATE') {
+            const updated = payload.new as UserRow;
+            setUserList(prev => prev.map(u => u.id === updated.id ? { ...u, ...updated } : u));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+      if (alertTimer.current) clearTimeout(alertTimer.current);
+    };
+  }, []);
 
   // Edit existing user
   const [editingId, setEditingId]   = useState<number | null>(null);
@@ -121,6 +168,17 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
 
   return (
     <div className="space-y-3">
+      {liveAlert && (
+        <div className="flex items-center gap-2.5 bg-green-50 border border-green-200 text-green-700 px-4 py-2.5 rounded-lg text-sm">
+          <span className="relative flex h-2.5 w-2.5 shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500" />
+          </span>
+          <Users className="w-4 h-4 shrink-0" />
+          {liveAlert}
+        </div>
+      )}
+
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>
       )}
@@ -290,9 +348,12 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
                     {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </Field>
-                <Field label="Team">
-                  <input value={newForm.team} onChange={e => setNewForm(f => ({ ...f, team: e.target.value }))}
-                    className={inputCls} placeholder="e.g. Tech or Design" />
+                <Field label="Department">
+                  <select value={newForm.team} onChange={e => setNewForm(f => ({ ...f, team: e.target.value }))}
+                    className={inputCls}>
+                    <option value="">— Select —</option>
+                    {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
                 </Field>
               </div>
 

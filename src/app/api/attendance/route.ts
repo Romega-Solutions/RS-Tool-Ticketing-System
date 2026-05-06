@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
-import { db } from '@/db';
-import { users, attendance } from '@/db/schema';
-import { eq, and, inArray } from 'drizzle-orm';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { canAccessReports } from '@/lib/rbac';
 
 export const runtime = 'nodejs';
@@ -54,12 +52,26 @@ function countWorkdaysInMonth(yearMonth: string): number {
   return count;
 }
 
+type AttendanceRow = {
+  id: number;
+  user_id: number;
+  week_start: string;
+  monday_status: string | null;
+  tuesday_status: string | null;
+  wednesday_status: string | null;
+  thursday_status: string | null;
+  friday_status: string | null;
+  notes: string | null;
+  submitted_at: string | null;
+};
+
 export async function GET(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   if (!canAccessReports(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
 
   const { searchParams } = new URL(req.url);
+  const admin = createAdminClient();
 
   const monthParam = searchParams.get('month');
   if (monthParam) {
@@ -68,29 +80,34 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Invalid month format (YYYY-MM)' }, { status: 400 });
     }
 
-    const teamUsers = session.role === 'admin'
-      ? await db.select({ id: users.id, name: users.name, team: users.team, role: users.role })
-          .from(users).where(eq(users.isActive, 1))
-      : await db.select({ id: users.id, name: users.name, team: users.team, role: users.role })
-          .from(users).where(and(eq(users.isActive, 1), eq(users.team, session.team ?? '')));
+    let usersQuery = admin.from('users').select('id, name, team, role').eq('is_active', 1);
+    if (session.role !== 'admin') {
+      usersQuery = usersQuery.eq('team', session.team ?? '');
+    }
+    const { data: teamUsers = [] } = await usersQuery;
 
-    const userIds = teamUsers.map(u => u.id);
-    const records = userIds.length > 0
-      ? await db.select().from(attendance)
-          .where(and(inArray(attendance.userId, userIds), inArray(attendance.weekStart, mondays)))
-      : [];
+    const userIds = teamUsers.map((u: { id: number }) => u.id);
+    let records: AttendanceRow[] = [];
+    if (userIds.length > 0) {
+      const { data } = await admin
+        .from('attendance')
+        .select('*')
+        .in('user_id', userIds)
+        .in('week_start', mondays);
+      records = (data ?? []) as AttendanceRow[];
+    }
 
-    const DAY_STATUS_COLS = ['mondayStatus', 'tuesdayStatus', 'wednesdayStatus', 'thursdayStatus', 'fridayStatus'] as const;
+    const DAY_COLS = ['monday_status', 'tuesday_status', 'wednesday_status', 'thursday_status', 'friday_status'] as const;
     const workdays = countWorkdaysInMonth(monthParam);
 
-    const summary = teamUsers.map(user => {
-      const userRecs = records.filter(r => r.userId === user.id);
+    const summary = teamUsers.map((user: { id: number; name: string; team: string | null; role: string }) => {
+      const userRecs = records.filter(r => r.user_id === user.id);
       let present = 0, wfh = 0, leave = 0, absent = 0;
       for (const rec of userRecs) {
-        for (const col of DAY_STATUS_COLS) {
+        for (const col of DAY_COLS) {
           const val = rec[col];
           if (val === 'present') present++;
-          else if (val === 'wfh')  wfh++;
+          else if (val === 'wfh')   wfh++;
           else if (val === 'leave') leave++;
           else if (val === 'absent') absent++;
         }
@@ -98,7 +115,26 @@ export async function GET(req: Request) {
       return { userId: user.id, name: user.name, team: user.team, role: user.role, present, wfh, leave, absent, workdays };
     });
 
-    return NextResponse.json({ month: monthParam, summary, workdays });
+    // Fetch timesheet hours for the month
+    const lastDayNum = new Date(Number(monthParam.split('-')[0]), Number(monthParam.split('-')[1]), 0).getDate();
+    const monthStart = `${monthParam}-01`;
+    const monthEnd   = `${monthParam}-${String(lastDayNum).padStart(2, '0')}`;
+    const monthTsMap: Record<number, number> = {};
+    if (userIds.length > 0) {
+      const { data: tsRows = [] } = await admin
+        .from('timesheets')
+        .select('user_id, duration_seconds')
+        .in('user_id', userIds)
+        .gte('date', monthStart)
+        .lte('date', monthEnd)
+        .not('duration_seconds', 'is', null);
+      for (const ts of tsRows as { user_id: number; duration_seconds: number }[]) {
+        monthTsMap[ts.user_id] = (monthTsMap[ts.user_id] ?? 0) + ts.duration_seconds;
+      }
+    }
+
+    const summaryWithHours = summary.map(row => ({ ...row, totalSeconds: monthTsMap[row.userId] ?? 0 }));
+    return NextResponse.json({ month: monthParam, summary: summaryWithHours, workdays });
   }
 
   const weekParam = searchParams.get('week');
@@ -107,15 +143,55 @@ export async function GET(req: Request) {
   const weekStart = getMondayOfWeek(weekParam);
   if (!weekStart) return NextResponse.json({ error: 'week must be a Monday date (YYYY-MM-DD)' }, { status: 400 });
 
-  const records = await db.select().from(attendance).where(eq(attendance.weekStart, weekStart));
+  const { data: rawRecords = [] } = await admin
+    .from('attendance')
+    .select('*')
+    .eq('week_start', weekStart);
 
-  const teamUsers = session.role === 'admin'
-    ? await db.select({ id: users.id, name: users.name, team: users.team, role: users.role })
-        .from(users).where(eq(users.isActive, 1))
-    : await db.select({ id: users.id, name: users.name, team: users.team, role: users.role })
-        .from(users).where(and(eq(users.isActive, 1), eq(users.team, session.team ?? '')));
+  let usersQuery = admin.from('users').select('id, name, team, role').eq('is_active', 1);
+  if (session.role !== 'admin') {
+    usersQuery = usersQuery.eq('team', session.team ?? '');
+  }
+  const { data: teamUsers = [] } = await usersQuery;
 
-  return NextResponse.json({ weekStart, records, users: teamUsers });
+  // Map snake_case DB rows to camelCase for the client
+  const records = (rawRecords as AttendanceRow[]).map(r => ({
+    id:               r.id,
+    userId:           r.user_id,
+    weekStart:        r.week_start,
+    mondayStatus:     r.monday_status,
+    tuesdayStatus:    r.tuesday_status,
+    wednesdayStatus:  r.wednesday_status,
+    thursdayStatus:   r.thursday_status,
+    fridayStatus:     r.friday_status,
+    notes:            r.notes,
+    submittedAt:      r.submitted_at,
+  }));
+
+  // Build Mon–Fri ISO date strings for timesheet lookup
+  const weekDates: string[] = [];
+  const base = new Date(weekStart + 'T00:00:00');
+  for (let i = 0; i < 5; i++) {
+    weekDates.push(toLocalISO(new Date(base.getTime() + i * 86400000)));
+  }
+
+  // Fetch timesheet durations per user per day (multiple sessions per day summed)
+  const userIds = (teamUsers as { id: number }[]).map(u => u.id);
+  const timesheetsByDay: Record<string, number> = {}; // "userId:date" → seconds
+  if (userIds.length > 0) {
+    const { data: tsRows = [] } = await admin
+      .from('timesheets')
+      .select('user_id, date, duration_seconds')
+      .in('user_id', userIds)
+      .in('date', weekDates)
+      .not('duration_seconds', 'is', null);
+    for (const ts of tsRows as { user_id: number; date: string; duration_seconds: number }[]) {
+      const key = `${ts.user_id}:${ts.date}`;
+      timesheetsByDay[key] = (timesheetsByDay[key] ?? 0) + ts.duration_seconds;
+    }
+  }
+
+  return NextResponse.json({ weekStart, records, users: teamUsers, timesheetsByDay });
 }
 
 export async function POST(req: Request) {
@@ -140,35 +216,31 @@ export async function POST(req: Request) {
     dayValues[day] = val || null;
   }
 
-  const [existing] = await db.select().from(attendance)
-    .where(and(eq(attendance.userId, session.id), eq(attendance.weekStart, weekStart)));
+  const admin = createAdminClient();
+  const { data: existing } = await admin
+    .from('attendance')
+    .select('id')
+    .eq('user_id', session.id)
+    .eq('week_start', weekStart)
+    .maybeSingle();
 
   const now = new Date().toISOString();
+  const payload = {
+    monday_status:    dayValues.monday,
+    tuesday_status:   dayValues.tuesday,
+    wednesday_status: dayValues.wednesday,
+    thursday_status:  dayValues.thursday,
+    friday_status:    dayValues.friday,
+    notes:            body.notes?.trim() || null,
+    submitted_at:     now,
+    updated_at:       now,
+  };
 
   if (existing) {
-    await db.update(attendance).set({
-      mondayStatus:    dayValues.monday,
-      tuesdayStatus:   dayValues.tuesday,
-      wednesdayStatus: dayValues.wednesday,
-      thursdayStatus:  dayValues.thursday,
-      fridayStatus:    dayValues.friday,
-      notes:           body.notes?.trim() || null,
-      submittedAt:     now,
-    }).where(eq(attendance.id, existing.id));
+    await admin.from('attendance').update(payload).eq('id', existing.id);
     return NextResponse.json({ success: true, action: 'updated' });
   }
 
-  await db.insert(attendance).values({
-    userId:          session.id,
-    weekStart,
-    mondayStatus:    dayValues.monday,
-    tuesdayStatus:   dayValues.tuesday,
-    wednesdayStatus: dayValues.wednesday,
-    thursdayStatus:  dayValues.thursday,
-    fridayStatus:    dayValues.friday,
-    notes:           body.notes?.trim() || null,
-    submittedAt:     now,
-  });
-
+  await admin.from('attendance').insert({ user_id: session.id, week_start: weekStart, ...payload });
   return NextResponse.json({ success: true, action: 'created' });
 }

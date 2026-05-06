@@ -1,28 +1,30 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { canAccessAdmin } from '@/lib/rbac';
-import { db } from '@/db';
-import { users } from '@/db/schema';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { UserManagementTable } from '@/components/user-management-table';
 
 export default async function AdminUsersPage() {
   const session = await getSession();
   if (!session || !canAccessAdmin(session.role)) redirect('/dashboard');
 
-  const allUsers = await db
-    .select({
-      id:            users.id,
-      username:      users.username,
-      name:          users.name,
-      email:         users.email,
-      role:          users.role,
-      team:          users.team,
-      jobTitle:      users.jobTitle,
-      planeMemberId: users.planeMemberId,
-      isActive:      users.isActive,
-    })
-    .from(users)
-    .orderBy(users.name);
+  const admin = createAdminClient();
+  const { data: rawUsers = [] } = await admin
+    .from('users')
+    .select('id, username, name, email, role, team, job_title, plane_member_id, is_active')
+    .order('name');
+
+  const allUsers = rawUsers.map((u: Record<string, unknown>) => ({
+    id:            u.id as number,
+    username:      u.username as string,
+    name:          u.name as string,
+    email:         u.email as string,
+    role:          u.role as string,
+    team:          u.team as string | null,
+    jobTitle:      u.job_title as string | null,
+    planeMemberId: u.plane_member_id as string | null,
+    isActive:      Boolean(u.is_active),
+  }));
 
   return (
     <div className="space-y-6">

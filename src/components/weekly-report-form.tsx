@@ -9,6 +9,7 @@ import { ChevronLeft, ChevronRight, Plus, Trash2, Loader2, CheckCircle2, AlertCi
 
 interface ClientEngagement { activity: string; date: string; details: string; }
 interface Risk { description: string; resolution: string; escalation: string; }
+interface Meeting { title: string; date: string; participants: string; notes: string; }
 interface PlanePending { project: string; title: string; status: string; statusGroup: string; targetDate: string | null; }
 interface PlaneAccomplishment { project: string; title: string; completedAt: string; }
 
@@ -56,8 +57,9 @@ export function WeeklyReportForm({ planeMemberId }: { planeMemberId: string | nu
 
   // Form state
   const [engagements, setEngagements] = useState<ClientEngagement[]>([]);
-  const [risks, setRisks] = useState<Risk[]>([]);
-  const [ideas, setIdeas] = useState('');
+  const [meetings,    setMeetings]    = useState<Meeting[]>([]);
+  const [risks,       setRisks]       = useState<Risk[]>([]);
+  const [ideas,       setIdeas]       = useState('');
 
   // Load state
   const [loading,   setLoading]   = useState(true);
@@ -78,14 +80,16 @@ export function WeeklyReportForm({ planeMemberId }: { planeMemberId: string | nu
     setSaveState('idle');
     fetch(`/api/weekly-report?week=${weekStart}`)
       .then(r => r.json())
-      .then((d: { report?: { clientEngagements: ClientEngagement[]; risks: Risk[]; ideas: string; submittedAt: string | null } | null }) => {
+      .then((d: { report?: { clientEngagements: ClientEngagement[]; risks: Risk[]; meetings: Meeting[]; ideas: string; submittedAt: string | null } | null }) => {
         if (d.report) {
           setEngagements(d.report.clientEngagements ?? []);
+          setMeetings(d.report.meetings ?? []);
           setRisks(d.report.risks ?? []);
           setIdeas(d.report.ideas ?? '');
           setLastSaved(d.report.submittedAt);
         } else {
           setEngagements([]);
+          setMeetings([]);
           setRisks([]);
           setIdeas('');
           setLastSaved(null);
@@ -120,7 +124,7 @@ export function WeeklyReportForm({ planeMemberId }: { planeMemberId: string | nu
       const res = await fetch('/api/weekly-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ weekStart, clientEngagements: engagements, risks, ideas }),
+        body: JSON.stringify({ weekStart, clientEngagements: engagements, meetings, risks, ideas }),
       });
       if (!res.ok) throw new Error();
       setSaveState('saved');
@@ -132,6 +136,12 @@ export function WeeklyReportForm({ planeMemberId }: { planeMemberId: string | nu
       setSaving(false);
     }
   };
+
+  // ── Meeting helpers
+  const addMeeting    = () => setMeetings(m => [...m, { title: '', date: '', participants: '', notes: '' }]);
+  const updateMeeting = (i: number, field: keyof Meeting, val: string) =>
+    setMeetings(m => m.map((r, idx) => idx === i ? { ...r, [field]: val } : r));
+  const removeMeeting = (i: number) => setMeetings(m => m.filter((_, idx) => idx !== i));
 
   // ── Engagement helpers
   const addEngagement  = () => setEngagements(e => [...e, { activity: '', date: '', details: '' }]);
@@ -241,7 +251,79 @@ export function WeeklyReportForm({ planeMemberId }: { planeMemberId: string | nu
             </CardContent>
           </Card>
 
-          {/* ── Section 2: Risks / Issues / Roadblocks */}
+          {/* ── Section 2: Meetings */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-serif">Meetings</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {meetings.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[560px]">
+                    <thead>
+                      <tr className="border-b border-(--rs-neutral-grey-200) text-left">
+                        <th className="pb-2 pr-3 font-medium text-(--rs-neutral-grey-600) w-[28%]">Title</th>
+                        <th className="pb-2 pr-3 font-medium text-(--rs-neutral-grey-600) w-28">Date</th>
+                        <th className="pb-2 pr-3 font-medium text-(--rs-neutral-grey-600) w-[25%]">Participants</th>
+                        <th className="pb-2 pr-3 font-medium text-(--rs-neutral-grey-600)">Notes / Outcome</th>
+                        <th className="pb-2 w-8" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-(--rs-neutral-grey-100)">
+                      {meetings.map((row, i) => (
+                        <tr key={i}>
+                          <td className="py-2 pr-3">
+                            <input
+                              className="w-full text-sm border border-(--rs-neutral-grey-200) rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-(--rs-primary-400)"
+                              value={row.title}
+                              onChange={e => updateMeeting(i, 'title', e.target.value)}
+                              placeholder="Meeting title"
+                            />
+                          </td>
+                          <td className="py-2 pr-3">
+                            <input
+                              type="date"
+                              className="w-full text-sm border border-(--rs-neutral-grey-200) rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-(--rs-primary-400)"
+                              value={row.date}
+                              onChange={e => updateMeeting(i, 'date', e.target.value)}
+                            />
+                          </td>
+                          <td className="py-2 pr-3">
+                            <input
+                              className="w-full text-sm border border-(--rs-neutral-grey-200) rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-(--rs-primary-400)"
+                              value={row.participants}
+                              onChange={e => updateMeeting(i, 'participants', e.target.value)}
+                              placeholder="Who attended"
+                            />
+                          </td>
+                          <td className="py-2 pr-3">
+                            <input
+                              className="w-full text-sm border border-(--rs-neutral-grey-200) rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-(--rs-primary-400)"
+                              value={row.notes}
+                              onChange={e => updateMeeting(i, 'notes', e.target.value)}
+                              placeholder="Outcome / key decisions"
+                            />
+                          </td>
+                          <td className="py-2">
+                            <button onClick={() => removeMeeting(i)} className="text-(--rs-neutral-grey-400) hover:text-red-500 transition-colors">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-sm text-(--rs-neutral-grey-400) italic">No meetings logged yet.</p>
+              )}
+              <Button variant="outline" size="sm" onClick={addMeeting} className="gap-1.5">
+                <Plus className="w-3.5 h-3.5" /> Add Meeting
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* ── Section 3: Risks / Issues / Roadblocks */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-serif">Risks / Issues / Roadblocks</CardTitle>
@@ -307,7 +389,7 @@ export function WeeklyReportForm({ planeMemberId }: { planeMemberId: string | nu
             </CardContent>
           </Card>
 
-          {/* ── Section 3: Ideas / Recommendations */}
+          {/* ── Section 4: Ideas / Recommendations */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-serif">Ideas / Recommendations</CardTitle>
@@ -323,7 +405,7 @@ export function WeeklyReportForm({ planeMemberId }: { planeMemberId: string | nu
             </CardContent>
           </Card>
 
-          {/* ── Section 4: Plane auto-populated data */}
+          {/* ── Section 5: Plane auto-populated data */}
           {!planeConfigured ? (
             <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md px-4 py-3 text-sm">
               {planeMemberId

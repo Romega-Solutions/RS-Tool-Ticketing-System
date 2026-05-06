@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { db } from '@/db';
-import { users } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
 
@@ -25,40 +23,51 @@ export async function POST(req: Request) {
 
   if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
 
-  // Users can only self-assign ic or lead — admin/ceo requires admin action
-  const selfAssignableRole = ['ic', 'lead'].includes(role) ? role : 'ic';
+  const email = user.email;
+
+  // @romega-solutions.com can pick IC or Lead; all other domains are forced to IC
+  const domain = email.split('@')[1] ?? '';
+  const isRomega = domain === 'romega-solutions.com';
+  const selfAssignableRole = isRomega && ['ic', 'lead', 'ceo'].includes(role) ? role : 'ic';
 
   const now = new Date().toISOString();
-  const email = user.email;
   const emailPrefix = email.split('@')[0].replace(/[^a-z0-9_]/gi, '_').toLowerCase();
 
-  const [existing] = await db.select({ id: users.id, role: users.role })
-    .from(users).where(eq(users.email, email));
+  const admin = createAdminClient();
+  const { data: existing } = await admin
+    .from('users')
+    .select('id, role')
+    .eq('email', email)
+    .maybeSingle();
 
   if (existing) {
     // Preserve role if they're already admin/ceo — never self-downgrade
     const protectedRoles = ['admin', 'ceo', 'owner', 'superadmin'];
-    const finalRole = protectedRoles.includes(existing.role.toLowerCase())
+    const finalRole = protectedRoles.includes((existing.role as string).toLowerCase())
       ? existing.role
       : selfAssignableRole;
 
-    await db.update(users)
-      .set({ name, team, jobTitle, role: finalRole, updatedAt: now })
-      .where(eq(users.id, existing.id));
+    await admin.from('users').update({
+      name,
+      team,
+      job_title: jobTitle,
+      role: finalRole,
+      updated_at: now,
+    }).eq('id', existing.id);
   } else {
     // First time — create the row (fallback if callback didn't create it)
-    await db.insert(users).values({
-      username:     emailPrefix,
-      passwordHash: '',
+    await admin.from('users').upsert({
+      username:      emailPrefix,
+      password_hash: '',
       name,
       email,
-      role:         selfAssignableRole,
+      role:          selfAssignableRole,
       team,
-      jobTitle,
-      isActive:     1,
-      createdAt:    now,
-      updatedAt:    now,
-    }).onConflictDoNothing();
+      job_title:     jobTitle,
+      is_active:     1,
+      created_at:    now,
+      updated_at:    now,
+    }, { onConflict: 'email', ignoreDuplicates: true });
   }
 
   return NextResponse.json({ success: true });

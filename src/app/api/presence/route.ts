@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
-import { db } from '@/db';
-import { timesheets } from '@/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { getOnline, getMyEntry } from '@/lib/presence';
 
 export const runtime = 'nodejs';
@@ -19,11 +17,14 @@ export async function GET() {
   if (myEntry) {
     openSession = { timesheetId: -1, clockedInAt: myEntry.clockedInAt };
   } else {
-    const [open] = await db
-      .select({ id: timesheets.id, clockedInAt: timesheets.clockedInAt })
-      .from(timesheets)
-      .where(and(eq(timesheets.userId, session.id), isNull(timesheets.clockedOutAt)));
-    if (open) openSession = { timesheetId: open.id, clockedInAt: open.clockedInAt };
+    const admin = createAdminClient();
+    const { data: open } = await admin
+      .from('timesheets')
+      .select('id, clocked_in_at')
+      .eq('user_id', session.id)
+      .is('clocked_out_at', null)
+      .maybeSingle();
+    if (open) openSession = { timesheetId: open.id, clockedInAt: open.clocked_in_at };
   }
 
   return NextResponse.json({ online, openSession });

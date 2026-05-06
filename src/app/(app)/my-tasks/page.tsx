@@ -1,21 +1,7 @@
-import { cookies } from 'next/headers';
-import { verifyToken } from '@/lib/auth';
-import { db } from '@/db';
-import { users } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { getSession } from '@/lib/session';
 import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems, PlaneWorkItem, PlaneState } from '@/lib/plane';
 import { Card, CardContent } from "@/components/ui/card";
 import { TaskCard } from '@/components/task-card';
-
-async function getSessionUser() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('session_token')?.value;
-  if (!token) return null;
-  const payload = await verifyToken(token);
-  if (!payload?.id) return null;
-  const [user] = await db.select().from(users).where(eq(users.id, Number(payload.id)));
-  return user ?? null;
-}
 
 export type TaskWithProject = PlaneWorkItem & {
   _projectName: string;
@@ -38,7 +24,7 @@ export default async function MyTasksPage({
   searchParams: Promise<{ tab?: string }>;
 }) {
   const { tab = 'active' } = await searchParams;
-  const sessionUser = await getSessionUser();
+  const sessionUser = await getSession();
   const planeMemberId = sessionUser?.planeMemberId ?? null;
 
   let activeTasks:    TaskWithProject[] = [];

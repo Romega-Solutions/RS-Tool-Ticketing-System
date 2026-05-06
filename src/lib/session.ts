@@ -1,7 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
-import { db } from '@/db';
-import { users } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { normalizeRole, type AppRole } from '@/lib/rbac';
 
 export type SessionUser = {
@@ -21,12 +19,14 @@ export async function getSession(): Promise<SessionUser | null> {
     const { data: { user }, error } = await supabase.auth.getUser();
     if (error || !user?.email) return null;
 
-    const [dbUser] = await db
-      .select()
-      .from(users)
-      .where(eq(users.email, user.email));
+    const admin = createAdminClient();
+    const { data: dbUser } = await admin
+      .from('users')
+      .select('id, email, name, username, role, team, job_title, plane_member_id, is_active')
+      .eq('email', user.email)
+      .maybeSingle();
 
-    if (!dbUser || !dbUser.isActive) return null;
+    if (!dbUser || !dbUser.is_active) return null;
 
     return {
       id: dbUser.id,
@@ -35,8 +35,8 @@ export async function getSession(): Promise<SessionUser | null> {
       username: dbUser.username,
       role: normalizeRole(dbUser.role),
       team: dbUser.team ?? null,
-      jobTitle: dbUser.jobTitle ?? null,
-      planeMemberId: dbUser.planeMemberId ?? null,
+      jobTitle: dbUser.job_title ?? null,
+      planeMemberId: dbUser.plane_member_id ?? null,
     };
   } catch {
     return null;

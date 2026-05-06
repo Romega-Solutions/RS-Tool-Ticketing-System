@@ -1,8 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/db';
-import { users } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { createAdminClient } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
 
@@ -44,27 +42,32 @@ export async function GET(request: NextRequest) {
   const authUser = session.user;
   const email    = authUser.email!;
 
+  const admin = createAdminClient();
+
   // Create public.users row if this is a fresh sign-up
-  const [existing] = await db.select({ id: users.id, team: users.team })
-    .from(users).where(eq(users.email, email));
+  const { data: existing } = await admin
+    .from('users')
+    .select('id, team')
+    .eq('email', email)
+    .maybeSingle();
 
   let isNewUser = false;
   if (!existing) {
     const emailPrefix = email.split('@')[0].replace(/[^a-z0-9_]/gi, '_').toLowerCase();
     const name = (authUser.user_metadata?.name as string | undefined)?.trim() || emailPrefix;
     const now = new Date().toISOString();
-    await db.insert(users).values({
-      username:     emailPrefix,
-      passwordHash: '',
+    await admin.from('users').upsert({
+      username:      emailPrefix,
+      password_hash: '',
       name,
       email,
-      role:         'ic',
-      team:         null,
-      jobTitle:     null,
-      isActive:     1,
-      createdAt:    now,
-      updatedAt:    now,
-    }).onConflictDoNothing();
+      role:          'ic',
+      team:          null,
+      job_title:     null,
+      is_active:     1,
+      created_at:    now,
+      updated_at:    now,
+    }, { onConflict: 'email', ignoreDuplicates: true });
     isNewUser = true;
   }
 
