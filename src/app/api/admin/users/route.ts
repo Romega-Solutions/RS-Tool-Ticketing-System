@@ -17,10 +17,11 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const admin = createAdminClient();
-  const { data: allUsers = [] } = await admin
+  const { data } = await admin
     .from('users')
     .select('id, username, name, email, role, team, job_title, plane_member_id, is_active')
     .order('name');
+  const allUsers = data ?? [];
 
   const mapped = allUsers.map((u: Record<string, unknown>) => ({
     id:            u.id,

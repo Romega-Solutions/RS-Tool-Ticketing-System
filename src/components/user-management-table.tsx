@@ -14,7 +14,7 @@ export type UserRow = {
   team: string | null;
   jobTitle: string | null;
   planeMemberId: string | null;
-  isActive: number;
+  isActive: boolean;
 };
 
 const ROLE_OPTIONS = ['ic', 'lead', 'admin'];
@@ -41,7 +41,7 @@ const ROLE_BADGE: Record<string, string> = {
   ic:      'bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-600) border-(--rs-neutral-grey-200)',
 };
 
-type EditState = { role: string; planeMemberId: string; isActive: number };
+type EditState = { role: string; planeMemberId: string; isActive: boolean };
 
 type NewUserForm = {
   email: string;
@@ -95,7 +95,7 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
 
   // Edit existing user
   const [editingId, setEditingId]   = useState<number | null>(null);
-  const [editForm, setEditForm]     = useState<EditState>({ role: '', planeMemberId: '', isActive: 1 });
+  const [editForm, setEditForm]     = useState<EditState>({ role: '', planeMemberId: '', isActive: true });
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState('');
 
@@ -124,7 +124,7 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
           id:            userId,
           role:          editForm.role,
           planeMemberId: editForm.planeMemberId.trim() || null,
-          isActive:      editForm.isActive,
+          isActive:      editForm.isActive ? 1 : 0,
         }),
       });
       const data = (await res.json()) as { user?: UserRow; error?: string };
@@ -249,8 +249,8 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
                       {isEditing ? (
                         <input
                           type="checkbox"
-                          checked={editForm.isActive === 1}
-                          onChange={e => setEditForm(f => ({ ...f, isActive: e.target.checked ? 1 : 0 }))}
+                          checked={editForm.isActive}
+                          onChange={e => setEditForm(f => ({ ...f, isActive: e.target.checked }))}
                           className="w-4 h-4 rounded accent-(--rs-primary-500)"
                         />
                       ) : (

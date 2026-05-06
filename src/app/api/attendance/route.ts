@@ -84,7 +84,8 @@ export async function GET(req: Request) {
     if (session.role !== 'admin') {
       usersQuery = usersQuery.eq('team', session.team ?? '');
     }
-    const { data: teamUsers = [] } = await usersQuery;
+    const { data: teamUsersData } = await usersQuery;
+    const teamUsers = teamUsersData ?? [];
 
     const userIds = teamUsers.map((u: { id: number }) => u.id);
     let records: AttendanceRow[] = [];
@@ -121,14 +122,14 @@ export async function GET(req: Request) {
     const monthEnd   = `${monthParam}-${String(lastDayNum).padStart(2, '0')}`;
     const monthTsMap: Record<number, number> = {};
     if (userIds.length > 0) {
-      const { data: tsRows = [] } = await admin
+      const { data: tsData1 } = await admin
         .from('timesheets')
         .select('user_id, duration_seconds')
         .in('user_id', userIds)
         .gte('date', monthStart)
         .lte('date', monthEnd)
         .not('duration_seconds', 'is', null);
-      for (const ts of tsRows as { user_id: number; duration_seconds: number }[]) {
+      for (const ts of (tsData1 ?? []) as { user_id: number; duration_seconds: number }[]) {
         monthTsMap[ts.user_id] = (monthTsMap[ts.user_id] ?? 0) + ts.duration_seconds;
       }
     }
@@ -143,16 +144,18 @@ export async function GET(req: Request) {
   const weekStart = getMondayOfWeek(weekParam);
   if (!weekStart) return NextResponse.json({ error: 'week must be a Monday date (YYYY-MM-DD)' }, { status: 400 });
 
-  const { data: rawRecords = [] } = await admin
+  const { data: rawRecordsData } = await admin
     .from('attendance')
     .select('*')
     .eq('week_start', weekStart);
+  const rawRecords = rawRecordsData ?? [];
 
   let usersQuery = admin.from('users').select('id, name, team, role').eq('is_active', 1);
   if (session.role !== 'admin') {
     usersQuery = usersQuery.eq('team', session.team ?? '');
   }
-  const { data: teamUsers = [] } = await usersQuery;
+  const { data: teamUsersData2 } = await usersQuery;
+  const teamUsers = teamUsersData2 ?? [];
 
   // Map snake_case DB rows to camelCase for the client
   const records = (rawRecords as AttendanceRow[]).map(r => ({
@@ -179,13 +182,13 @@ export async function GET(req: Request) {
   const userIds = (teamUsers as { id: number }[]).map(u => u.id);
   const timesheetsByDay: Record<string, number> = {}; // "userId:date" → seconds
   if (userIds.length > 0) {
-    const { data: tsRows = [] } = await admin
+    const { data: tsData2 } = await admin
       .from('timesheets')
       .select('user_id, date, duration_seconds')
       .in('user_id', userIds)
       .in('date', weekDates)
       .not('duration_seconds', 'is', null);
-    for (const ts of tsRows as { user_id: number; date: string; duration_seconds: number }[]) {
+    for (const ts of (tsData2 ?? []) as { user_id: number; date: string; duration_seconds: number }[]) {
       const key = `${ts.user_id}:${ts.date}`;
       timesheetsByDay[key] = (timesheetsByDay[key] ?? 0) + ts.duration_seconds;
     }

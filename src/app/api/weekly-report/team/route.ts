@@ -40,7 +40,8 @@ export async function GET(req: Request) {
     usersQuery = usersQuery.eq('team', session.team ?? '');
   }
 
-  const { data: allUsers = [] } = await usersQuery;
+  const { data: allUsersData } = await usersQuery;
+  const allUsers = allUsersData ?? [];
 
   const userIds = allUsers.map((u: { id: number }) => u.id);
   let reports: Array<Record<string, unknown>> = [];

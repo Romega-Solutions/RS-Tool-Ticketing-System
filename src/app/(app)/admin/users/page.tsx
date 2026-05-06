@@ -9,10 +9,11 @@ export default async function AdminUsersPage() {
   if (!session || !canAccessAdmin(session.role)) redirect('/dashboard');
 
   const admin = createAdminClient();
-  const { data: rawUsers = [] } = await admin
+  const { data } = await admin
     .from('users')
     .select('id, username, name, email, role, team, job_title, plane_member_id, is_active')
     .order('name');
+  const rawUsers = data ?? [];
 
   const allUsers = rawUsers.map((u: Record<string, unknown>) => ({
     id:            u.id as number,
