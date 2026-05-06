@@ -3,8 +3,6 @@ import { getProjects, getProjectStates, getWorkspaceMembers, getWorkItems, build
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { AlertCircle, Clock } from "lucide-react";
 import Link from 'next/link';
-import { canAccessReports } from '@/lib/rbac';
-import { PresencePanel } from '@/components/presence-panel';
 
 function stateGroup(item: { state_detail?: { group?: string } }) {
   return (item.state_detail?.group ?? '').toLowerCase();
@@ -14,11 +12,50 @@ const PRIORITY_ICON: Record<string, string> = {
   urgent: '🔴', high: '🔴', medium: '🟡', low: '🟢', none: '⚪',
 };
 
+const MEDITATION_NOTES = [
+  "Pause for one full breath before your next task. A calmer start usually creates a clearer outcome.",
+  "You do not need to solve the whole week at once. Finish the next right thing with steady attention.",
+  "Let your shoulders drop, unclench your jaw, and return to the work in front of you.",
+  "Progress feels lighter when your mind is not arguing with the present moment.",
+  "Even on a busy day, a quiet minute can reset your thinking more than rushing can.",
+  "Your pace does not need to be frantic to be effective. Consistency is stronger than strain.",
+];
+
+async function getDashboardQuote(userSeed: number) {
+  try {
+    const res = await fetch('https://zenquotes.io/api/random', {
+      next: { revalidate: 21600 },
+    });
+    if (res.ok) {
+      const data = await res.json() as Array<{ q?: string; a?: string }>;
+      const quote = data[0];
+      if (quote?.q && quote?.a) {
+        return {
+          text: quote.q,
+          author: quote.a,
+          source: 'ZenQuotes',
+        };
+      }
+    }
+  } catch {
+    // Fall back to local quotes if the external API is unavailable.
+  }
+
+  const fallback = MEDITATION_NOTES[userSeed % MEDITATION_NOTES.length];
+  return {
+    text: fallback,
+    author: 'Romega Dashboard',
+    source: null,
+  };
+}
+
 export default async function DashboardPage() {
   const sessionUser = await getSession();
   const planeMemberId = sessionUser?.planeMemberId ?? null;
   const isFriday = new Date().getDay() === 5;
-  const isLeadOrAdmin = canAccessReports(sessionUser?.role ?? 'ic');
+  const firstName = sessionUser?.name?.trim().split(' ')[0] ?? 'there';
+  const userSeed = new Date().getDate() + (sessionUser?.id ?? 0);
+  const meditationQuote = await getDashboardQuote(userSeed);
 
   type ItemMeta = {
     id: string;
@@ -128,8 +165,26 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* Who's In — lead/admin only */}
-      {isLeadOrAdmin && <PresencePanel />}
+      <Card className="overflow-hidden border-(--rs-primary-200) bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(244,249,255,0.98))] shadow-sm">
+        <CardContent className="flex flex-col gap-4 px-5 py-5 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-(--rs-primary-600)">Daily Reflection</p>
+            <h2 className="font-serif text-lg font-semibold text-(--rs-neutral-grey-900)">
+              Take a beat, {firstName}
+            </h2>
+            <p className="max-w-2xl text-sm leading-6 text-(--rs-neutral-grey-700)">
+              “{meditationQuote.text}”
+            </p>
+            <p className="text-xs font-medium text-(--rs-neutral-grey-500)">
+              {meditationQuote.author}
+              {meditationQuote.source ? ` · ${meditationQuote.source}` : ''}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-(--rs-primary-200) bg-white/80 px-4 py-3 text-xs text-(--rs-neutral-grey-500) shadow-sm">
+            A little calm belongs in the dashboard too.
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Project Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

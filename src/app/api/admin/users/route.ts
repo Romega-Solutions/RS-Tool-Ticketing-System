@@ -6,6 +6,15 @@ import { hash } from 'bcryptjs';
 
 export const runtime = 'nodejs';
 
+// All known role strings — any value outside this set is rejected
+const VALID_ROLES = new Set([
+  'ic', 'lead', 'admin', 'ceo', 'owner', 'superadmin',
+  'team_lead', 'teamlead', 'manager', 'tl',
+]);
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const USERNAME_RE = /^[a-z0-9_.-]{2,64}$/;
+
 async function requireAdmin() {
   const session = await getSession();
   if (!session || !canAccessAdmin(session.role)) return null;
@@ -70,8 +79,17 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+  if (!EMAIL_RE.test(email)) {
+    return NextResponse.json({ error: 'Invalid email address' }, { status: 400 });
+  }
+  if (!USERNAME_RE.test(username)) {
+    return NextResponse.json({ error: 'Username must be 2–64 chars: letters, numbers, _ . -' }, { status: 400 });
+  }
   if (password.length < 8) {
     return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
+  }
+  if (role !== 'ic' && !VALID_ROLES.has(role)) {
+    return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
   }
 
   const admin = createAdminClient();
@@ -154,6 +172,18 @@ export async function PATCH(req: Request) {
   }
 
   if (!body.id) return NextResponse.json({ error: 'id is required' }, { status: 400 });
+
+  // Admins cannot modify their own account through this endpoint
+  if (body.id === session.id) {
+    return NextResponse.json({ error: 'Use the profile page to edit your own account' }, { status: 403 });
+  }
+
+  if (body.role !== undefined && !VALID_ROLES.has(body.role)) {
+    return NextResponse.json({ error: `Invalid role. Allowed: ${[...VALID_ROLES].join(', ')}` }, { status: 400 });
+  }
+  if (body.isActive !== undefined && body.isActive !== 0 && body.isActive !== 1) {
+    return NextResponse.json({ error: 'isActive must be 0 or 1' }, { status: 400 });
+  }
 
   const updates: Record<string, unknown> = {};
   if (body.role !== undefined)          updates.role           = body.role;

@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { LogIn, LogOut, Loader2 } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { AlertTriangle, Loader2, LogIn, LogOut } from 'lucide-react';
 
 type WidgetState = 'loading' | 'out' | 'in';
+type PendingAction = 'clock-in' | 'clock-out' | null;
 
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
@@ -13,35 +14,141 @@ function formatDuration(seconds: number): string {
   return `${h}h ${m}m`;
 }
 
+function ClockConfirmDialog({
+  action,
+  noteDraft,
+  onNoteChange,
+  onCancel,
+  onConfirm,
+  busy,
+  elapsed,
+}: {
+  action: Exclude<PendingAction, null>;
+  noteDraft: string;
+  onNoteChange: (value: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+  busy: boolean;
+  elapsed: number;
+}) {
+  const isClockIn = action === 'clock-in';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4">
+      <div className="w-full max-w-md rounded-2xl border border-(--rs-neutral-grey-200) bg-white shadow-2xl">
+        <div className="border-b border-(--rs-neutral-grey-100) px-5 py-4">
+          <div className="flex items-start gap-3">
+            <div className="mt-0.5 rounded-full bg-yellow-100 p-2 text-yellow-700">
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-base font-serif font-semibold text-(--rs-neutral-grey-900)">
+                {isClockIn ? 'Confirm Clock-In' : 'Confirm Clock-Out'}
+              </h2>
+              <p className="mt-1 text-sm text-(--rs-neutral-grey-500)">
+                {isClockIn
+                  ? 'Double-check before starting your session. This will make you appear as clocked in across the app.'
+                  : 'Double-check before ending your current session. This will stop your live timer everywhere.'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-4 px-5 py-4">
+          <div className="rounded-xl border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-4 py-3 text-sm text-(--rs-neutral-grey-700)">
+            {isClockIn ? (
+              <p>Starting now will begin a new tracked session immediately.</p>
+            ) : (
+              <p>Current tracked duration: <span className="font-semibold text-(--rs-neutral-grey-900)">{formatDuration(elapsed)}</span></p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="clock-note" className="block text-sm font-medium text-(--rs-neutral-grey-700)">
+              {isClockIn ? 'Session note (optional)' : 'Session note'}
+            </label>
+            <p className="mt-1 text-xs text-(--rs-neutral-grey-400)">
+              {isClockIn
+                ? 'Add a quick purpose, location, or reminder for this clock-in.'
+                : 'Review the note attached to this session before clocking out.'}
+            </p>
+            <textarea
+              id="clock-note"
+              value={noteDraft}
+              onChange={e => onNoteChange(e.target.value)}
+              rows={4}
+              maxLength={300}
+              readOnly={!isClockIn}
+              placeholder={isClockIn ? 'Example: Client meeting in Makati office, finishing API review.' : 'No note saved for this session.'}
+              className="mt-2 w-full rounded-lg border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm text-(--rs-neutral-grey-800) outline-none transition-colors focus:border-(--rs-primary-300) focus:ring-3 focus:ring-(--rs-primary-100) disabled:opacity-60 read-only:bg-(--rs-neutral-grey-50) read-only:text-(--rs-neutral-grey-500)"
+            />
+            <div className="mt-1 text-right text-[10px] text-(--rs-neutral-grey-400)">
+              {noteDraft.length}/300
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-(--rs-neutral-grey-100) px-5 py-4">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="rounded-lg border border-(--rs-neutral-grey-200) px-3 py-2 text-sm font-medium text-(--rs-neutral-grey-600) transition-colors hover:bg-(--rs-neutral-grey-50) disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50 ${
+              isClockIn ? 'bg-(--rs-primary-600) hover:bg-(--rs-primary-700)' : 'bg-red-600 hover:bg-red-700'
+            }`}
+          >
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : isClockIn ? <LogIn className="w-4 h-4" /> : <LogOut className="w-4 h-4" />}
+            {isClockIn ? 'Start Clock-In' : 'Confirm Clock-Out'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collapsed?: boolean; variant?: 'sidebar' | 'topbar' }) {
   const [state, setState] = useState<WidgetState>('loading');
-  const [clockedInAt, setClockedInAt] = useState<string | null>(null);
+  const [sessionNote, setSessionNote] = useState('');
+  const [noteSaved, setNoteSaved] = useState(true);
+  const [noteDraft, setNoteDraft] = useState('');
   const [elapsed, setElapsed] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const startTimer = useCallback((sinceIso: string) => {
+  function startTimer(sinceIso: string) {
     if (timerRef.current) clearInterval(timerRef.current);
     const calc = () => Math.max(0, Math.round((Date.now() - new Date(sinceIso).getTime()) / 1000));
     setElapsed(calc());
     timerRef.current = setInterval(() => setElapsed(calc()), 1000);
-  }, []);
+  }
 
-  const stopTimer = useCallback(() => {
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+  function stopTimer() {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
     setElapsed(0);
-  }, []);
+  }
 
-  // Restore state on mount / page refresh
   useEffect(() => {
     let cancelled = false;
     fetch('/api/presence')
       .then(r => r.json())
-      .then((data: { openSession?: { clockedInAt: string } | null }) => {
+      .then((data: { openSession?: { clockedInAt: string; notes?: string | null } | null }) => {
         if (cancelled) return;
         if (data.openSession?.clockedInAt) {
-          setClockedInAt(data.openSession.clockedInAt);
+          setSessionNote(data.openSession.notes ?? '');
+          setNoteSaved(true);
           startTimer(data.openSession.clockedInAt);
           setState('in');
         } else {
@@ -53,27 +160,53 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
       cancelled = true;
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [startTimer]);
+  }, []);
 
-  const handleClockIn = async () => {
+  function openClockInConfirm() {
+    setError('');
+    setNoteDraft(sessionNote);
+    setPendingAction('clock-in');
+  }
+
+  function openClockOutConfirm() {
+    setError('');
+    setPendingAction('clock-out');
+  }
+
+  function closeConfirm() {
+    if (busy) return;
+    setPendingAction(null);
+  }
+
+  async function confirmClockIn() {
     setBusy(true);
     setError('');
     try {
-      const res = await fetch('/api/presence/clock-in', { method: 'POST' });
-      const data = (await res.json()) as { clockedInAt?: string; error?: string };
-      if (!res.ok) { setError(data.error ?? 'Failed to clock in'); return; }
+      const res = await fetch('/api/presence/clock-in', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmed: true, notes: noteDraft }),
+      });
+      const data = (await res.json()) as { clockedInAt?: string; error?: string; notes?: string | null; noteSaved?: boolean };
+      if (!res.ok) {
+        setError(data.error ?? 'Failed to clock in');
+        return;
+      }
+
       const ts = data.clockedInAt!;
-      setClockedInAt(ts);
+      setSessionNote(data.notes ?? noteDraft.trim());
+      setNoteSaved(data.noteSaved ?? true);
       startTimer(ts);
       setState('in');
+      setPendingAction(null);
     } catch {
       setError('Request failed');
     } finally {
       setBusy(false);
     }
-  };
+  }
 
-  const handleClockOut = async () => {
+  async function confirmClockOut() {
     setBusy(true);
     setError('');
     try {
@@ -83,109 +216,139 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
         setError(data.error ?? 'Failed to clock out');
         return;
       }
+
       stopTimer();
-      setClockedInAt(null);
+      setSessionNote('');
+      setNoteDraft('');
+      setNoteSaved(true);
       setState('out');
+      setPendingAction(null);
     } catch {
       setError('Request failed');
     } finally {
       setBusy(false);
     }
-  };
-
-  // ── Topbar variant ─────────────────────────────────────────────────────────────
-  if (variant === 'topbar') {
-    if (state === 'loading') {
-      return (
-        <div className="flex items-center gap-1.5 text-(--rs-neutral-grey-400) text-xs">
-          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-        </div>
-      );
-    }
-
-    if (state === 'in') {
-      return (
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-            {formatDuration(elapsed)}
-          </div>
-          <button
-            onClick={handleClockOut}
-            disabled={busy}
-            className="flex items-center gap-1 text-xs font-medium text-(--rs-neutral-grey-500) hover:text-red-600 border border-(--rs-neutral-grey-200) hover:border-red-300 px-2.5 py-1 rounded-full transition-colors disabled:opacity-50"
-            title="Clock Out"
-          >
-            {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <LogOut className="w-3 h-3" />}
-            <span className="hidden sm:inline">Clock Out</span>
-          </button>
-        </div>
-      );
-    }
-
-    return (
-      <button
-        onClick={handleClockIn}
-        disabled={busy}
-        className="flex items-center gap-1.5 text-xs font-medium text-(--rs-neutral-grey-600) hover:text-(--rs-primary-600) border border-(--rs-neutral-grey-200) hover:border-(--rs-primary-300) px-2.5 py-1 rounded-full transition-colors disabled:opacity-50"
-        title="Clock In"
-      >
-        {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <LogIn className="w-3 h-3" />}
-        <span className="hidden sm:inline">Clock In</span>
-      </button>
-    );
   }
 
-  // ── Sidebar: collapsed icon-only ───────────────────────────────────────────────
-  if (collapsed) {
+  const noteHint = state === 'in' && sessionNote
+    ? sessionNote
+    : state === 'in' && !noteSaved
+    ? 'This session is active, but note saving is not available until the database update is applied.'
+    : '';
+
+  if (variant === 'topbar') {
     return (
-      <button
-        onClick={state === 'out' ? handleClockIn : handleClockOut}
-        disabled={busy}
-        className={`w-full flex justify-center py-2 transition-colors ${
-          state === 'in'
-            ? 'text-green-400 hover:text-green-300'
-            : 'text-white/40 hover:text-white/80'
-        }`}
-        title={state === 'in' ? `Clocked in · ${formatDuration(elapsed)}` : 'Clock In'}
-      >
-        {busy
-          ? <Loader2 className="w-4 h-4 animate-spin" />
-          : state === 'in'
-          ? <span className="w-2 h-2 rounded-full bg-green-400 mt-1" />
-          : <LogIn className="w-4 h-4" />}
-      </button>
+      <>
+        {state === 'loading' ? (
+          <div className="flex items-center gap-1.5 text-(--rs-neutral-grey-400) text-xs">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          </div>
+        ) : state === 'in' ? (
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+              {formatDuration(elapsed)}
+            </div>
+            <button
+              onClick={openClockOutConfirm}
+              disabled={busy}
+              className="flex items-center gap-1 text-xs font-medium text-(--rs-neutral-grey-500) hover:text-red-600 border border-(--rs-neutral-grey-200) hover:border-red-300 px-2.5 py-1 rounded-full transition-colors disabled:opacity-50"
+              title={noteHint || 'Clock Out'}
+            >
+              {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <LogOut className="w-3 h-3" />}
+              <span className="hidden sm:inline">Clock Out</span>
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={openClockInConfirm}
+            disabled={busy}
+            className="flex items-center gap-1.5 rounded-full border border-(--rs-neutral-grey-300) bg-(--rs-neutral-grey-900) px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-(--rs-neutral-grey-800) hover:border-(--rs-neutral-grey-800) disabled:opacity-50"
+            title="Clock In"
+          >
+            {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <LogIn className="w-3 h-3" />}
+            <span className="hidden sm:inline">Clock In</span>
+          </button>
+        )}
+        {pendingAction && (
+          <ClockConfirmDialog
+            action={pendingAction}
+            noteDraft={pendingAction === 'clock-in' ? noteDraft : sessionNote}
+            onNoteChange={setNoteDraft}
+            onCancel={closeConfirm}
+            onConfirm={pendingAction === 'clock-in' ? confirmClockIn : confirmClockOut}
+            busy={busy}
+            elapsed={elapsed}
+          />
+        )}
+      </>
     );
   }
 
   return (
-    <div className="space-y-1">
-      {state === 'in' ? (
-        <>
-          <div className="flex items-center gap-2 px-3 py-1 text-xs text-green-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-            <span className="font-medium">Clocked in · {formatDuration(elapsed)}</span>
-          </div>
-          <button
-            onClick={handleClockOut}
-            disabled={busy}
-            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs rounded-md font-medium text-red-400/80 hover:text-red-300 hover:bg-white/6 transition-colors disabled:opacity-50"
-          >
-            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5 shrink-0" />}
-            Clock Out
-          </button>
-        </>
-      ) : (
+    <>
+      {collapsed ? (
         <button
-          onClick={handleClockIn}
-          disabled={busy}
-          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs rounded-md font-medium text-white/50 hover:text-white/90 hover:bg-white/6 transition-colors disabled:opacity-50"
+          onClick={state === 'out' ? openClockInConfirm : openClockOutConfirm}
+          disabled={busy || state === 'loading'}
+          className={`w-full flex justify-center py-2 transition-colors ${
+            state === 'in'
+              ? 'text-green-400 hover:text-green-300'
+              : 'text-white/40 hover:text-white/80'
+          } disabled:opacity-50`}
+          title={state === 'in' ? `Clocked in · ${formatDuration(elapsed)}` : 'Clock In'}
         >
-          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5 shrink-0" />}
-          Clock In
+          {busy || state === 'loading'
+            ? <Loader2 className="w-4 h-4 animate-spin" />
+            : state === 'in'
+            ? <span className="w-2 h-2 rounded-full bg-green-400 mt-1" />
+            : <LogIn className="w-4 h-4" />}
         </button>
+      ) : (
+        <div className="space-y-1">
+          {state === 'in' ? (
+            <>
+              <div className="flex items-center gap-2 px-3 py-1 text-xs text-green-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
+                <span className="font-medium">Clocked in · {formatDuration(elapsed)}</span>
+              </div>
+              {noteHint && (
+                <p className="px-3 text-[10px] text-white/50 line-clamp-2">{noteHint}</p>
+              )}
+              <button
+                onClick={openClockOutConfirm}
+                disabled={busy}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs rounded-md font-medium text-red-400/80 hover:text-red-300 hover:bg-white/6 transition-colors disabled:opacity-50"
+              >
+                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5 shrink-0" />}
+                Clock Out
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={openClockInConfirm}
+              disabled={busy}
+              className="w-full flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-(--rs-neutral-grey-900) shadow-sm transition-colors hover:bg-(--rs-neutral-grey-100) disabled:opacity-50"
+            >
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5 shrink-0" />}
+              Clock In
+            </button>
+          )}
+          {error && <p className="px-3 text-[10px] text-red-400">{error}</p>}
+        </div>
       )}
-      {error && <p className="px-3 text-[10px] text-red-400">{error}</p>}
-    </div>
+
+      {pendingAction && (
+        <ClockConfirmDialog
+          action={pendingAction}
+          noteDraft={pendingAction === 'clock-in' ? noteDraft : sessionNote}
+          onNoteChange={setNoteDraft}
+          onCancel={closeConfirm}
+          onConfirm={pendingAction === 'clock-in' ? confirmClockIn : confirmClockOut}
+          busy={busy}
+          elapsed={elapsed}
+        />
+      )}
+    </>
   );
 }

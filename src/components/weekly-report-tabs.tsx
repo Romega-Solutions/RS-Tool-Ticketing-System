@@ -8,13 +8,15 @@ interface Props {
   myReportSlot:  ReactNode;
   teamSlot:      ReactNode;
   overviewSlot:  ReactNode;
+  overviewLabel?: string;
 }
 
-export function TabSwitcher({ role, myReportSlot, teamSlot, overviewSlot }: Props) {
+export function TabSwitcher({ role, myReportSlot, teamSlot, overviewSlot, overviewLabel }: Props) {
+  const resolvedOverviewLabel = overviewLabel ?? (role === 'admin' ? 'All Teams' : 'Team Overview');
   const tabs = [];
-  if (myReportSlot)  tabs.push({ key: 'my',       label: 'My Report'     });
-  if (teamSlot)      tabs.push({ key: 'team',     label: 'Team Reports'  });
-  if (overviewSlot)  tabs.push({ key: 'overview', label: 'All Teams'     });
+  if (myReportSlot)  tabs.push({ key: 'my',       label: 'My Report'    });
+  if (teamSlot)      tabs.push({ key: 'team',      label: 'Team Reports' });
+  if (overviewSlot)  tabs.push({ key: 'overview',  label: resolvedOverviewLabel });
 
   const [active, setActive] = useState(tabs[0]?.key ?? 'my');
 

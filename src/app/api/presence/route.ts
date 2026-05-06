@@ -12,19 +12,30 @@ export async function GET() {
   const online = getOnline(session.role, session.team, session.id);
 
   const myEntry = getMyEntry(session.id);
-  let openSession: { timesheetId: number; clockedInAt: string } | null = null;
+  let openSession: { timesheetId: number; clockedInAt: string; notes: string | null } | null = null;
 
   if (myEntry) {
-    openSession = { timesheetId: -1, clockedInAt: myEntry.clockedInAt };
+    openSession = { timesheetId: -1, clockedInAt: myEntry.clockedInAt, notes: null };
   } else {
     const admin = createAdminClient();
-    const { data: open } = await admin
+    const { data: openWithNotes, error } = await admin
       .from('timesheets')
-      .select('id, clocked_in_at')
+      .select('id, clocked_in_at, notes')
       .eq('user_id', session.id)
       .is('clocked_out_at', null)
       .maybeSingle();
-    if (open) openSession = { timesheetId: open.id, clockedInAt: open.clocked_in_at };
+
+    if (error) {
+      const { data: openFallback } = await admin
+        .from('timesheets')
+        .select('id, clocked_in_at')
+        .eq('user_id', session.id)
+        .is('clocked_out_at', null)
+        .maybeSingle();
+      if (openFallback) openSession = { timesheetId: openFallback.id, clockedInAt: openFallback.clocked_in_at, notes: null };
+    } else if (openWithNotes) {
+      openSession = { timesheetId: openWithNotes.id, clockedInAt: openWithNotes.clocked_in_at, notes: openWithNotes.notes ?? null };
+    }
   }
 
   return NextResponse.json({ online, openSession });

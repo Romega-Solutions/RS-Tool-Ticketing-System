@@ -7,6 +7,7 @@ export const runtime = 'nodejs';
 
 const VALID_STATUSES = new Set(['present', 'absent', 'wfh', 'leave', '']);
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] as const;
+const DAY_COLS = ['monday_status', 'tuesday_status', 'wednesday_status', 'thursday_status', 'friday_status'] as const;
 
 function toLocalISO(d: Date): string {
   const y = d.getFullYear();
@@ -50,6 +51,19 @@ function countWorkdaysInMonth(yearMonth: string): number {
     if (dow !== 0 && dow !== 6) count++;
   }
   return count;
+}
+
+function getWeekStartForDate(date: Date): string {
+  const monday = new Date(date);
+  const dow = monday.getDay();
+  monday.setDate(monday.getDate() + (dow === 0 ? -6 : 1 - dow));
+  return toLocalISO(monday);
+}
+
+function getWeekdayColumnForDate(date: Date): typeof DAY_COLS[number] | null {
+  const dow = date.getDay();
+  if (dow === 0 || dow === 6) return null;
+  return DAY_COLS[dow - 1];
 }
 
 type AttendanceRow = {
@@ -98,21 +112,27 @@ export async function GET(req: Request) {
       records = (data ?? []) as AttendanceRow[];
     }
 
-    const DAY_COLS = ['monday_status', 'tuesday_status', 'wednesday_status', 'thursday_status', 'friday_status'] as const;
     const workdays = countWorkdaysInMonth(monthParam);
+    const recordsByUserAndWeek = new Map(records.map(record => [`${record.user_id}:${record.week_start}`, record] as const));
 
     const summary = teamUsers.map((user: { id: number; name: string; team: string | null; role: string }) => {
-      const userRecs = records.filter(r => r.user_id === user.id);
       let present = 0, wfh = 0, leave = 0, absent = 0;
-      for (const rec of userRecs) {
-        for (const col of DAY_COLS) {
-          const val = rec[col];
-          if (val === 'present') present++;
-          else if (val === 'wfh')   wfh++;
-          else if (val === 'leave') leave++;
-          else if (val === 'absent') absent++;
-        }
+      const [year, month] = monthParam.split('-').map(Number);
+      const lastDay = new Date(year, month, 0).getDate();
+
+      for (let day = 1; day <= lastDay; day++) {
+        const date = new Date(year, month - 1, day);
+        const col = getWeekdayColumnForDate(date);
+        if (!col) continue;
+
+        const rec = recordsByUserAndWeek.get(`${user.id}:${getWeekStartForDate(date)}`);
+        const val = rec?.[col];
+        if (val === 'present') present++;
+        else if (val === 'wfh') wfh++;
+        else if (val === 'leave') leave++;
+        else if (val === 'absent') absent++;
       }
+
       return { userId: user.id, name: user.name, team: user.team, role: user.role, present, wfh, leave, absent, workdays };
     });
 
@@ -171,10 +191,10 @@ export async function GET(req: Request) {
     submittedAt:      r.submitted_at,
   }));
 
-  // Build Mon–Fri ISO date strings for timesheet lookup
+  // Build Mon–Sun ISO date strings for timesheet lookup
   const weekDates: string[] = [];
   const base = new Date(weekStart + 'T00:00:00');
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 7; i++) {
     weekDates.push(toLocalISO(new Date(base.getTime() + i * 86400000)));
   }
 

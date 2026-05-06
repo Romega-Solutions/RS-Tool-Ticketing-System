@@ -4,20 +4,20 @@ import React, { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2 } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import type { AppRole } from "@/lib/rbac";
 import { canAccessReports, canAccessAdmin, roleLabel } from "@/lib/rbac";
 
 const navItems = [
-  { href: "/dashboard",   label: "Dashboard",      icon: LayoutDashboard, category: "main"    },
-  { href: "/my-tasks",    label: "My Tasks",        icon: CheckSquare,     category: "main"    },
-  { href: "/projects",    label: "Projects",        icon: Briefcase,       category: "main"    },
-  { href: "/reports",         label: "Weekly Reports",  icon: FileText,        category: "main"    },
-  { href: "/weekly-report",   label: "Status Report",   icon: ClipboardList,   category: "main"    },
-  { href: "/attendance",  label: "Attendance",      icon: Calendar,        category: "reports" },
-  { href: "/admin/users", label: "User Management", icon: Shield,          category: "admin"   },
+  { href: "/dashboard",     label: "Dashboard",      icon: LayoutDashboard, category: "main"    },
+  { href: "/my-tasks",      label: "My Tasks",        icon: CheckSquare,     category: "main"    },
+  { href: "/projects",      label: "Projects",        icon: Briefcase,       category: "main"    },
+  { href: "/reports",       label: "Weekly Reports",  icon: FileText,        category: "main"    },
+  { href: "/weekly-report", label: "Status Report",   icon: ClipboardList,   category: "main"    },
+  { href: "/attendance",    label: "Attendance",      icon: Calendar,        category: "reports" },
+  { href: "/admin/users",   label: "User Management", icon: Shield,          category: "admin"   },
 ];
 
 function NavLink({
@@ -148,7 +148,7 @@ function LogoutButton({ collapsed = false }: { collapsed?: boolean }) {
   );
 }
 
-export function AppSidebar({ role }: { role: AppRole }) {
+export function AppSidebar({ role, userName, team }: { role: AppRole; userName: string; team: string | null }) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -210,19 +210,35 @@ export function AppSidebar({ role }: { role: AppRole }) {
       {/* Footer */}
       <div className={`${collapsed ? "px-2 py-3" : "px-3 py-3"} border-t border-white/10 space-y-0.5`}>
         {!collapsed && (
-          <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-widest text-white/35">
-            {roleLabel(role)}
+          <div className="mb-2 rounded-2xl border border-white/10 bg-white/6 px-3.5 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-white truncate">{userName}</p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-white/70">
+                    <Shield className="w-3 h-3" />
+                    {roleLabel(role)}
+                  </span>
+                  {team && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-white/8 px-2 py-0.5 text-[10px] font-medium text-white/60">
+                      <Building2 className="w-3 h-3" />
+                      {team}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
         <Link
           href="/profile"
-          className={`flex items-center gap-3 px-3 py-2 hover:bg-white/6 rounded-md text-white/60 hover:text-white/90 transition-colors text-sm font-medium ${
+          className={`flex items-center gap-3 px-3 py-2 hover:bg-white/8 rounded-xl text-white/70 hover:text-white transition-colors text-sm font-medium ${
             collapsed ? "justify-center" : ""
           }`}
           title={collapsed ? "Profile" : undefined}
         >
           <User className="w-4 h-4 shrink-0" />
-          {!collapsed && "Profile"}
+          {!collapsed && "My Profile"}
         </Link>
         <LogoutButton collapsed={collapsed} />
       </div>

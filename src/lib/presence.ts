@@ -20,8 +20,10 @@ type Subscriber = {
 // ── In-memory store ────────────────────────────────────────────────────────────
 // Resets on server restart — acceptable for a small internal tool.
 
-const online: Map<number, PresenceUser>  = new Map();
-const subs:   Map<number, Subscriber>    = new Map();
+const online:    Map<number, PresenceUser>                          = new Map();
+const subs:      Map<number, Subscriber>                            = new Map();
+// Live subscribers see ALL clock events regardless of role/team.
+const liveSubs:  Map<number, ReadableStreamDefaultController>       = new Map();
 const enc = new TextEncoder();
 
 // ── Visibility check ───────────────────────────────────────────────────────────
@@ -49,9 +51,11 @@ function sendEvent(ctrl: ReadableStreamDefaultController, payload: unknown) {
   }
 }
 
-function broadcast(
-  event: { type: 'clock_in'; user: PresenceUser } | { type: 'clock_out'; userId: number },
-) {
+type PresenceEvent =
+  | { type: 'clock_in';  user: PresenceUser }
+  | { type: 'clock_out'; userId: number };
+
+function broadcast(event: PresenceEvent) {
   for (const [, sub] of subs) {
     const target: PresenceUser | undefined =
       event.type === 'clock_in'
@@ -63,15 +67,24 @@ function broadcast(
   }
 }
 
+function broadcastToLive(event: PresenceEvent) {
+  for (const [, ctrl] of liveSubs) {
+    sendEvent(ctrl, event);
+  }
+}
+
 // ── Public API ─────────────────────────────────────────────────────────────────
 
 export function clockIn(user: PresenceUser): void {
   online.set(user.userId, user);
   broadcast({ type: 'clock_in', user });
+  broadcastToLive({ type: 'clock_in', user });
 }
 
 export function clockOut(userId: number): void {
+  // Broadcast before deleting so filtered subs can still resolve the user
   broadcast({ type: 'clock_out', userId });
+  broadcastToLive({ type: 'clock_out', userId });
   online.delete(userId);
 }
 
@@ -95,4 +108,17 @@ export function subscribe(sub: Subscriber): void {
 
 export function unsubscribe(userId: number): void {
   subs.delete(userId);
+}
+
+/** All online users — no visibility filter. Used by the live page. */
+export function getAllOnline(): PresenceUser[] {
+  return [...online.values()];
+}
+
+export function subscribeToLive(userId: number, ctrl: ReadableStreamDefaultController): void {
+  liveSubs.set(userId, ctrl);
+}
+
+export function unsubscribeFromLive(userId: number): void {
+  liveSubs.delete(userId);
 }

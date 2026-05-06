@@ -1,20 +1,22 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { DataExportButtons } from '@/components/data-export-buttons';
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface ClientEngagement { activity: string; date: string; details: string; }
 interface Risk { description: string; resolution: string; escalation: string; }
+interface Meeting { title: string; date: string; participants: string; notes: string; }
 
 interface MemberReport {
   user: { id: number; name: string; role: string; team: string | null; jobTitle: string | null };
   report: {
     id: number; weekStart: string; submittedAt: string | null;
-    clientEngagements: ClientEngagement[]; risks: Risk[]; ideas: string;
+    clientEngagements: ClientEngagement[]; risks: Risk[]; meetings: Meeting[]; ideas: string;
   } | null;
 }
 
@@ -173,7 +175,7 @@ function TeamCard({ group }: { group: TeamGroup }) {
           <div className="border-t border-(--rs-neutral-grey-100) pt-3 space-y-4">
             {group.members.filter(m => m.report?.submittedAt).map(m => {
               const r = m.report!;
-              const hasContent = r.clientEngagements.length > 0 || r.risks.length > 0 || r.ideas;
+              const hasContent = r.clientEngagements.length > 0 || r.risks.length > 0 || (r.meetings?.length ?? 0) > 0 || r.ideas;
               return (
                 <div key={m.user.id} className="space-y-2">
                   <div className="flex items-center gap-2">
@@ -201,6 +203,17 @@ function TeamCard({ group }: { group: TeamGroup }) {
                       {r.risks.map((risk, i) => (
                         <p key={i} className={`text-xs ${risk.escalation === 'Yes' ? 'text-red-600 font-medium' : 'text-(--rs-neutral-grey-700)'}`}>
                           • {risk.description}{risk.escalation === 'Yes' ? ' ⚠ Escalation needed' : ''}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
+                  {r.meetings && r.meetings.length > 0 && (
+                    <div className="ml-7 space-y-0.5">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-(--rs-neutral-grey-400)">Meetings</p>
+                      {r.meetings.map((mtg, i) => (
+                        <p key={i} className="text-xs text-(--rs-neutral-grey-700)">
+                          • {mtg.title}{mtg.participants ? ` — ${mtg.participants}` : ''}{mtg.notes ? ` (${mtg.notes})` : ''}
                         </p>
                       ))}
                     </div>
@@ -234,20 +247,25 @@ export function CeoReportsOverview() {
   const [error,   setError]   = useState('');
   const [members, setMembers] = useState<MemberReport[]>([]);
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setError('');
+  useEffect(() => {
+    let cancelled = false;
     fetch(`/api/weekly-report/team?week=${weekStart}`)
       .then(r => r.json())
       .then((d: { members?: MemberReport[]; error?: string }) => {
+        if (cancelled) return;
         if (d.error) { setError(d.error); return; }
         setMembers(d.members ?? []);
       })
-      .catch(() => setError('Failed to load reports.'))
-      .finally(() => setLoading(false));
+      .catch(() => { if (!cancelled) setError('Failed to load reports.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [weekStart]);
 
-  useEffect(() => { load(); }, [load]);
+  function changeWeekOffset(updater: number | ((value: number) => number)) {
+    setLoading(true);
+    setError('');
+    setWeekOffset(updater);
+  }
 
   // Group members by team
   const groups = members.reduce<Record<string, MemberReport[]>>((acc, m) => {
@@ -264,25 +282,50 @@ export function CeoReportsOverview() {
   const totalMembers   = members.length;
   const totalSubmitted = members.filter(m => m.report?.submittedAt).length;
   const totalEscalations = members.flatMap(m => (m.report?.risks ?? []).filter(r => r.escalation === 'Yes')).length;
+  const exportRows = members.map(member => ({
+    member: member.user.name,
+    team: member.user.team ?? 'Unassigned',
+    role: member.user.role,
+    job_title: member.user.jobTitle ?? '',
+    submitted: member.report?.submittedAt ? 'Yes' : 'No',
+    submitted_at: member.report?.submittedAt ?? '',
+    engagements: member.report?.clientEngagements.length ?? 0,
+    meetings: member.report?.meetings.length ?? 0,
+    risks: member.report?.risks.length ?? 0,
+    escalations: (member.report?.risks ?? []).filter(r => r.escalation === 'Yes').length,
+    ideas: member.report?.ideas ?? '',
+  }));
 
   return (
     <div className="space-y-5">
       {/* Week navigator */}
       <div className="flex items-center gap-3 flex-wrap">
-        <Button variant="outline" size="icon" onClick={() => setWeekOffset(w => w - 1)}>
+        <Button variant="outline" size="icon" onClick={() => changeWeekOffset(w => w - 1)}>
           <ChevronLeft className="w-4 h-4" />
         </Button>
         <span className="text-sm font-medium text-(--rs-neutral-grey-900) min-w-44 text-center">
           {fmtDate(monday)} – {fmtDate(friday)}
         </span>
-        <Button variant="outline" size="icon" onClick={() => setWeekOffset(w => w + 1)} disabled={weekOffset >= 0}>
+        <Button variant="outline" size="icon" onClick={() => changeWeekOffset(w => w + 1)} disabled={weekOffset >= 0}>
           <ChevronRight className="w-4 h-4" />
         </Button>
         {weekOffset !== 0 && (
-          <Button variant="ghost" size="sm" onClick={() => setWeekOffset(0)} className="text-(--rs-primary-500) text-sm">
+          <Button variant="ghost" size="sm" onClick={() => changeWeekOffset(0)} className="text-(--rs-primary-500) text-sm">
             This Week
           </Button>
         )}
+        <div className="ml-auto">
+          <DataExportButtons
+            baseName={`weekly_reports_overview_${weekStart}`}
+            rows={exportRows}
+            jsonData={{
+              weekStart,
+              totals: { members: totalMembers, submitted: totalSubmitted, escalations: totalEscalations, teams: teamGroups.length },
+              members,
+            }}
+            title="Export Reports"
+          />
+        </div>
       </div>
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">{error}</div>}

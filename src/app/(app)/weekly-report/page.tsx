@@ -1,7 +1,6 @@
 import { getSession } from '@/lib/session';
 import { canAccessReports } from '@/lib/rbac';
 import { WeeklyReportForm } from '@/components/weekly-report-form';
-import { TeamReportsView } from '@/components/team-reports-view';
 import { CeoReportsOverview } from '@/components/ceo-reports-overview';
 import { TabSwitcher } from '@/components/weekly-report-tabs';
 
@@ -19,7 +18,7 @@ export default async function WeeklyReportPage() {
           {isAdmin
             ? 'Org-wide report overview — all teams and escalations at a glance.'
             : isLeadOrAdmin
-            ? 'Submit your weekly report and review your team\'s submissions.'
+            ? 'Submit your weekly report and review your team\'s weekly overview.'
             : 'Submit your weekly status for your lead to review.'}
         </p>
       </div>
@@ -31,12 +30,11 @@ export default async function WeeklyReportPage() {
             <WeeklyReportForm planeMemberId={sessionUser?.planeMemberId ?? null} />
           ) : null
         }
-        teamSlot={
-          isLeadOrAdmin && !isAdmin ? <TeamReportsView /> : null
-        }
+        teamSlot={null}
         overviewSlot={
-          isAdmin ? <CeoReportsOverview /> : null
+          isLeadOrAdmin ? <CeoReportsOverview /> : null
         }
+        overviewLabel={isAdmin ? 'All Teams' : 'Team Overview'}
       />
     </div>
   );

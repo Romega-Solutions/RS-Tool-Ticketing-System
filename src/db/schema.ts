@@ -22,6 +22,7 @@ export const timesheets = pgTable('timesheets', {
   clockedInAt:     text('clocked_in_at').notNull(),
   clockedOutAt:    text('clocked_out_at'),
   durationSeconds: integer('duration_seconds'),
+  notes:           text('notes'),
   date:            text('date').notNull(),
   createdAt:       text('created_at').default(sql`CURRENT_TIMESTAMP`),
 });

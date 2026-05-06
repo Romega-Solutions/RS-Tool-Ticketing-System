@@ -66,29 +66,77 @@ function localDateStr(): string {
   return `${y}-${m}-${day}`;
 }
 
-export async function POST() {
+export async function POST(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  let body: { confirmed?: boolean; notes?: string } = {};
+  try {
+    body = await req.json();
+  } catch {
+    body = {};
+  }
+
+  if (!body.confirmed) {
+    return NextResponse.json({ error: 'Clock-in confirmation is required.' }, { status: 400 });
+  }
+
+  const notes = body.notes?.trim() || null;
+
   const admin = createAdminClient();
-  const { data: existing } = await admin
+  const { data: existingWithNotes, error: existingError } = await admin
     .from('timesheets')
-    .select('id, clocked_in_at')
+    .select('id, clocked_in_at, notes')
     .eq('user_id', session.id)
     .is('clocked_out_at', null)
     .maybeSingle();
 
+  const existing = existingError
+    ? await admin
+        .from('timesheets')
+        .select('id, clocked_in_at')
+        .eq('user_id', session.id)
+        .is('clocked_out_at', null)
+        .maybeSingle()
+        .then(result => result.data)
+    : existingWithNotes;
+
   if (existing) {
     clockIn({ userId: session.id, name: session.name, role: session.role, team: session.team, clockedInAt: existing.clocked_in_at });
-    return NextResponse.json({ timesheetId: existing.id, clockedInAt: existing.clocked_in_at, resumed: true });
+    return NextResponse.json({
+      timesheetId: existing.id,
+      clockedInAt: existing.clocked_in_at,
+      resumed: true,
+      notes: 'notes' in existing ? (existing.notes ?? null) : null,
+      noteSaved: 'notes' in existing,
+    });
   }
 
   const now = new Date().toISOString();
-  const { data: inserted, error: insertErr } = await admin
+  let noteSaved = false;
+  let inserted: { id: number } | null = null;
+  let insertErr: { message?: string } | null = null;
+
+  const insertWithNotes = await admin
     .from('timesheets')
-    .insert({ user_id: session.id, clocked_in_at: now, date: localDateStr() })
+    .insert({ user_id: session.id, clocked_in_at: now, date: localDateStr(), notes })
     .select('id')
     .single();
+
+  inserted = insertWithNotes.data;
+  insertErr = insertWithNotes.error;
+  noteSaved = !insertErr;
+
+  if (insertErr && notes) {
+    const fallbackInsert = await admin
+      .from('timesheets')
+      .insert({ user_id: session.id, clocked_in_at: now, date: localDateStr() })
+      .select('id')
+      .single();
+    inserted = fallbackInsert.data;
+    insertErr = fallbackInsert.error;
+    noteSaved = false;
+  }
 
   if (insertErr || !inserted) {
     console.error('[clock-in] insert error:', insertErr?.message);
@@ -98,5 +146,5 @@ export async function POST() {
   clockIn({ userId: session.id, name: session.name, role: session.role, team: session.team, clockedInAt: now });
   await autoMarkPresent(session.id);
 
-  return NextResponse.json({ timesheetId: inserted.id, clockedInAt: now });
+  return NextResponse.json({ timesheetId: inserted.id, clockedInAt: now, notes, noteSaved });
 }

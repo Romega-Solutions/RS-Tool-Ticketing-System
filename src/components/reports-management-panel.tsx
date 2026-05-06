@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Download, Loader2, RefreshCcw, Users, Copy, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { DataExportButtons } from '@/components/data-export-buttons';
 
 type ReportFile = {
   name: string;
@@ -63,6 +64,18 @@ export function ReportsManagementPanel({ initialFiles = [] }: { initialFiles?: R
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersError, setMembersError] = useState('');
 
+  const fileExportRows = files.map(file => ({
+    name: file.name,
+    size_bytes: file.size,
+    modified_at: file.modifiedAt,
+  }));
+
+  const memberExportRows = (members ?? []).map(member => ({
+    id: member.id,
+    display_name: member.display_name,
+    email: member.email,
+  }));
+
   const loadFiles = async () => {
     setFilesLoading(true);
     setFilesError('');
@@ -99,11 +112,21 @@ export function ReportsManagementPanel({ initialFiles = [] }: { initialFiles?: R
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-lg font-serif">Generated Files</CardTitle>
-            <Button variant="outline" size="sm" onClick={loadFiles} disabled={filesLoading}>
-              {filesLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
-              Refresh
-            </Button>
+            <div>
+              <CardTitle className="text-lg font-serif">Generated Files</CardTitle>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <DataExportButtons
+                baseName="generated_report_files"
+                rows={fileExportRows}
+                jsonData={{ files }}
+                title="Export Files"
+              />
+              <Button variant="outline" size="sm" onClick={loadFiles} disabled={filesLoading}>
+                {filesLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCcw className="w-4 h-4" />}
+                Refresh
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -148,10 +171,18 @@ export function ReportsManagementPanel({ initialFiles = [] }: { initialFiles?: R
                 Copy a member&apos;s Plane ID to paste into their profile.
               </p>
             </div>
-            <Button variant="outline" size="sm" onClick={loadMembers} disabled={membersLoading}>
-              {membersLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
-              {members === null ? 'Load Members' : 'Refresh'}
-            </Button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <DataExportButtons
+                baseName="plane_workspace_members"
+                rows={memberExportRows}
+                jsonData={{ members: members ?? [] }}
+                title="Export Members"
+              />
+              <Button variant="outline" size="sm" onClick={loadMembers} disabled={membersLoading}>
+                {membersLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
+                {members === null ? 'Load Members' : 'Refresh'}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
