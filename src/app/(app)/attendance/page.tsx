@@ -8,14 +8,15 @@ import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock } fro
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type DayKey = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday';
+type DayKey = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 type WeekdayLabel = 'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun';
 
 interface AttendanceRecord {
   id: number; userId: number; weekStart: string;
   mondayStatus: string | null; tuesdayStatus: string | null;
   wednesdayStatus: string | null; thursdayStatus: string | null;
-  fridayStatus: string | null; notes: string | null; submittedAt: string | null;
+  fridayStatus: string | null; saturdayStatus: string | null; sundayStatus: string | null;
+  notes: string | null; submittedAt: string | null;
 }
 
 interface TeamUser { id: number; name: string; team: string | null; role: string; }
@@ -23,7 +24,7 @@ interface TeamUser { id: number; name: string; team: string | null; role: string
 interface MonthlySummary {
   userId: number; name: string; team: string | null; role: string;
   present: number; wfh: number; leave: number; absent: number; workdays: number;
-  totalSeconds: number;
+  weekendWork: number; totalSeconds: number;
 }
 
 interface TimesheetEntry {
@@ -43,11 +44,11 @@ interface DetailDay {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const DAY_KEYS: DayKey[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+const DAY_KEYS: DayKey[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const DAY_LABELS: Record<DayKey, string> = {
   monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri',
+  saturday: 'Sat', sunday: 'Sun',
 };
-const FULL_WEEK_LABELS: WeekdayLabel[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 const STATUS_OPTS = [
   { value: 'present', label: 'Present', color: 'bg-green-100 text-green-700 border-green-300' },
@@ -145,7 +146,7 @@ function TimesheetDetailPanel({
   if (loading) {
     return (
       <tr>
-        <td colSpan={8} className="px-4 py-3 bg-(--rs-neutral-grey-50)">
+        <td colSpan={10} className="px-4 py-3 bg-(--rs-neutral-grey-50)">
           <div className="flex items-center gap-2 text-(--rs-neutral-grey-400) text-xs">
             <Loader2 className="w-3 h-3 animate-spin" />
             Loading clock-in details…
@@ -158,7 +159,7 @@ function TimesheetDetailPanel({
   if (error) {
     return (
       <tr>
-        <td colSpan={8} className="px-4 py-3 bg-red-50">
+        <td colSpan={10} className="px-4 py-3 bg-red-50">
           <p className="text-xs text-red-600">{error}</p>
         </td>
       </tr>
@@ -173,7 +174,7 @@ function TimesheetDetailPanel({
 
   return (
     <tr>
-      <td colSpan={8} className="bg-(--rs-neutral-grey-50) border-b border-(--rs-neutral-grey-100)">
+      <td colSpan={10} className="bg-(--rs-neutral-grey-50) border-b border-(--rs-neutral-grey-100)">
         <div className="px-4 py-3">
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_2fr]">
             <div className="space-y-3">
@@ -269,7 +270,6 @@ export default function AttendancePage() {
   const weekStart = toLocalISO(monday);
   const weekdayDates    = DAY_KEYS.map((_, i) => new Date(monday.getTime() + i * 86400000).getDate());
   const weekdayDateStrs = DAY_KEYS.map((_, i) => toLocalISO(new Date(monday.getTime() + i * 86400000)));
-  const weekDateStrs    = FULL_WEEK_LABELS.map((_, i) => toLocalISO(new Date(monday.getTime() + i * 86400000)));
 
   const [weekLoading,      setWeekLoading]      = useState(true);
   const [weekError,        setWeekError]         = useState('');
@@ -305,9 +305,9 @@ export default function AttendancePage() {
 
   const weeklyExportRows = teamUsers.map(user => {
     const rec = teamRecords.find(r => r.userId === user.id);
-    const weekSeconds = weekDateStrs.reduce((sum, date) => sum + (timesheetsByDay[`${user.id}:${date}`] ?? 0), 0);
-    const saturdaySeconds = timesheetsByDay[`${user.id}:${weekDateStrs[5]}`] ?? 0;
-    const sundaySeconds = timesheetsByDay[`${user.id}:${weekDateStrs[6]}`] ?? 0;
+    const weekSeconds = weekdayDateStrs.reduce((sum, date) => sum + (timesheetsByDay[`${user.id}:${date}`] ?? 0), 0);
+    const saturdaySeconds = timesheetsByDay[`${user.id}:${weekdayDateStrs[5]}`] ?? 0;
+    const sundaySeconds = timesheetsByDay[`${user.id}:${weekdayDateStrs[6]}`] ?? 0;
 
     return {
       member: user.name,
@@ -317,6 +317,8 @@ export default function AttendancePage() {
       wednesday: rec?.wednesdayStatus ?? '',
       thursday: rec?.thursdayStatus ?? '',
       friday: rec?.fridayStatus ?? '',
+      saturday: rec?.saturdayStatus ?? '',
+      sunday: rec?.sundayStatus ?? '',
       saturday_hours: fmtSeconds(saturdaySeconds),
       sunday_hours: fmtSeconds(sundaySeconds),
       week_total_hours: fmtSeconds(weekSeconds),
@@ -331,6 +333,7 @@ export default function AttendancePage() {
     wfh: row.wfh,
     leave: row.leave,
     absent: row.absent,
+    weekend_work_days: row.weekendWork,
     tracked_days: row.present + row.wfh + row.leave + row.absent,
     workdays: monthWorkdays,
     total_hours: fmtSeconds(row.totalSeconds),
@@ -448,7 +451,7 @@ export default function AttendancePage() {
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[580px]">
+                  <table className="w-full text-sm min-w-[760px]">
                     <thead>
                       <tr className="border-b border-(--rs-neutral-grey-200)">
                         <th className="w-6 py-2" />
@@ -465,26 +468,14 @@ export default function AttendancePage() {
                     <tbody>
                       {teamUsers.map(user => {
                         const rec = teamRecords.find(r => r.userId === user.id);
-                        const weekSeconds = weekDateStrs.reduce((sum, d) => sum + (timesheetsByDay[`${user.id}:${d}`] ?? 0), 0);
+                        const weekSeconds = weekdayDateStrs.reduce((sum, d) => sum + (timesheetsByDay[`${user.id}:${d}`] ?? 0), 0);
                         const isExpanded = expandedUserId === user.id;
-                        const detailDays: DetailDay[] = FULL_WEEK_LABELS.map((label, index) => {
-                          if (index < DAY_KEYS.length) {
-                            const dayKey = DAY_KEYS[index];
-                            return {
-                              key: dayKey,
-                              label,
-                              date: weekdayDateStrs[index],
-                              status: rec ? (rec[`${dayKey}Status` as keyof AttendanceRecord] as string | null) : null,
-                            };
-                          }
-
-                          return {
-                            key: label.toLowerCase(),
-                            label,
-                            date: weekDateStrs[index],
-                            status: null,
-                          };
-                        });
+                        const detailDays: DetailDay[] = DAY_KEYS.map((dayKey, index) => ({
+                          key: dayKey,
+                          label: DAY_LABELS[dayKey] as WeekdayLabel,
+                          date: weekdayDateStrs[index],
+                          status: rec ? (rec[`${dayKey}Status` as keyof AttendanceRecord] as string | null) : null,
+                        }));
                         return (
                           <Fragment key={user.id}>
                             <tr
@@ -533,7 +524,7 @@ export default function AttendancePage() {
                       })}
                       {teamUsers.length === 0 && (
                         <tr>
-                          <td colSpan={8} className="text-center py-8 text-(--rs-neutral-grey-400) italic text-sm">
+                          <td colSpan={10} className="text-center py-8 text-(--rs-neutral-grey-400) italic text-sm">
                             No team members found.
                           </td>
                         </tr>
@@ -600,7 +591,7 @@ export default function AttendancePage() {
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[480px]">
+                  <table className="w-full text-sm min-w-[560px]">
                     <thead>
                       <tr className="border-b border-(--rs-neutral-grey-200)">
                         <th className="text-left py-2 pr-4 font-medium text-(--rs-neutral-grey-600) w-40">Member</th>
@@ -608,6 +599,7 @@ export default function AttendancePage() {
                         <th className="text-center py-2 px-3 font-medium text-blue-700">WFH</th>
                         <th className="text-center py-2 px-3 font-medium text-yellow-700">Leave</th>
                         <th className="text-center py-2 px-3 font-medium text-red-700">Absent</th>
+                        <th className="text-center py-2 px-3 font-medium text-purple-700">Weekend</th>
                         <th className="text-center py-2 px-3 font-medium text-(--rs-neutral-grey-500)">Tracked</th>
                         <th className="text-center py-2 px-3 font-medium text-(--rs-primary-600)">Hours</th>
                       </tr>
@@ -635,6 +627,11 @@ export default function AttendancePage() {
                               <span className="font-semibold text-red-700">{row.absent}</span>
                             </td>
                             <td className="text-center py-3 px-3">
+                              {row.weekendWork > 0
+                                ? <span className="font-semibold text-purple-700">{row.weekendWork}</span>
+                                : <span className="text-xs text-(--rs-neutral-grey-300)">—</span>}
+                            </td>
+                            <td className="text-center py-3 px-3">
                               <div className="text-xs text-(--rs-neutral-grey-500)">{tracked}/{monthWorkdays}</div>
                               <div className="text-[10px] text-(--rs-neutral-grey-400)">{pct}% present/WFH</div>
                             </td>
@@ -648,7 +645,7 @@ export default function AttendancePage() {
                       })}
                       {monthlySummary.length === 0 && (
                         <tr>
-                          <td colSpan={7} className="text-center py-8 text-(--rs-neutral-grey-400) italic text-sm">
+                          <td colSpan={8} className="text-center py-8 text-(--rs-neutral-grey-400) italic text-sm">
                             No attendance data for this month.
                           </td>
                         </tr>

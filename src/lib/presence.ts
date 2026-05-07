@@ -122,3 +122,12 @@ export function subscribeToLive(userId: number, ctrl: ReadableStreamDefaultContr
 export function unsubscribeFromLive(userId: number): void {
   liveSubs.delete(userId);
 }
+
+/** Seed users from DB without broadcasting. Used for post-restart hydration. */
+export function seedUsers(users: PresenceUser[]): void {
+  for (const u of users) {
+    if (!online.has(u.userId)) {
+      online.set(u.userId, u);
+    }
+  }
+}

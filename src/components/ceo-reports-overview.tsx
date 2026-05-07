@@ -338,7 +338,7 @@ export function CeoReportsOverview() {
       ) : (
         <>
           {/* Summary bar */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="bg-white border border-(--rs-neutral-grey-200) rounded-lg px-4 py-3 text-center">
               <div className="text-2xl font-bold text-(--rs-neutral-grey-900)">{totalSubmitted}<span className="text-base font-normal text-(--rs-neutral-grey-400)">/{totalMembers}</span></div>
               <div className="text-xs text-(--rs-neutral-grey-500) mt-0.5">Reports submitted</div>

@@ -22,14 +22,15 @@ const inputDisabled =
   'w-full rounded-lg border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-3 py-2.5 text-sm text-(--rs-neutral-grey-400) cursor-not-allowed';
 
 export default function ProfilePage() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [user, setUser] = useState<ProfileUser | null>(null);
+  const [loading, setLoading]                   = useState(true);
+  const [saving, setSaving]                     = useState(false);
+  const [error, setError]                       = useState('');
+  const [success, setSuccess]                   = useState('');
+  const [user, setUser]                         = useState<ProfileUser | null>(null);
+  const [availableTeams, setAvailableTeams]     = useState<string[]>([]);
+  const [availableJobTitles, setAvailableJobTitles] = useState<string[]>([]);
   const [form, setForm] = useState({
     name: '',
-    email: '',
     team: '',
     jobTitle: '',
     password: '',
@@ -41,16 +42,22 @@ export default function ProfilePage() {
       setError('');
       try {
         const res = await fetch('/api/profile/me', { cache: 'no-store' });
-        const data = await res.json() as { user?: ProfileUser; error?: string };
+        const data = await res.json() as {
+          user?: ProfileUser;
+          availableTeams?: string[];
+          availableJobTitles?: string[];
+          error?: string;
+        };
         if (!res.ok || !data.user) {
           setError(data.error || 'Failed to load profile');
           return;
         }
         setUser(data.user);
+        setAvailableTeams(data.availableTeams ?? []);
+        setAvailableJobTitles(data.availableJobTitles ?? []);
         setForm({
-          name: data.user.name || '',
-          email: data.user.email || '',
-          team: data.user.team || '',
+          name:     data.user.name || '',
+          team:     data.user.team || '',
           jobTitle: data.user.jobTitle || '',
           password: '',
         });
@@ -121,8 +128,8 @@ export default function ProfilePage() {
 
       <form onSubmit={handleSave} className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-6 space-y-5 max-w-2xl shadow-sm">
 
-        {/* Read-only info */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Read-only account info */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="space-y-1.5">
             <label className="block text-xs font-semibold uppercase tracking-wide text-(--rs-neutral-grey-500)">
               Username
@@ -135,37 +142,28 @@ export default function ProfilePage() {
             </label>
             <input value={user?.role || ''} disabled className={inputDisabled} />
           </div>
+          <div className="space-y-1.5">
+            <label className="block text-xs font-semibold uppercase tracking-wide text-(--rs-neutral-grey-500)">
+              Email
+            </label>
+            <input value={user?.email || ''} disabled className={inputDisabled} />
+          </div>
         </div>
 
         <div className="border-t border-(--rs-neutral-grey-100)" />
 
         {/* Editable fields */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <label htmlFor="name" className="block text-sm font-medium text-(--rs-neutral-grey-700)">
-              Full Name <span className="text-red-500">*</span>
-            </label>
-            <input
-              id="name"
-              value={form.name}
-              onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))}
-              required
-              className={inputBase}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="email" className="block text-sm font-medium text-(--rs-neutral-grey-700)">
-              Email <span className="text-red-500">*</span>
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={form.email}
-              onChange={e => setForm(prev => ({ ...prev, email: e.target.value }))}
-              required
-              className={inputBase}
-            />
-          </div>
+        <div className="space-y-1.5">
+          <label htmlFor="name" className="block text-sm font-medium text-(--rs-neutral-grey-700)">
+            Full Name <span className="text-red-500">*</span>
+          </label>
+          <input
+            id="name"
+            value={form.name}
+            onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))}
+            required
+            className={inputBase}
+          />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -173,25 +171,41 @@ export default function ProfilePage() {
             <label htmlFor="team" className="block text-sm font-medium text-(--rs-neutral-grey-700)">
               Team
             </label>
-            <input
+            <select
               id="team"
               value={form.team}
               onChange={e => setForm(prev => ({ ...prev, team: e.target.value }))}
-              placeholder="e.g. Engineering"
-              className={inputBase}
-            />
+              className={inputBase + ' bg-white cursor-pointer'}
+            >
+              <option value="">— No team</option>
+              {/* Preserve current value if it's not in the fetched list */}
+              {form.team && !availableTeams.includes(form.team) && (
+                <option value={form.team}>{form.team}</option>
+              )}
+              {availableTeams.map(t => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
           </div>
           <div className="space-y-1.5">
             <label htmlFor="jobTitle" className="block text-sm font-medium text-(--rs-neutral-grey-700)">
               Job Title
             </label>
-            <input
+            <select
               id="jobTitle"
               value={form.jobTitle}
               onChange={e => setForm(prev => ({ ...prev, jobTitle: e.target.value }))}
-              placeholder="e.g. Full-Stack Developer"
-              className={inputBase}
-            />
+              className={inputBase + ' bg-white cursor-pointer'}
+            >
+              <option value="">— No title</option>
+              {/* Preserve current value if it's not in the fetched list */}
+              {form.jobTitle && !availableJobTitles.includes(form.jobTitle) && (
+                <option value={form.jobTitle}>{form.jobTitle}</option>
+              )}
+              {availableJobTitles.map(t => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
           </div>
         </div>
 

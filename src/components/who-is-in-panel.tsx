@@ -47,53 +47,18 @@ function LiveDuration({ clockedInAt }: { clockedInAt: string }) {
   return <span>{m}m</span>;
 }
 
-// ── Panel content ─────────────────────────────────────────────────────────────
+// ── Panel content (pure presentation) ────────────────────────────────────────
 
-function PanelContent() {
-  const [online, setOnline]       = useState<PresenceUser[]>([]);
-  const [connected, setConnected] = useState(false);
-  const esRef = useRef<EventSource | null>(null);
-
-  useEffect(() => {
-    const es = new EventSource('/api/presence/live');
-    esRef.current = es;
-
-    es.onopen  = () => setConnected(true);
-    es.onerror = () => setConnected(false);
-
-    es.onmessage = (e) => {
-      const event = JSON.parse(e.data as string) as SSEEvent;
-      if (event.type === 'snapshot') {
-        setOnline(event.online);
-        setConnected(true);
-      } else if (event.type === 'clock_in') {
-        setOnline(prev => {
-          const exists = prev.some(u => u.userId === event.user.userId);
-          return exists
-            ? prev.map(u => u.userId === event.user.userId ? event.user : u)
-            : [...prev, event.user];
-        });
-      } else if (event.type === 'clock_out') {
-        setOnline(prev => prev.filter(u => u.userId !== event.userId));
-      }
-    };
-
-    return () => { es.close(); esRef.current = null; };
-  }, []);
-
-  const sorted = [...online].sort(
-    (a, b) => new Date(a.clockedInAt).getTime() - new Date(b.clockedInAt).getTime()
-  );
-
+function PanelContent({ sorted, connected }: { sorted: PresenceUser[]; connected: boolean }) {
   return (
     <div className="flex flex-col h-full">
       {/* Panel header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-(--rs-neutral-grey-100)">
         <div className="flex items-center gap-2">
           <span className="text-sm font-serif font-semibold text-(--rs-neutral-grey-900)">Who&apos;s In</span>
-          {online.length > 0 && (
+          {sorted.length > 0 && (
             <span className="bg-green-100 text-green-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
-              {online.length}
+              {sorted.length}
             </span>
           )}
         </div>
@@ -154,27 +119,32 @@ function PanelContent() {
 
 export function WhoIsInPanel() {
   const [open, setOpen]           = useState(false);
-  const [count, setCount]         = useState<number | null>(null);
+  const [online, setOnline]       = useState<PresenceUser[]>([]);
   const [connected, setConnected] = useState(false);
   const esRef = useRef<EventSource | null>(null);
 
-  // Maintain a count subscription always (for the button badge)
+  // Single SSE connection for both the badge count and the panel list
   useEffect(() => {
     const es = new EventSource('/api/presence/live');
     esRef.current = es;
 
     es.onopen  = () => setConnected(true);
-    es.onerror = () => { setConnected(false); };
+    es.onerror = () => setConnected(false);
 
     es.onmessage = (e) => {
       const event = JSON.parse(e.data as string) as SSEEvent;
       if (event.type === 'snapshot') {
-        setCount(event.online.length);
+        setOnline(event.online);
         setConnected(true);
       } else if (event.type === 'clock_in') {
-        setCount(n => (n ?? 0) + 1);
+        setOnline(prev => {
+          const exists = prev.some(u => u.userId === event.user.userId);
+          return exists
+            ? prev.map(u => u.userId === event.user.userId ? event.user : u)
+            : [...prev, event.user];
+        });
       } else if (event.type === 'clock_out') {
-        setCount(n => Math.max(0, (n ?? 1) - 1));
+        setOnline(prev => prev.filter(u => u.userId !== event.userId));
       }
     };
 
@@ -188,6 +158,11 @@ export function WhoIsInPanel() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [open]);
+
+  const count = online.length;
+  const sorted = [...online].sort(
+    (a, b) => new Date(a.clockedInAt).getTime() - new Date(b.clockedInAt).getTime()
+  );
 
   return (
     <>
@@ -203,14 +178,14 @@ export function WhoIsInPanel() {
       >
         {/* Pulsing dot — green when someone is in, grey otherwise */}
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-          (count ?? 0) > 0 && connected ? 'bg-green-500' : 'bg-(--rs-neutral-grey-300)'
+          count > 0 && connected ? 'bg-green-500' : 'bg-(--rs-neutral-grey-300)'
         }`}>
-          {(count ?? 0) > 0 && connected && (
+          {count > 0 && connected && (
             <span className="absolute inset-0 rounded-full bg-green-400 animate-ping opacity-60" />
           )}
         </span>
         <span className="hidden sm:inline">Who&apos;s In</span>
-        {(count ?? 0) > 0 && (
+        {count > 0 && (
           <span className="bg-green-100 text-green-700 font-bold px-1 rounded-full text-[10px] leading-none py-0.5">
             {count}
           </span>
@@ -244,7 +219,7 @@ export function WhoIsInPanel() {
           <X className="w-4 h-4" />
         </button>
 
-        {open && <PanelContent />}
+        {open && <PanelContent sorted={sorted} connected={connected} />}
       </div>
     </>
   );

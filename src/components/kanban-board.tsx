@@ -395,7 +395,8 @@ export function KanbanBoard({
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex gap-4 pb-4 items-start">
+        <div className="overflow-x-auto pb-1 -mx-1 px-1">
+        <div className="flex gap-4 pb-4 items-start min-w-max">
           {states.map(state => (
             <KanbanColumn
               key={state.id}
@@ -406,6 +407,7 @@ export function KanbanBoard({
               onAdd={handleTaskAdded}
             />
           ))}
+        </div>
         </div>
 
         <DragOverlay dropAnimation={{ duration: 150, easing: 'ease' }}>

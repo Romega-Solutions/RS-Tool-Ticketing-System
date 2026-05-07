@@ -47,6 +47,8 @@ export const attendance = pgTable('attendance', {
   wednesdayStatus: text('wednesday_status'),
   thursdayStatus:  text('thursday_status'),
   fridayStatus:    text('friday_status'),
+  saturdayStatus:  text('saturday_status'),
+  sundayStatus:    text('sunday_status'),
   notes:           text('notes'),
   submittedAt:     text('submitted_at'),
   createdAt:       text('created_at').default(sql`CURRENT_TIMESTAMP`),

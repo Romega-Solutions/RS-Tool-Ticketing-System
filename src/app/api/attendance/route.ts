@@ -6,8 +6,8 @@ import { canAccessReports } from '@/lib/rbac';
 export const runtime = 'nodejs';
 
 const VALID_STATUSES = new Set(['present', 'absent', 'wfh', 'leave', '']);
-const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] as const;
-const DAY_COLS = ['monday_status', 'tuesday_status', 'wednesday_status', 'thursday_status', 'friday_status'] as const;
+const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+const DAY_COLS = ['monday_status', 'tuesday_status', 'wednesday_status', 'thursday_status', 'friday_status', 'saturday_status', 'sunday_status'] as const;
 
 function toLocalISO(d: Date): string {
   const y = d.getFullYear();
@@ -75,6 +75,8 @@ type AttendanceRow = {
   wednesday_status: string | null;
   thursday_status: string | null;
   friday_status: string | null;
+  saturday_status: string | null;
+  sunday_status: string | null;
   notes: string | null;
   submitted_at: string | null;
 };
@@ -116,24 +118,31 @@ export async function GET(req: Request) {
     const recordsByUserAndWeek = new Map(records.map(record => [`${record.user_id}:${record.week_start}`, record] as const));
 
     const summary = teamUsers.map((user: { id: number; name: string; team: string | null; role: string }) => {
-      let present = 0, wfh = 0, leave = 0, absent = 0;
+      let present = 0, wfh = 0, leave = 0, absent = 0, weekendWork = 0;
       const [year, month] = monthParam.split('-').map(Number);
       const lastDay = new Date(year, month, 0).getDate();
 
       for (let day = 1; day <= lastDay; day++) {
         const date = new Date(year, month - 1, day);
-        const col = getWeekdayColumnForDate(date);
-        if (!col) continue;
-
+        const dow = date.getDay();
         const rec = recordsByUserAndWeek.get(`${user.id}:${getWeekStartForDate(date)}`);
-        const val = rec?.[col];
-        if (val === 'present') present++;
-        else if (val === 'wfh') wfh++;
-        else if (val === 'leave') leave++;
-        else if (val === 'absent') absent++;
+
+        if (dow === 6 || dow === 0) {
+          const col = dow === 6 ? 'saturday_status' : 'sunday_status';
+          const val = rec?.[col as keyof AttendanceRow] as string | null;
+          if (val === 'present' || val === 'wfh') weekendWork++;
+        } else {
+          const col = getWeekdayColumnForDate(date);
+          if (!col) continue;
+          const val = rec?.[col];
+          if (val === 'present') present++;
+          else if (val === 'wfh') wfh++;
+          else if (val === 'leave') leave++;
+          else if (val === 'absent') absent++;
+        }
       }
 
-      return { userId: user.id, name: user.name, team: user.team, role: user.role, present, wfh, leave, absent, workdays };
+      return { userId: user.id, name: user.name, team: user.team, role: user.role, present, wfh, leave, absent, weekendWork, workdays };
     });
 
     // Fetch timesheet hours for the month
@@ -187,6 +196,8 @@ export async function GET(req: Request) {
     wednesdayStatus:  r.wednesday_status,
     thursdayStatus:   r.thursday_status,
     fridayStatus:     r.friday_status,
+    saturdayStatus:   r.saturday_status,
+    sundayStatus:     r.sunday_status,
     notes:            r.notes,
     submittedAt:      r.submitted_at,
   }));
@@ -224,6 +235,7 @@ export async function POST(req: Request) {
   const body = await req.json() as {
     weekStart: string;
     monday?: string; tuesday?: string; wednesday?: string; thursday?: string; friday?: string;
+    saturday?: string; sunday?: string;
     notes?: string;
   };
 
@@ -254,6 +266,8 @@ export async function POST(req: Request) {
     wednesday_status: dayValues.wednesday,
     thursday_status:  dayValues.thursday,
     friday_status:    dayValues.friday,
+    saturday_status:  dayValues.saturday,
+    sunday_status:    dayValues.sunday,
     notes:            body.notes?.trim() || null,
     submitted_at:     now,
     updated_at:       now,

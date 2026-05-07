@@ -19,6 +19,23 @@ export async function GET() {
 
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
+  const [{ data: teamRows }, { data: jobTitleRows }] = await Promise.all([
+    admin.from('users').select('team').not('team', 'is', null).eq('is_active', 1),
+    admin.from('users').select('job_title').not('job_title', 'is', null).eq('is_active', 1),
+  ]);
+
+  const availableTeams = [...new Set(
+    (teamRows ?? [])
+      .map((r: { team: string | null }) => r.team)
+      .filter((t): t is string => Boolean(t))
+  )].sort();
+
+  const availableJobTitles = [...new Set(
+    (jobTitleRows ?? [])
+      .map((r: { job_title: string | null }) => r.job_title)
+      .filter((t): t is string => Boolean(t))
+  )].sort();
+
   return NextResponse.json({
     user: {
       id: user.id,
@@ -31,6 +48,8 @@ export async function GET() {
       planeMemberId: user.plane_member_id ?? null,
       isActive: Boolean(user.is_active),
     },
+    availableTeams,
+    availableJobTitles,
   });
 }
 

@@ -313,7 +313,7 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
                 <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2.5 rounded-lg text-sm">{createError}</div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Full Name" required>
                   <input autoFocus required value={newForm.name} onChange={e => setNewForm(f => ({ ...f, name: e.target.value }))}
                     className={inputCls} placeholder="e.g. Jane Dela Cruz" />
@@ -341,7 +341,7 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
                 </div>
               </Field>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Role">
                   <select value={newForm.role} onChange={e => setNewForm(f => ({ ...f, role: e.target.value }))}
                     className={inputCls}>

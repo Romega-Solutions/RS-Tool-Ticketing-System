@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getOnline, getMyEntry } from '@/lib/presence';
+import { getOnline, getMyEntry, clockIn } from '@/lib/presence';
+import type { AppRole } from '@/lib/rbac';
 
 export const runtime = 'nodejs';
 
@@ -32,9 +33,13 @@ export async function GET() {
         .eq('user_id', session.id)
         .is('clocked_out_at', null)
         .maybeSingle();
-      if (openFallback) openSession = { timesheetId: openFallback.id, clockedInAt: openFallback.clocked_in_at, notes: null };
+      if (openFallback) {
+        openSession = { timesheetId: openFallback.id, clockedInAt: openFallback.clocked_in_at, notes: null };
+        clockIn({ userId: session.id, name: session.name, role: session.role as AppRole, team: session.team, clockedInAt: openFallback.clocked_in_at });
+      }
     } else if (openWithNotes) {
       openSession = { timesheetId: openWithNotes.id, clockedInAt: openWithNotes.clocked_in_at, notes: openWithNotes.notes ?? null };
+      clockIn({ userId: session.id, name: session.name, role: session.role as AppRole, team: session.team, clockedInAt: openWithNotes.clocked_in_at });
     }
   }
 

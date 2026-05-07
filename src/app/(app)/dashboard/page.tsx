@@ -1,7 +1,8 @@
 import { getSession } from '@/lib/session';
 import { getProjects, getProjectStates, getWorkspaceMembers, getWorkItems, buildStateLookup, enrichWorkItems } from '@/lib/plane';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { AlertCircle, Clock } from "lucide-react";
+import { AlertCircle, Clock, Users, FileText } from "lucide-react";
 import Link from 'next/link';
 
 function stateGroup(item: { state_detail?: { group?: string } }) {
@@ -29,25 +30,37 @@ async function getDashboardQuote(userSeed: number) {
     if (res.ok) {
       const data = await res.json() as Array<{ q?: string; a?: string }>;
       const quote = data[0];
-      if (quote?.q && quote?.a) {
-        return {
-          text: quote.q,
-          author: quote.a,
-          source: 'ZenQuotes',
-        };
-      }
+      if (quote?.q && quote?.a) return { text: quote.q, author: quote.a, source: 'ZenQuotes' };
     }
-  } catch {
-    // Fall back to local quotes if the external API is unavailable.
-  }
-
-  const fallback = MEDITATION_NOTES[userSeed % MEDITATION_NOTES.length];
+  } catch { /* fall back */ }
   return {
-    text: fallback,
+    text: MEDITATION_NOTES[userSeed % MEDITATION_NOTES.length],
     author: 'Romega Dashboard',
     source: null,
   };
 }
+
+function getWeekStart(): string {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().split('T')[0];
+}
+
+function getTodayDayName(): string {
+  return ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][new Date().getDay()];
+}
+
+type AttStatusRow = {
+  monday_status: string | null;
+  tuesday_status: string | null;
+  wednesday_status: string | null;
+  thursday_status: string | null;
+  friday_status: string | null;
+  saturday_status: string | null;
+  sunday_status: string | null;
+};
 
 export default async function DashboardPage() {
   const sessionUser = await getSession();
@@ -102,11 +115,12 @@ export default async function DashboardPage() {
 
   const projectStats = projects.map(p => {
     const items = allItems.filter(i => i._projectId === p.id);
+    const open = items.filter(i => openGroups.has(stateGroup(i))).length;
     const done = items.filter(i => stateGroup(i) === 'completed').length;
     const blocked = items.filter(i =>
       i.label_detail?.some(l => l.name.toLowerCase().includes('blocker'))
     ).length;
-    return { project: p, total: items.length, done, blocked };
+    return { project: p, total: items.length, open, done, blocked };
   });
 
   const assignedToMe = (item: ItemMeta) =>
@@ -147,6 +161,36 @@ export default async function DashboardPage() {
     )
     .slice(0, 4);
 
+  // Summary widgets — best-effort, don't break the page if DB is slow
+  let attendanceToday = { present: 0, total: 0 };
+  let reportsSummary = { submitted: 0, total: 0 };
+  try {
+    const admin = createAdminClient();
+    const weekStart = getWeekStart();
+    const dayCol = `${getTodayDayName()}_status` as keyof AttStatusRow;
+
+    const [usersRes, attendRes, reportsRes] = await Promise.all([
+      admin.from('users').select('id', { count: 'exact', head: true }).eq('is_active', 1),
+      admin.from('attendance')
+        .select('monday_status,tuesday_status,wednesday_status,thursday_status,friday_status,saturday_status,sunday_status')
+        .eq('week_start', weekStart),
+      admin.from('weekly_reports').select('submitted_at').eq('week_start', weekStart),
+    ]);
+
+    const total = usersRes.count ?? 0;
+    const present = ((attendRes.data ?? []) as AttStatusRow[]).filter(r => {
+      const val = r[dayCol];
+      return val === 'present' || val === 'wfh';
+    }).length;
+
+    attendanceToday = { present, total };
+    reportsSummary = {
+      submitted: ((reportsRes.data ?? []) as { submitted_at: string | null }[])
+        .filter(r => r.submitted_at).length,
+      total,
+    };
+  } catch { /* best-effort */ }
+
   return (
     <div className="space-y-6">
       {isFriday && (
@@ -165,47 +209,99 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      <Card className="overflow-hidden border-(--rs-primary-200) bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(244,249,255,0.98))] shadow-sm">
-        <CardContent className="flex flex-col gap-4 px-5 py-5 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-1">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-(--rs-primary-600)">Daily Reflection</p>
-            <h2 className="font-serif text-lg font-semibold text-(--rs-neutral-grey-900)">
-              Take a beat, {firstName}
-            </h2>
-            <p className="max-w-2xl text-sm leading-6 text-(--rs-neutral-grey-700)">
-              “{meditationQuote.text}”
-            </p>
-            <p className="text-xs font-medium text-(--rs-neutral-grey-500)">
-              {meditationQuote.author}
-              {meditationQuote.source ? ` · ${meditationQuote.source}` : ''}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-(--rs-primary-200) bg-white/80 px-4 py-3 text-xs text-(--rs-neutral-grey-500) shadow-sm">
-            A little calm belongs in the dashboard too.
-          </div>
-        </CardContent>
-      </Card>
+      {/* Quick Summary Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Link href="/attendance">
+          <Card className="hover:shadow-md hover:border-(--rs-primary-300) transition-all cursor-pointer h-full">
+            <CardContent className="flex items-center justify-between px-5 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-(--rs-neutral-grey-500)">
+                  Attendance Today
+                </p>
+                <p className="mt-1 text-2xl font-bold tabular-nums text-(--rs-neutral-grey-900)">
+                  {attendanceToday.present}
+                  <span className="text-sm font-normal text-(--rs-neutral-grey-400)">
+                    /{attendanceToday.total}
+                  </span>
+                </p>
+                <p className="text-xs text-(--rs-neutral-grey-400) mt-0.5">
+                  {attendanceToday.total > 0
+                    ? `${Math.round((attendanceToday.present / attendanceToday.total) * 100)}% present or WFH`
+                    : 'No records yet today'}
+                </p>
+              </div>
+              <div className="w-10 h-10 rounded-full bg-(--rs-primary-50) flex items-center justify-center shrink-0">
+                <Users className="w-5 h-5 text-(--rs-primary-500)" />
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/reports">
+          <Card className="hover:shadow-md hover:border-(--rs-accent-300) transition-all cursor-pointer h-full">
+            <CardContent className="flex items-center justify-between px-5 py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-(--rs-neutral-grey-500)">
+                  Weekly Reports
+                </p>
+                <p className="mt-1 text-2xl font-bold tabular-nums text-(--rs-neutral-grey-900)">
+                  {reportsSummary.submitted}
+                  <span className="text-sm font-normal text-(--rs-neutral-grey-400)">
+                    /{reportsSummary.total}
+                  </span>
+                </p>
+                <p className="text-xs text-(--rs-neutral-grey-400) mt-0.5">
+                  {reportsSummary.total - reportsSummary.submitted > 0
+                    ? `${reportsSummary.total - reportsSummary.submitted} pending this week`
+                    : 'All submitted this week'}
+                </p>
+              </div>
+              <div className="w-10 h-10 rounded-full bg-(--rs-accent-50) flex items-center justify-center shrink-0">
+                <FileText className="w-5 h-5 text-(--rs-accent-500)" />
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+      </div>
 
       {/* Project Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {projectStats.length === 0 && !planeError && (
           <p className="text-(--rs-neutral-grey-500) col-span-4 text-sm italic">No projects found in workspace.</p>
         )}
-        {projectStats.map(({ project, total, done, blocked }) => (
+        {projectStats.map(({ project, total, open, done, blocked }) => (
           <Link key={project.id} href={`/projects/${project.id}`}>
             <Card className="hover:border-(--rs-primary-300) hover:shadow-md transition-all cursor-pointer border-t-4 border-t-(--rs-primary-500) h-full">
               <CardHeader className="pb-2">
-                <CardTitle className="text-xs font-bold text-(--rs-neutral-grey-400) uppercase tracking-wide">{project.identifier}</CardTitle>
+                <CardTitle className="text-xs font-bold text-(--rs-neutral-grey-400) uppercase tracking-wide">
+                  {project.identifier}
+                </CardTitle>
                 <div className="text-base font-bold text-(--rs-neutral-grey-900) leading-tight">{project.name}</div>
               </CardHeader>
               <CardContent>
-                <div className="flex justify-between items-end">
-                  <div className="text-3xl font-bold text-(--rs-neutral-grey-900) tabular-nums">{total}</div>
+                <div className="flex justify-between items-baseline">
+                  <div>
+                    <span className="text-3xl font-bold tabular-nums text-(--rs-neutral-grey-900)">{open}</span>
+                    <span className="text-xs text-(--rs-neutral-grey-400) ml-1.5">open tasks</span>
+                  </div>
                   <div className="text-xs text-right space-y-0.5">
                     <div className="text-green-600 font-medium">{done} done</div>
                     {blocked > 0 && <div className="text-red-500 font-medium">{blocked} blocked</div>}
                   </div>
                 </div>
+                {total > 0 && (
+                  <>
+                    <div className="mt-2.5 h-1.5 bg-(--rs-neutral-grey-100) rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-(--rs-primary-400) rounded-full transition-all"
+                        style={{ width: `${Math.round((done / total) * 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-[10px] text-(--rs-neutral-grey-400) mt-1 text-right">
+                      {Math.round((done / total) * 100)}% complete
+                    </p>
+                  </>
+                )}
               </CardContent>
             </Card>
           </Link>
@@ -223,9 +319,17 @@ export default async function DashboardPage() {
           </CardHeader>
           <CardContent>
             {!planeMemberId ? (
-              <p className="text-sm text-(--rs-neutral-grey-400) italic">
-                Plane account not linked. Ask your admin to set your Plane Member ID.
-              </p>
+              <div className="flex flex-col items-center gap-3 py-5 text-center">
+                <p className="text-sm text-(--rs-neutral-grey-500)">
+                  My Tasks will appear here once your Plane account is linked.
+                </p>
+                <Link
+                  href="/profile"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-(--rs-primary-500) px-3 py-1.5 text-xs font-semibold text-white hover:bg-(--rs-primary-600) transition-colors"
+                >
+                  View Profile →
+                </Link>
+              </div>
             ) : myTasks.length === 0 ? (
               <p className="text-sm text-(--rs-neutral-grey-400) italic">No active tasks.</p>
             ) : (
@@ -260,10 +364,13 @@ export default async function DashboardPage() {
         </Card>
 
         <Card>
-          <CardHeader className="pb-2">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-lg font-serif flex items-center gap-2">
               <Clock className="w-5 h-5 text-(--rs-accent-500)" /> Upcoming Deadlines
             </CardTitle>
+            <Link href="/projects" className="text-sm text-(--rs-primary-500) hover:text-(--rs-primary-700) font-medium transition-colors">
+              View all →
+            </Link>
           </CardHeader>
           <CardContent>
             {deadlines.length === 0 ? (
@@ -298,8 +405,11 @@ export default async function DashboardPage() {
       {/* Workload + Blockers */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
-          <CardHeader className="pb-2">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-lg font-serif">Team Workload</CardTitle>
+            <Link href="/reports" className="text-sm text-(--rs-primary-500) hover:text-(--rs-primary-700) font-medium transition-colors">
+              View reports →
+            </Link>
           </CardHeader>
           <CardContent>
             {workload.length === 0 ? (
@@ -313,7 +423,9 @@ export default async function DashboardPage() {
                     </div>
                     <div className="flex-1 h-2 bg-(--rs-neutral-grey-100) rounded-full overflow-hidden">
                       <div
-                        className={`h-full rounded-full transition-all ${count / maxLoad > 0.8 ? 'bg-red-500' : 'bg-(--rs-primary-500)'}`}
+                        className={`h-full rounded-full transition-all ${
+                          count / maxLoad > 0.8 ? 'bg-amber-400' : 'bg-(--rs-primary-400)'
+                        }`}
                         style={{ width: `${(count / maxLoad) * 100}%` }}
                       />
                     </div>
@@ -328,10 +440,13 @@ export default async function DashboardPage() {
         </Card>
 
         <Card className="border-t-4 border-t-red-400">
-          <CardHeader className="pb-2">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-lg font-serif flex items-center gap-2 text-red-600">
               <AlertCircle className="w-4 h-4" /> Active Blockers
             </CardTitle>
+            <Link href="/projects" className="text-sm text-(--rs-primary-500) hover:text-(--rs-primary-700) font-medium transition-colors">
+              View projects →
+            </Link>
           </CardHeader>
           <CardContent>
             {blockers.length === 0 ? (
@@ -350,6 +465,22 @@ export default async function DashboardPage() {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      {/* Daily Reflection — compact footer widget */}
+      <div className="flex gap-3 items-start rounded-xl border border-(--rs-primary-100) bg-gradient-to-r from-[hsla(209,100%,97%,1)] to-transparent px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-(--rs-primary-500) mb-1">
+            Daily Reflection · {firstName}
+          </p>
+          <p className="text-sm text-(--rs-neutral-grey-700) leading-relaxed italic">
+            &ldquo;{meditationQuote.text}&rdquo;
+          </p>
+          <p className="text-xs text-(--rs-neutral-grey-400) mt-1">
+            — {meditationQuote.author}
+            {meditationQuote.source ? ` · ${meditationQuote.source}` : ''}
+          </p>
+        </div>
       </div>
     </div>
   );
