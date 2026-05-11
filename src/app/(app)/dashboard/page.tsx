@@ -14,32 +14,6 @@ const PRIORITY_ICON: Record<string, string> = {
   urgent: '🔴', high: '🔴', medium: '🟡', low: '🟢', none: '⚪',
 };
 
-const MEDITATION_NOTES = [
-  "Pause for one full breath before your next task. A calmer start usually creates a clearer outcome.",
-  "You do not need to solve the whole week at once. Finish the next right thing with steady attention.",
-  "Let your shoulders drop, unclench your jaw, and return to the work in front of you.",
-  "Progress feels lighter when your mind is not arguing with the present moment.",
-  "Even on a busy day, a quiet minute can reset your thinking more than rushing can.",
-  "Your pace does not need to be frantic to be effective. Consistency is stronger than strain.",
-];
-
-async function getDashboardQuote(userSeed: number) {
-  try {
-    const res = await fetch('https://zenquotes.io/api/random', {
-      next: { revalidate: 21600 },
-    });
-    if (res.ok) {
-      const data = await res.json() as Array<{ q?: string; a?: string }>;
-      const quote = data[0];
-      if (quote?.q && quote?.a) return { text: quote.q, author: quote.a, source: 'ZenQuotes' };
-    }
-  } catch { /* fall back */ }
-  return {
-    text: MEDITATION_NOTES[userSeed % MEDITATION_NOTES.length],
-    author: 'Romega Dashboard',
-    source: null,
-  };
-}
 
 function getWeekStart(): string {
   const d = new Date();
@@ -67,9 +41,6 @@ export default async function DashboardPage() {
   const sessionUser = await getSession();
   const planeMemberId = sessionUser?.planeMemberId ?? null;
   const isFriday = new Date().getDay() === 5;
-  const firstName = sessionUser?.name?.trim().split(' ')[0] ?? 'there';
-  const userSeed = new Date().getDate() + (sessionUser?.id ?? 0);
-  const meditationQuote = await getDashboardQuote(userSeed);
 
   type ItemMeta = {
     id: string;
@@ -537,21 +508,6 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
-      {/* Daily Reflection — compact footer widget */}
-      <div className="flex gap-3 items-start rounded-xl border border-(--rs-primary-100) bg-gradient-to-r from-[hsla(209,100%,97%,1)] to-transparent px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-(--rs-primary-500) mb-1">
-            Daily Reflection · {firstName}
-          </p>
-          <p className="text-sm text-(--rs-neutral-grey-700) leading-relaxed italic">
-            &ldquo;{meditationQuote.text}&rdquo;
-          </p>
-          <p className="text-xs text-(--rs-neutral-grey-400) mt-1">
-            — {meditationQuote.author}
-            {meditationQuote.source ? ` · ${meditationQuote.source}` : ''}
-          </p>
-        </div>
-      </div>
     </div>
   );
 }
