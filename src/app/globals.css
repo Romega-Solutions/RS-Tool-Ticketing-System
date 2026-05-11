@@ -396,6 +396,10 @@ select,
   animation: slide-up 0.2s ease-out;
 }
 
+@utility animate-fade-in {
+  animation: fade-in 0.2s ease-out both;
+}
+
 @utility tabular-nums {
   font-variant-numeric: tabular-nums;
 }

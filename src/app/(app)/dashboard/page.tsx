@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { AlertCircle, Clock, Users, FileText } from "lucide-react";
 import Link from 'next/link';
+import { HoursChart } from '@/components/hours-chart';
 
 function stateGroup(item: { state_detail?: { group?: string } }) {
   return (item.state_detail?.group ?? '').toLowerCase();
@@ -164,9 +165,9 @@ export default async function DashboardPage() {
   // Summary widgets — best-effort, don't break the page if DB is slow
   let attendanceToday = { present: 0, total: 0 };
   let reportsSummary = { submitted: 0, total: 0 };
+  const weekStart = getWeekStart();
   try {
     const admin = createAdminClient();
-    const weekStart = getWeekStart();
     const dayCol = `${getTodayDayName()}_status` as keyof AttStatusRow;
 
     const [usersRes, attendRes, reportsRes] = await Promise.all([
@@ -189,6 +190,58 @@ export default async function DashboardPage() {
         .filter(r => r.submitted_at).length,
       total,
     };
+  } catch { /* best-effort */ }
+
+  // Hours chart data — best-effort
+  const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  let weeklyData:  { day: string;  hours: number }[] = DAY_NAMES.map(d => ({ day: d, hours: 0 }));
+  let monthlyData: { week: string; hours: number }[] = Array.from({ length: 4 }, (_, i) => ({ week: `Wk ${i + 1}`, hours: 0 }));
+  let totalWeekHours  = 0;
+  let totalMonthHours = 0;
+
+  try {
+    if (sessionUser) {
+      const admin    = createAdminClient();
+      const today    = new Date().toISOString().split('T')[0];
+      const monthAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      const { data: tsRows } = await admin
+        .from('timesheets')
+        .select('date, duration_seconds')
+        .eq('user_id', sessionUser.id)
+        .gte('date', monthAgo)
+        .lte('date', today)
+        .not('duration_seconds', 'is', null);
+
+      const rows = (tsRows ?? []) as { date: string; duration_seconds: number }[];
+
+      // Weekly: map each Mon–Sun date
+      const wkDates = DAY_NAMES.map((_, i) => {
+        const d = new Date(weekStart);
+        d.setDate(d.getDate() + i);
+        return d.toISOString().split('T')[0];
+      });
+      weeklyData = DAY_NAMES.map((day, i) => {
+        const secs = rows.filter(r => r.date === wkDates[i]).reduce((s, r) => s + (r.duration_seconds ?? 0), 0);
+        return { day, hours: Math.round((secs / 3600) * 10) / 10 };
+      });
+      totalWeekHours = Math.round(weeklyData.reduce((s, d) => s + d.hours, 0) * 10) / 10;
+
+      // Monthly: last 4 Mon-based weeks
+      const wkStarts = Array.from({ length: 4 }, (_, i) => {
+        const ms = new Date(weekStart);
+        ms.setDate(ms.getDate() - (3 - i) * 7);
+        return ms.toISOString().split('T')[0];
+      });
+      monthlyData = wkStarts.map((ws, i) => {
+        const we = new Date(ws);
+        we.setDate(we.getDate() + 7);
+        const weStr = we.toISOString().split('T')[0];
+        const secs = rows.filter(r => r.date >= ws && r.date < weStr).reduce((s, r) => s + (r.duration_seconds ?? 0), 0);
+        return { week: `Wk ${i + 1}`, hours: Math.round((secs / 3600) * 10) / 10 };
+      });
+      totalMonthHours = Math.round(monthlyData.reduce((s, d) => s + d.hours, 0) * 10) / 10;
+    }
   } catch { /* best-effort */ }
 
   return (
@@ -263,6 +316,23 @@ export default async function DashboardPage() {
           </Card>
         </Link>
       </div>
+
+      {/* My Hours Chart */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg font-serif flex items-center gap-2">
+            <Clock className="w-5 h-5 text-(--rs-primary-500)" /> My Hours
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <HoursChart
+            weeklyData={weeklyData}
+            monthlyData={monthlyData}
+            totalWeekHours={totalWeekHours}
+            totalMonthHours={totalMonthHours}
+          />
+        </CardContent>
+      </Card>
 
       {/* Project Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

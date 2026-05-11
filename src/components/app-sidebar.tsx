@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2 } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2 } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import type { AppRole } from "@/lib/rbac";
@@ -121,30 +121,60 @@ function NavLinks({ collapsed = false, role }: { collapsed?: boolean; role: AppR
 
 function LogoutButton({ collapsed = false }: { collapsed?: boolean }) {
   const router = useRouter();
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const handleLogout = async () => {
+    setLoggingOut(true);
     try {
       const res = await fetch('/api/auth/logout', { method: 'POST' });
       if (res.ok) {
         router.push('/login');
         router.refresh();
+      } else {
+        setLoggingOut(false);
       }
     } catch (err) {
       console.error('Failed to logout', err);
+      setLoggingOut(false);
     }
   };
 
   return (
-    <button
-      onClick={handleLogout}
-      className={`w-full flex items-center gap-3 px-3 py-2 hover:bg-white/6 rounded-md text-red-400/80 hover:text-red-300 transition-colors text-left text-sm font-medium ${
-        collapsed ? "justify-center" : ""
-      }`}
-      title={collapsed ? "Logout" : undefined}
-    >
-      <LogOut className="w-4 h-4 shrink-0" />
-      {!collapsed && "Log out"}
-    </button>
+    <>
+      {loggingOut && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white animate-fade-in">
+          <div className="flex flex-col items-center gap-5">
+            <Image
+              src="/images/rs-logo.svg"
+              alt="Romega Solutions"
+              width={148}
+              height={44}
+              className="object-contain"
+              priority
+              unoptimized
+            />
+            <div className="flex flex-col items-center gap-2">
+              <Loader2 className="h-6 w-6 animate-spin text-(--rs-primary-500)" />
+              <p className="text-sm font-medium text-(--rs-neutral-grey-600)">Signing out…</p>
+            </div>
+          </div>
+        </div>
+      )}
+      <button
+        onClick={handleLogout}
+        disabled={loggingOut}
+        className={`w-full flex items-center gap-3 px-3 py-2 hover:bg-white/6 rounded-md text-red-400/80 hover:text-red-300 transition-colors text-left text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed ${
+          collapsed ? "justify-center" : ""
+        }`}
+        title={collapsed ? "Logout" : undefined}
+      >
+        {loggingOut
+          ? <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
+          : <LogOut className="w-4 h-4 shrink-0" />
+        }
+        {!collapsed && (loggingOut ? "Signing out…" : "Log out")}
+      </button>
+    </>
   );
 }
 

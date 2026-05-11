@@ -1,4 +1,4 @@
-export type AppRole = 'ic' | 'lead' | 'admin';
+export type AppRole = 'intern' | 'ic' | 'lead' | 'admin';
 
 export function normalizeRole(role: unknown): AppRole {
   const value = String(role || '').trim().toLowerCase();
@@ -7,8 +7,12 @@ export function normalizeRole(role: unknown): AppRole {
     return 'admin';
   }
 
-  if (['lead', 'team_lead', 'teamlead', 'manager', 'tl'].includes(value)) {
+  if (['lead', 'team_lead', 'teamlead', 'manager', 'tl', 'ic_lead', 'iclead'].includes(value)) {
     return 'lead';
+  }
+
+  if (value === 'intern') {
+    return 'intern';
   }
 
   return 'ic';
@@ -29,12 +33,13 @@ export function canAccessPath(pathname: string, role: AppRole): boolean {
 }
 
 export function defaultLandingPath(role: AppRole): string {
-  if (role === 'ic') return '/my-tasks';
+  if (role === 'ic' || role === 'intern') return '/my-tasks';
   return '/dashboard';
 }
 
 export function roleLabel(role: AppRole): string {
-  if (role === 'admin') return 'Admin';
-  if (role === 'lead') return 'Lead';
+  if (role === 'admin')  return 'Admin';
+  if (role === 'lead')   return 'IC Lead';
+  if (role === 'intern') return 'Intern';
   return 'IC';
 }

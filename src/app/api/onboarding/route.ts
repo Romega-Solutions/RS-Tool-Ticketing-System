@@ -25,10 +25,10 @@ export async function POST(req: Request) {
 
   const email = user.email;
 
-  // @romega-solutions.com can pick IC or Lead; all other domains are forced to IC
+  // Trusted domains can self-assign roles; all others are forced to IC
   const domain = email.split('@')[1] ?? '';
-  const isRomega = domain === 'romega-solutions.com';
-  const selfAssignableRole = isRomega && ['ic', 'lead', 'ceo'].includes(role) ? role : 'ic';
+  const isTrusted = ['romega-solutions.com', 'gmail.com'].includes(domain);
+  const selfAssignableRole = isTrusted && ['intern', 'ic', 'lead', 'ceo'].includes(role) ? role : 'ic';
 
   const now = new Date().toISOString();
   const emailPrefix = email.split('@')[0].replace(/[^a-z0-9_]/gi, '_').toLowerCase();

@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation';
 import { Loader2, ArrowRight, Lock, CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
-const ROMEGA_DOMAIN = 'romega-solutions.com';
+const TRUSTED_DOMAINS = ['romega-solutions.com', 'gmail.com'];
 
 const DEPARTMENTS = [
   'AI & Technology',
@@ -25,14 +25,15 @@ const DEPARTMENTS = [
 ];
 
 const ROLE_OPTS = [
-  { value: 'ic',   label: 'Individual Contributor (IC)' },
-  { value: 'lead', label: 'Team Lead' },
-  { value: 'ceo',  label: 'CEO' },
+  { value: 'intern', label: 'Intern',                      desc: 'My Tasks · Projects · Weekly Report' },
+  { value: 'ic',     label: 'Individual Contributor (IC)', desc: 'My Tasks · Projects · Weekly Report' },
+  { value: 'lead',   label: 'IC Lead',                     desc: 'All above + Attendance · Team Reports' },
+  { value: 'ceo',    label: 'CEO',                         desc: 'Full access to all features' },
 ] as const;
 
 const onboardingSchema = z.object({
   name:     z.string().min(2, 'Full name must be at least 2 characters'),
-  role:     z.enum(['ic', 'lead', 'ceo']),
+  role:     z.enum(['intern', 'ic', 'lead', 'ceo']),
   team:     z.string().min(1, 'Please select a department'),
   jobTitle: z.string().optional(),
 });
@@ -49,7 +50,7 @@ export default function OnboardingPage() {
   const router = useRouter();
 
   const [domainLoading, setDomainLoading] = useState(true);
-  const [isRomega, setIsRomega]           = useState(false);
+  const [isTrusted, setIsTrusted]         = useState(false);
   const [submitted, setSubmitted]         = useState(false);
   const [serverError, setServerError]     = useState('');
   const [errorKey, setErrorKey]           = useState(0);
@@ -71,9 +72,9 @@ export default function OnboardingPage() {
     supabase.auth.getUser().then(({ data }) => {
       const email  = data.user?.email ?? '';
       const domain = email.split('@')[1] ?? '';
-      const romega = domain === ROMEGA_DOMAIN;
-      setIsRomega(romega);
-      if (!romega) setValue('role', 'ic');
+      const trusted = TRUSTED_DOMAINS.includes(domain);
+      setIsTrusted(trusted);
+      if (!trusted) setValue('role', 'ic');
       setDomainLoading(false);
     });
   }, [setValue]);
@@ -189,8 +190,8 @@ export default function OnboardingPage() {
               <label className="block text-sm font-medium text-(--rs-neutral-grey-800)">Your Role</label>
 
               {domainLoading ? (
-                <div className="h-[72px] rounded-xl bg-(--rs-neutral-grey-100) animate-pulse" aria-hidden="true" />
-              ) : isRomega ? (
+                <div className="h-[100px] rounded-xl bg-(--rs-neutral-grey-100) animate-pulse" aria-hidden="true" />
+              ) : isTrusted ? (
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     {ROLE_OPTS.map(opt => {
@@ -203,7 +204,8 @@ export default function OnboardingPage() {
                               ? 'border-(--rs-primary-500) bg-(--rs-primary-50) text-(--rs-primary-700) font-semibold animate-card-select'
                               : 'border-(--rs-neutral-grey-200) text-(--rs-neutral-grey-600) hover:border-(--rs-primary-300) hover:bg-(--rs-primary-50)'
                           }`}>
-                          {opt.label}
+                          <div className="font-semibold">{opt.label}</div>
+                          <div className={`mt-0.5 text-[11px] ${selected ? 'text-(--rs-primary-500)' : 'text-(--rs-neutral-grey-400)'}`}>{opt.desc}</div>
                         </button>
                       );
                     })}
@@ -218,7 +220,7 @@ export default function OnboardingPage() {
                   <div>
                     <p className="text-sm font-medium text-(--rs-neutral-grey-700)">Individual Contributor (IC)</p>
                     <p className="text-xs text-(--rs-neutral-grey-400)">
-                      Non-@{ROMEGA_DOMAIN} accounts are assigned the IC role.
+                      Your domain is not in the trusted list. Role is assigned by your administrator.
                     </p>
                   </div>
                 </div>
