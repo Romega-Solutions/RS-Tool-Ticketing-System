@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
-import { clockOut } from '@/lib/presence';
 
 export const runtime = 'nodejs';
 
@@ -11,7 +10,6 @@ export async function POST() {
     const supabase = await createClient();
     const session = await getSession();
 
-    // Best-effort auto clock-out — don't block logout if DB fails
     if (session) {
       const admin = createAdminClient();
       const { data: open } = await admin
@@ -22,19 +20,10 @@ export async function POST() {
         .maybeSingle();
 
       if (open) {
-        const now = new Date().toISOString();
-        const durationSeconds = Math.round(
-          (Date.now() - new Date(open.clocked_in_at).getTime()) / 1000
+        return NextResponse.json(
+          { clockedIn: true, clockedInAt: open.clocked_in_at },
+          { status: 409 }
         );
-        const { error } = await admin
-          .from('timesheets')
-          .update({ clocked_out_at: now, duration_seconds: durationSeconds })
-          .eq('id', open.id);
-        if (error) {
-          console.error('[logout] clock-out update failed:', error.message);
-        } else {
-          clockOut(session.id);
-        }
       }
     }
 
