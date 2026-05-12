@@ -1,4 +1,5 @@
-const ORG_CHART_BASE = 'https://tools.romega-solutions.com';
+// The org chart app is deployed at /org-chart sub-path
+const ORG_CHART_BASE = 'https://tools.romega-solutions.com/org-chart';
 
 export type OrgPerson = {
   id: number;
@@ -16,16 +17,12 @@ type RawPerson = {
   name: string;
   title: string;
   departmentId: number;
+  departmentName?: string | null;
+  departmentColor?: string | null;
   reportsTo?: number | null;
   photoUrl?: string | null;
   email?: string | null;
   isActive: boolean | number;
-};
-
-type RawDepartment = {
-  id: number;
-  name: string;
-  color?: string | null;
 };
 
 function resolvePhotoUrl(url: string | null | undefined): string | null {
@@ -77,57 +74,47 @@ export function mapOrgDeptToAppTeam(orgDeptName: string): string {
   return contains ?? orgDeptName;
 }
 
-async function apiFetch(path: string): Promise<unknown> {
+async function fetchPeople(): Promise<RawPerson[]> {
   const key = process.env.ORG_CHART_API_KEY;
   if (!key) {
     console.error('[orgchart] ORG_CHART_API_KEY is not set');
-    return null;
+    return [];
   }
   try {
-    const res = await fetch(`${ORG_CHART_BASE}${path}`, {
+    const res = await fetch(`${ORG_CHART_BASE}/api/people`, {
       headers: { 'X-API-Key': key },
       cache: 'no-store',
     });
     if (!res.ok) {
-      console.error(`[orgchart] ${path} → HTTP ${res.status}`);
-      return null;
+      console.error(`[orgchart] /api/people → HTTP ${res.status}`);
+      return [];
     }
-    const json = await res.json() as unknown;
-    return json;
+    const raw = await res.json() as unknown;
+    if (Array.isArray(raw)) return raw as RawPerson[];
+    // handle wrapped shapes: { people: [...] }, { data: [...] }
+    if (raw && typeof raw === 'object') {
+      for (const key of ['people', 'data', 'items', 'results']) {
+        const val = (raw as Record<string, unknown>)[key];
+        if (Array.isArray(val)) return val as RawPerson[];
+      }
+    }
+    console.error('[orgchart] unexpected /api/people shape');
+    return [];
   } catch (err) {
-    console.error(`[orgchart] ${path} fetch error:`, err);
-    return null;
+    console.error('[orgchart] /api/people fetch error:', err);
+    return [];
   }
 }
 
-function unwrapArray<T>(raw: unknown): T[] {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw as T[];
-  if (typeof raw === 'object') {
-    // handle { people: [...] }, { departments: [...] }, { data: [...] }, etc.
-    for (const key of ['people', 'departments', 'data', 'items', 'results']) {
-      const val = (raw as Record<string, unknown>)[key];
-      if (Array.isArray(val)) return val as T[];
-    }
-  }
-  console.error('[orgchart] unexpected response shape:', JSON.stringify(raw).slice(0, 200));
-  return [];
-}
-
-function buildOrgPerson(
-  match: RawPerson,
-  active: RawPerson[],
-  departments: RawDepartment[],
-): OrgPerson {
-  const rawDept  = departments.find(d => d.id === match.departmentId);
-  const deptName = rawDept?.name ?? '';
-  const manager  = match.reportsTo ? active.find(p => p.id === match.reportsTo) : null;
+function buildOrgPerson(match: RawPerson, active: RawPerson[]): OrgPerson {
+  const deptName  = match.departmentName ?? '';
+  const manager   = match.reportsTo ? active.find(p => p.id === match.reportsTo) : null;
   return {
     id:              match.id,
     name:            match.name,
     title:           match.title,
     department:      mapOrgDeptToAppTeam(deptName),
-    departmentColor: rawDept?.color ?? null,
+    departmentColor: match.departmentColor ?? null,
     reportsToName:   manager?.name ?? null,
     photoUrl:        resolvePhotoUrl(match.photoUrl),
     email:           match.email ?? null,
@@ -135,40 +122,27 @@ function buildOrgPerson(
 }
 
 /**
- * Look up an org chart person by email (primary) then name (fallback).
- * Email match requires the org chart list to include the email field.
- * Name matching uses exact → first+last token strategies.
+ * Look up an org chart person by email (if available in the list response)
+ * then by name — exact first, then first+last token (handles middle names/accents).
  */
 export async function lookupPerson(opts: { email?: string; name?: string }): Promise<OrgPerson | null> {
   const { email, name } = opts;
   if (!email && (!name || name.trim().length < 2)) return null;
 
-  const [rawPeople, rawDepts] = await Promise.all([
-    apiFetch('/api/people'),
-    apiFetch('/api/departments'),
-  ]);
-
-  const people      = unwrapArray<RawPerson>(rawPeople);
-  const departments = unwrapArray<RawDepartment>(rawDepts);
-
-  if (!people.length) {
-    console.error('[orgchart] /api/people returned empty or failed');
-    return null;
-  }
+  const people = await fetchPeople();
+  if (!people.length) return null;
 
   const active = people.filter(p => p.isActive !== false && p.isActive !== 0);
+  console.log(`[orgchart] ${active.length} active people; email="${email ?? ''}" name="${name ?? ''}"`);
 
-  console.log(`[orgchart] ${active.length} active people fetched; searching email="${email ?? ''}" name="${name ?? ''}"`);
-
-  // 1. Email — exact, case-insensitive
+  // 1. Email — exact, case-insensitive (works only if API returns email field)
   if (email) {
     const normEmail = email.toLowerCase().trim();
     const byEmail   = active.find(p => p.email?.toLowerCase().trim() === normEmail);
     if (byEmail) {
       console.log(`[orgchart] matched by email → ${byEmail.name}`);
-      return buildOrgPerson(byEmail, active, departments);
+      return buildOrgPerson(byEmail, active);
     }
-    console.log('[orgchart] no email match found (field may not be in list response)');
   }
 
   // 2. Name — exact normalised
@@ -177,19 +151,18 @@ export async function lookupPerson(opts: { email?: string; name?: string }): Pro
     const byExact  = active.find(p => normalizeStr(p.name) === normName);
     if (byExact) {
       console.log(`[orgchart] matched by exact name → ${byExact.name}`);
-      return buildOrgPerson(byExact, active, departments);
+      return buildOrgPerson(byExact, active);
     }
 
     // 3. Name — first + last token (handles middle names, accents, suffixes)
     const byTokens = active.find(p => firstLastMatch(p.name, name));
     if (byTokens) {
       console.log(`[orgchart] matched by first+last tokens → ${byTokens.name}`);
-      return buildOrgPerson(byTokens, active, departments);
+      return buildOrgPerson(byTokens, active);
     }
 
-    // Debug: show closest names to diagnose misses
     const sample = active.slice(0, 5).map(p => p.name).join(', ');
-    console.log(`[orgchart] no name match for "${name}". Sample names: ${sample}`);
+    console.log(`[orgchart] no match for "${name}". Sample: ${sample}`);
   }
 
   return null;
