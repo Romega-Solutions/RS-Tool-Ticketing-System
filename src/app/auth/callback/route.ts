@@ -54,7 +54,10 @@ export async function GET(request: NextRequest) {
   let isNewUser = false;
   if (!existing) {
     const emailPrefix = email.split('@')[0].replace(/[^a-z0-9_]/gi, '_').toLowerCase();
-    const name = (authUser.user_metadata?.name as string | undefined)?.trim() || emailPrefix;
+    const name = (
+      (authUser.user_metadata?.full_name as string | undefined) ||
+      (authUser.user_metadata?.name as string | undefined)
+    )?.trim() || emailPrefix;
     const now = new Date().toISOString();
     await admin.from('users').upsert({
       username:      emailPrefix,
