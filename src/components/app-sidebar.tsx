@@ -121,11 +121,23 @@ function NavLinks({ collapsed = false, role }: { collapsed?: boolean; role: AppR
 
 function LogoutButton({ collapsed = false }: { collapsed?: boolean }) {
   const router = useRouter();
-  const [loggingOut, setLoggingOut] = useState(false);
+  const [loggingOut, setLoggingOut]         = useState(false);
+  const [clockedInSince, setClockedInSince] = useState<string | null>(null);
 
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
+      // Check clock-in status before attempting logout
+      const presenceRes = await fetch('/api/presence');
+      if (presenceRes.ok) {
+        const presence = await presenceRes.json() as { openSession?: { clockedInAt: string } | null };
+        if (presence.openSession?.clockedInAt) {
+          setClockedInSince(presence.openSession.clockedInAt);
+          setLoggingOut(false);
+          return;
+        }
+      }
+
       const res = await fetch('/api/auth/logout', { method: 'POST' });
       if (res.ok) {
         router.push('/login');
@@ -138,6 +150,10 @@ function LogoutButton({ collapsed = false }: { collapsed?: boolean }) {
       setLoggingOut(false);
     }
   };
+
+  const clockedInTime = clockedInSince
+    ? new Date(clockedInSince).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })
+    : '';
 
   return (
     <>
@@ -160,6 +176,29 @@ function LogoutButton({ collapsed = false }: { collapsed?: boolean }) {
           </div>
         </div>
       )}
+
+      {clockedInSince && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full mx-4 p-6 space-y-4">
+            <div className="space-y-1.5">
+              <h2 className="text-base font-semibold text-(--rs-neutral-grey-900)">Still clocked in</h2>
+              <p className="text-sm text-(--rs-neutral-grey-600)">
+                You&apos;ve been clocked in since <span className="font-semibold text-(--rs-neutral-grey-900)">{clockedInTime}</span>.
+                Please clock out before logging out.
+              </p>
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={() => setClockedInSince(null)}
+                className="px-4 py-2 text-sm font-medium rounded-md bg-(--rs-primary-500) text-white hover:bg-(--rs-primary-600) transition-colors"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <button
         onClick={handleLogout}
         disabled={loggingOut}
