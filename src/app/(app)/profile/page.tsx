@@ -111,10 +111,13 @@ export default function ProfilePage() {
           reminderIntervalMinutes: data.user.reminderIntervalMinutes ?? 120,
         });
 
-        // Load org chart profile in the background
-        if (data.user.name) {
+        // Load org chart profile in the background — email first, name fallback
+        if (data.user.email || data.user.name) {
           setOrgLoading(true);
-          fetch(`/api/orgchart/lookup?name=${encodeURIComponent(data.user.name)}`)
+          const params = new URLSearchParams();
+          if (data.user.email) params.set('email', data.user.email);
+          if (data.user.name)  params.set('name',  data.user.name);
+          fetch(`/api/orgchart/lookup?${params.toString()}`)
             .then(r => r.json())
             .then(({ match }: { match: OrgPerson | null }) => setOrgProfile(match ?? null))
             .catch(() => setOrgProfile(null))
@@ -131,12 +134,15 @@ export default function ProfilePage() {
 
   const handleOrgSync = async () => {
     const name = form.name.trim();
-    if (!name) return;
+    if (!name && !user?.email) return;
     setSyncing(true);
     setSyncMsg('');
     setError('');
     try {
-      const res = await fetch(`/api/orgchart/lookup?name=${encodeURIComponent(name)}`);
+      const params = new URLSearchParams();
+      if (user?.email) params.set('email', user.email);
+      if (name)        params.set('name',  name);
+      const res = await fetch(`/api/orgchart/lookup?${params.toString()}`);
       const data = await res.json() as { match: OrgPerson | null };
       if (data.match) {
         setOrgProfile(data.match);

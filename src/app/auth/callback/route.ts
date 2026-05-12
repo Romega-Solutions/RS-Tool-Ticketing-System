@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { lookupPersonByName } from '@/lib/orgchart';
+import { lookupPerson } from '@/lib/orgchart';
 
 export const runtime = 'nodejs';
 
@@ -76,7 +76,8 @@ export async function GET(request: NextRequest) {
 
     // Enrich new user from org chart (silent fail — never blocks auth)
     try {
-      const orgMatch = await lookupPersonByName(name);
+      // Email is the primary key; name is the fallback
+      const orgMatch = await lookupPerson({ email, name });
       if (orgMatch) {
         await admin.from('users').update({
           team:      orgMatch.department,

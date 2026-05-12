@@ -8,6 +8,7 @@ export type OrgPerson = {
   departmentColor: string | null;
   reportsToName: string | null;
   photoUrl: string | null;
+  email: string | null;
 };
 
 type RawPerson = {
@@ -17,6 +18,7 @@ type RawPerson = {
   departmentId: number;
   reportsTo?: number | null;
   photoUrl?: string | null;
+  email?: string | null;
   isActive: boolean;
 };
 
@@ -90,8 +92,30 @@ async function apiFetch<T>(path: string): Promise<T | null> {
   }
 }
 
-export async function lookupPersonByName(name: string): Promise<OrgPerson | null> {
-  if (!name || name.trim().length < 2) return null;
+function buildOrgPerson(match: RawPerson, active: RawPerson[], departments: RawDepartment[]): OrgPerson {
+  const rawDept = departments.find(d => d.id === match.departmentId);
+  const deptName = rawDept?.name ?? '';
+  const manager = match.reportsTo ? active.find(p => p.id === match.reportsTo) : null;
+  return {
+    id: match.id,
+    name: match.name,
+    title: match.title,
+    department: mapOrgDeptToAppTeam(deptName),
+    departmentColor: rawDept?.color ?? null,
+    reportsToName: manager?.name ?? null,
+    photoUrl: resolvePhotoUrl(match.photoUrl),
+    email: match.email ?? null,
+  };
+}
+
+/**
+ * Look up an org chart person by email (primary) then name (fallback).
+ * Both are optional but at least one should be provided.
+ * Returns null silently if the API is unreachable or no match found.
+ */
+export async function lookupPerson(opts: { email?: string; name?: string }): Promise<OrgPerson | null> {
+  const { email, name } = opts;
+  if (!email && (!name || name.trim().length < 2)) return null;
 
   const [people, departments] = await Promise.all([
     apiFetch<RawPerson[]>('/api/people'),
@@ -102,26 +126,28 @@ export async function lookupPersonByName(name: string): Promise<OrgPerson | null
 
   const active = people.filter(p => p.isActive);
 
-  const normInput = normalizeStr(name);
-  let match = active.find(p => normalizeStr(p.name) === normInput);
-
-  if (!match) {
-    match = active.find(p => firstLastMatch(p.name, name));
+  // 1. Email — exact, case-insensitive (most reliable)
+  if (email) {
+    const normEmail = email.toLowerCase().trim();
+    const byEmail = active.find(p => p.email?.toLowerCase().trim() === normEmail);
+    if (byEmail) return buildOrgPerson(byEmail, active, departments);
   }
 
-  if (!match) return null;
+  // 2. Name — exact normalised
+  if (name) {
+    const normName = normalizeStr(name);
+    const byExact = active.find(p => normalizeStr(p.name) === normName);
+    if (byExact) return buildOrgPerson(byExact, active, departments);
 
-  const rawDept = departments.find(d => d.id === match.departmentId);
-  const deptName = rawDept?.name ?? '';
-  const manager = match.reportsTo ? active.find(p => p.id === match.reportsTo) : null;
+    // 3. Name — first + last token (handles middle names, accents)
+    const byTokens = active.find(p => firstLastMatch(p.name, name));
+    if (byTokens) return buildOrgPerson(byTokens, active, departments);
+  }
 
-  return {
-    id: match.id,
-    name: match.name,
-    title: match.title,
-    department: mapOrgDeptToAppTeam(deptName),
-    departmentColor: rawDept?.color ?? null,
-    reportsToName: manager?.name ?? null,
-    photoUrl: resolvePhotoUrl(match.photoUrl),
-  };
+  return null;
+}
+
+/** Convenience wrapper kept for backward compatibility. */
+export async function lookupPersonByName(name: string): Promise<OrgPerson | null> {
+  return lookupPerson({ name });
 }

@@ -88,10 +88,13 @@ export default function OnboardingPage() {
 
       setDomainLoading(false);
 
-      // Org chart lookup — pre-fill department + job title if matched
-      if (oauthName && oauthName.length >= 2) {
+      // Org chart lookup — email is primary, name is fallback
+      if (email || (oauthName && oauthName.length >= 2)) {
         try {
-          const res = await fetch(`/api/orgchart/lookup?name=${encodeURIComponent(oauthName)}`);
+          const params = new URLSearchParams();
+          if (email) params.set('email', email);
+          if (oauthName) params.set('name', oauthName);
+          const res = await fetch(`/api/orgchart/lookup?${params.toString()}`);
           if (res.ok) {
             const { match } = await res.json() as { match: OrgPerson | null };
             if (match) {
