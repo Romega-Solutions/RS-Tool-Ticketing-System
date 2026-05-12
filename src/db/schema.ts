@@ -11,9 +11,11 @@ export const users = pgTable('users', {
   team:          text('team'),
   jobTitle:      text('job_title'),
   planeMemberId: text('plane_member_id'),
-  isActive:      integer('is_active').notNull().default(1),
-  createdAt:     text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt:     text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  isActive:               integer('is_active').notNull().default(1),
+  reminderEnabled:        integer('reminder_enabled').notNull().default(1),
+  reminderIntervalMinutes: integer('reminder_interval_minutes').notNull().default(120),
+  createdAt:              text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt:              text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
 export const timesheets = pgTable('timesheets', {

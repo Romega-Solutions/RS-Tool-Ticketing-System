@@ -13,6 +13,8 @@ type ProfileUser = {
   jobTitle: string | null;
   planeMemberId?: string | null;
   isActive: boolean;
+  reminderEnabled: boolean;
+  reminderIntervalMinutes: number;
 };
 
 const inputBase =
@@ -34,6 +36,8 @@ export default function ProfilePage() {
     team: '',
     jobTitle: '',
     password: '',
+    reminderEnabled: true,
+    reminderIntervalMinutes: 120,
   });
 
   useEffect(() => {
@@ -56,10 +60,12 @@ export default function ProfilePage() {
         setAvailableTeams(data.availableTeams ?? []);
         setAvailableJobTitles(data.availableJobTitles ?? []);
         setForm({
-          name:     data.user.name || '',
-          team:     data.user.team || '',
-          jobTitle: data.user.jobTitle || '',
-          password: '',
+          name:                    data.user.name || '',
+          team:                    data.user.team || '',
+          jobTitle:                data.user.jobTitle || '',
+          password:                '',
+          reminderEnabled:         data.user.reminderEnabled ?? true,
+          reminderIntervalMinutes: data.user.reminderIntervalMinutes ?? 120,
         });
       } catch {
         setError('Failed to load profile');
@@ -224,6 +230,51 @@ export default function ProfilePage() {
             className={inputBase}
           />
           <p className="text-xs text-(--rs-neutral-grey-400)">Minimum 8 characters if provided.</p>
+        </div>
+
+        <div className="border-t border-(--rs-neutral-grey-100)" />
+
+        {/* Clock-Out Reminders */}
+        <div className="space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold text-(--rs-neutral-grey-800)">Clock-Out Reminders</h3>
+            <p className="text-xs text-(--rs-neutral-grey-400) mt-0.5">
+              Get notified when you&apos;ve been clocked in for too long.
+            </p>
+          </div>
+
+          <label className="flex items-center gap-3 cursor-pointer select-none">
+            <div className="relative">
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                checked={form.reminderEnabled}
+                onChange={e => setForm(prev => ({ ...prev, reminderEnabled: e.target.checked }))}
+              />
+              <div className="w-9 h-5 rounded-full bg-(--rs-neutral-grey-200) peer-checked:bg-(--rs-primary-500) transition-colors" />
+              <div className="absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-4" />
+            </div>
+            <span className="text-sm text-(--rs-neutral-grey-700)">Enable reminders</span>
+          </label>
+
+          {form.reminderEnabled && (
+            <div className="space-y-1.5">
+              <label htmlFor="reminderInterval" className="block text-sm font-medium text-(--rs-neutral-grey-700)">
+                Remind me every
+              </label>
+              <select
+                id="reminderInterval"
+                value={form.reminderIntervalMinutes}
+                onChange={e => setForm(prev => ({ ...prev, reminderIntervalMinutes: Number(e.target.value) }))}
+                className={inputBase + ' bg-white cursor-pointer'}
+              >
+                <option value={30}>30 minutes</option>
+                <option value={60}>1 hour</option>
+                <option value={120}>2 hours (default)</option>
+                <option value={180}>3 hours</option>
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Plane Member ID (read-only info) */}

@@ -2,17 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { AlertTriangle, Loader2, LogIn, LogOut } from 'lucide-react';
+import { formatDuration } from '@/lib/utils';
+import { ClockOutReminderBanner } from '@/components/clock-out-reminder-banner';
 
 type WidgetState = 'loading' | 'out' | 'in';
 type PendingAction = 'clock-in' | 'clock-out' | null;
-
-function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (h === 0) return `${m}m`;
-  return `${h}h ${m}m`;
-}
 
 function ClockConfirmDialog({
   action,
@@ -123,13 +117,24 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+  const [reminderEnabled, setReminderEnabled] = useState(true);
+  const [reminderIntervalMinutes, setReminderIntervalMinutes] = useState(120);
+  const [reminderVisible, setReminderVisible] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const elapsedRef = useRef(0);
+  const lastReminderFiredRef = useRef<number>(0);
 
   function startTimer(sinceIso: string) {
     if (timerRef.current) clearInterval(timerRef.current);
     const calc = () => Math.max(0, Math.round((Date.now() - new Date(sinceIso).getTime()) / 1000));
-    setElapsed(calc());
-    timerRef.current = setInterval(() => setElapsed(calc()), 1000);
+    const initial = calc();
+    setElapsed(initial);
+    elapsedRef.current = initial;
+    timerRef.current = setInterval(() => {
+      const val = calc();
+      setElapsed(val);
+      elapsedRef.current = val;
+    }, 1000);
   }
 
   function stopTimer() {
@@ -142,14 +147,23 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/presence')
-      .then(r => r.json())
-      .then((data: { openSession?: { clockedInAt: string; notes?: string | null } | null }) => {
+    Promise.all([
+      fetch('/api/presence').then(r => r.json()),
+      fetch('/api/profile/me').then(r => r.json()),
+    ])
+      .then(([presenceData, profileData]: [
+        { openSession?: { clockedInAt: string; notes?: string | null } | null },
+        { user?: { reminderEnabled?: boolean; reminderIntervalMinutes?: number } }
+      ]) => {
         if (cancelled) return;
-        if (data.openSession?.clockedInAt) {
-          setSessionNote(data.openSession.notes ?? '');
+        if (profileData.user) {
+          setReminderEnabled(profileData.user.reminderEnabled ?? true);
+          setReminderIntervalMinutes(profileData.user.reminderIntervalMinutes ?? 120);
+        }
+        if (presenceData.openSession?.clockedInAt) {
+          setSessionNote(presenceData.openSession.notes ?? '');
           setNoteSaved(true);
-          startTimer(data.openSession.clockedInAt);
+          startTimer(presenceData.openSession.clockedInAt);
           setState('in');
         } else {
           setState('out');
@@ -161,6 +175,25 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (state !== 'in' || !reminderEnabled) return;
+    const intervalSec = reminderIntervalMinutes * 60;
+    const check = () => {
+      const n = Math.floor(elapsedRef.current / intervalSec);
+      if (n > 0 && n > lastReminderFiredRef.current) {
+        lastReminderFiredRef.current = n;
+        setReminderVisible(true);
+      }
+    };
+    check();
+    const id = setInterval(check, 30_000);
+    return () => clearInterval(id);
+  }, [state, reminderEnabled, reminderIntervalMinutes]);
+
+  function dismissReminder() {
+    setReminderVisible(false);
+  }
 
   function openClockInConfirm() {
     setError('');
@@ -218,6 +251,8 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
       }
 
       stopTimer();
+      setReminderVisible(false);
+      lastReminderFiredRef.current = 0;
       setSessionNote('');
       setNoteDraft('');
       setNoteSaved(true);
@@ -269,6 +304,13 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
             {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <LogIn className="w-3 h-3" />}
             <span className="hidden sm:inline">Clock In</span>
           </button>
+        )}
+        {state === 'in' && reminderEnabled && reminderVisible && (
+          <ClockOutReminderBanner
+            elapsedSeconds={elapsed}
+            onDismiss={dismissReminder}
+            onClockOut={() => { dismissReminder(); openClockOutConfirm(); }}
+          />
         )}
         {pendingAction && (
           <ClockConfirmDialog

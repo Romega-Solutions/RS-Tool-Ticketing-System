@@ -47,6 +47,8 @@ export async function GET() {
       jobTitle: user.job_title,
       planeMemberId: user.plane_member_id ?? null,
       isActive: Boolean(user.is_active),
+      reminderEnabled: Boolean(user.reminder_enabled ?? 1),
+      reminderIntervalMinutes: user.reminder_interval_minutes ?? 120,
     },
     availableTeams,
     availableJobTitles,
@@ -62,6 +64,8 @@ export async function PUT(req: Request) {
     team?: string;
     jobTitle?: string;
     password?: string;
+    reminderEnabled?: boolean;
+    reminderIntervalMinutes?: number;
   };
 
   const name = String(body.name || '').trim();
@@ -71,12 +75,20 @@ export async function PUT(req: Request) {
 
   if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
 
-  const payload: Record<string, string | null> = {
+  const VALID_INTERVALS = [30, 60, 120, 180];
+  const payload: Record<string, string | number | null> = {
     name,
     team: team || null,
     job_title: jobTitle || null,
     updated_at: new Date().toISOString(),
   };
+
+  if (body.reminderEnabled !== undefined) {
+    payload.reminder_enabled = body.reminderEnabled ? 1 : 0;
+  }
+  if (body.reminderIntervalMinutes !== undefined && VALID_INTERVALS.includes(Number(body.reminderIntervalMinutes))) {
+    payload.reminder_interval_minutes = Number(body.reminderIntervalMinutes);
+  }
 
   if (password) {
     if (password.length < 8) {
@@ -102,6 +114,8 @@ export async function PUT(req: Request) {
       team: updated.team,
       jobTitle: updated.job_title,
       isActive: Boolean(updated.is_active),
+      reminderEnabled: Boolean(updated.reminder_enabled ?? 1),
+      reminderIntervalMinutes: updated.reminder_interval_minutes ?? 120,
     },
   });
 }
