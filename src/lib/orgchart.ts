@@ -5,6 +5,8 @@ export type OrgPerson = {
   name: string;
   title: string;
   department: string;
+  departmentColor: string | null;
+  reportsToName: string | null;
   photoUrl: string | null;
 };
 
@@ -13,6 +15,7 @@ type RawPerson = {
   name: string;
   title: string;
   departmentId: number;
+  reportsTo?: number | null;
   photoUrl?: string | null;
   isActive: boolean;
 };
@@ -20,7 +23,14 @@ type RawPerson = {
 type RawDepartment = {
   id: number;
   name: string;
+  color?: string | null;
 };
+
+function resolvePhotoUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (url.startsWith('http')) return url;
+  return `${ORG_CHART_BASE}${url.startsWith('/') ? '' : '/'}${url}`;
+}
 
 const APP_DEPARTMENTS = [
   'AI & Technology',
@@ -90,7 +100,6 @@ export async function lookupPersonByName(name: string): Promise<OrgPerson | null
 
   if (!people || !departments) return null;
 
-  const deptMap = new Map(departments.map(d => [d.id, d.name]));
   const active = people.filter(p => p.isActive);
 
   const normInput = normalizeStr(name);
@@ -102,12 +111,17 @@ export async function lookupPersonByName(name: string): Promise<OrgPerson | null
 
   if (!match) return null;
 
-  const deptName = deptMap.get(match.departmentId) ?? '';
+  const rawDept = departments.find(d => d.id === match.departmentId);
+  const deptName = rawDept?.name ?? '';
+  const manager = match.reportsTo ? active.find(p => p.id === match.reportsTo) : null;
+
   return {
     id: match.id,
     name: match.name,
     title: match.title,
     department: mapOrgDeptToAppTeam(deptName),
-    photoUrl: match.photoUrl ?? null,
+    departmentColor: rawDept?.color ?? null,
+    reportsToName: manager?.name ?? null,
+    photoUrl: resolvePhotoUrl(match.photoUrl),
   };
 }
