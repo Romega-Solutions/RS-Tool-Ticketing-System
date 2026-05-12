@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2, Save } from 'lucide-react';
+import { Loader2, Save, RefreshCw } from 'lucide-react';
+import type { OrgPerson } from '@/lib/orgchart';
 
 type ProfileUser = {
   id: number;
@@ -26,6 +27,8 @@ const inputDisabled =
 export default function ProfilePage() {
   const [loading, setLoading]                   = useState(true);
   const [saving, setSaving]                     = useState(false);
+  const [syncing, setSyncing]                   = useState(false);
+  const [syncMsg, setSyncMsg]                   = useState('');
   const [error, setError]                       = useState('');
   const [success, setSuccess]                   = useState('');
   const [user, setUser]                         = useState<ProfileUser | null>(null);
@@ -75,6 +78,28 @@ export default function ProfilePage() {
     };
     void load();
   }, []);
+
+  const handleOrgSync = async () => {
+    const name = form.name.trim();
+    if (!name) return;
+    setSyncing(true);
+    setSyncMsg('');
+    setError('');
+    try {
+      const res = await fetch(`/api/orgchart/lookup?name=${encodeURIComponent(name)}`);
+      const data = await res.json() as { match: OrgPerson | null };
+      if (data.match) {
+        setForm(prev => ({ ...prev, team: data.match!.department, jobTitle: data.match!.title }));
+        setSyncMsg(`Synced from org chart — ${data.match.name}. Save to apply.`);
+      } else {
+        setSyncMsg('No org chart profile found for this name.');
+      }
+    } catch {
+      setSyncMsg('Could not reach org chart. Try again later.');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -160,9 +185,20 @@ export default function ProfilePage() {
 
         {/* Editable fields */}
         <div className="space-y-1.5">
-          <label htmlFor="name" className="block text-sm font-medium text-(--rs-neutral-grey-700)">
-            Full Name <span className="text-red-500">*</span>
-          </label>
+          <div className="flex items-center justify-between gap-2">
+            <label htmlFor="name" className="block text-sm font-medium text-(--rs-neutral-grey-700)">
+              Full Name <span className="text-red-500">*</span>
+            </label>
+            <button
+              type="button"
+              onClick={handleOrgSync}
+              disabled={syncing || !form.name.trim()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-(--rs-neutral-grey-200) px-2.5 py-1 text-xs font-medium text-(--rs-neutral-grey-600) hover:border-(--rs-primary-400) hover:text-(--rs-primary-600) transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <RefreshCw className={`w-3 h-3 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? 'Syncing…' : 'Sync from Org Chart'}
+            </button>
+          </div>
           <input
             id="name"
             value={form.name}
@@ -170,6 +206,11 @@ export default function ProfilePage() {
             required
             className={inputBase}
           />
+          {syncMsg && (
+            <p className={`text-xs ${syncMsg.startsWith('Synced') ? 'text-emerald-600' : 'text-(--rs-neutral-grey-500)'}`}>
+              {syncMsg}
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

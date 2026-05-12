@@ -6,7 +6,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { Loader2, ArrowRight, Lock, CheckCircle2, User, Users2, Briefcase, GraduationCap, Building2 } from 'lucide-react';
+import { Loader2, ArrowRight, Lock, CheckCircle2, User, Users2, Briefcase, GraduationCap, Building2, X, Sparkles } from 'lucide-react';
+import type { OrgPerson } from '@/lib/orgchart';
 import { createClient } from '@/lib/supabase/client';
 
 const TRUSTED_DOMAINS = ['romega-solutions.com', 'gmail.com'];
@@ -49,11 +50,13 @@ const STEPS = [
 export default function OnboardingPage() {
   const router = useRouter();
 
-  const [domainLoading, setDomainLoading] = useState(true);
-  const [isTrusted, setIsTrusted]         = useState(false);
-  const [submitted, setSubmitted]         = useState(false);
-  const [serverError, setServerError]     = useState('');
-  const [errorKey, setErrorKey]           = useState(0);
+  const [domainLoading, setDomainLoading]   = useState(true);
+  const [isTrusted, setIsTrusted]           = useState(false);
+  const [submitted, setSubmitted]           = useState(false);
+  const [serverError, setServerError]       = useState('');
+  const [errorKey, setErrorKey]             = useState(0);
+  const [orgMatch, setOrgMatch]             = useState<OrgPerson | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   const form = useForm<OnboardingValues>({
     resolver: zodResolver(onboardingSchema),
@@ -69,7 +72,7 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(async ({ data }) => {
       const email   = data.user?.email ?? '';
       const domain  = email.split('@')[1] ?? '';
       const trusted = TRUSTED_DOMAINS.includes(domain);
@@ -84,6 +87,21 @@ export default function OnboardingPage() {
       if (oauthName) setValue('name', oauthName);
 
       setDomainLoading(false);
+
+      // Org chart lookup — pre-fill department + job title if matched
+      if (oauthName && oauthName.length >= 2) {
+        try {
+          const res = await fetch(`/api/orgchart/lookup?name=${encodeURIComponent(oauthName)}`);
+          if (res.ok) {
+            const { match } = await res.json() as { match: OrgPerson | null };
+            if (match) {
+              setOrgMatch(match);
+              setValue('team', match.department, { shouldValidate: true });
+              setValue('jobTitle', match.title);
+            }
+          }
+        } catch { /* org chart unavailable — no pre-fill */ }
+      }
     });
   }, [setValue]);
 
@@ -228,6 +246,28 @@ export default function OnboardingPage() {
               );
             })}
           </div>
+
+          {/* Org chart match banner */}
+          {orgMatch && !bannerDismissed && (
+            <div className="mb-5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3.5">
+              <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-emerald-800">Found in org chart</p>
+                <p className="text-xs text-emerald-700 mt-0.5">
+                  Department and job title pre-filled from{' '}
+                  <span className="font-medium">{orgMatch.name}</span>&rsquo;s profile. You can change them below.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBannerDismissed(true)}
+                className="text-emerald-500 hover:text-emerald-700 transition-colors cursor-pointer"
+                aria-label="Dismiss"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
 
           {/* Server error */}
           {serverError && (
