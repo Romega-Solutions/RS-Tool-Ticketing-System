@@ -58,7 +58,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       <main className="flex-1 flex flex-col h-full overflow-hidden w-full">
         <header className="shrink-0 border-b border-[rgba(15,23,42,0.08)] bg-white px-4 py-3 shadow-[0_1px_3px_rgba(15,23,42,0.06)] md:px-8">
           <div className="flex items-center justify-between gap-4">
-            <MobileNav role={session.role} />
+            <MobileNav role={session.role} team={session.team} />
 
             <div className="min-w-0 flex-1">
               <h2 className="font-serif text-base font-bold text-(--rs-neutral-grey-900) md:text-lg leading-tight">

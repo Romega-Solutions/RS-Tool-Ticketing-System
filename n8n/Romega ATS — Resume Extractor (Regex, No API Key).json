@@ -1,0 +1,260 @@
+{
+  "name": "Romega ATS — Resume Extractor (Regex, No API Key)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "34a0c7fc-e9d1-4bac-a907-d1c84fd78874",
+        "formTitle": "Upload Resume",
+        "formDescription": "Upload a PDF or DOCX resume to extract candidate information automatically.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Resume File",
+              "fieldType": "file",
+              "multipleFiles": false,
+              "acceptFileTypes": ".pdf",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Candidate ID",
+              "placeholder": "e.g. candidate-001 (optional)"
+            }
+          ]
+        },
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a-form-trigger",
+      "name": "Resume Upload Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2,
+      "position": [
+        240,
+        304
+      ],
+      "webhookId": "34a0c7fc-e9d1-4bac-a907-d1c84fd78874"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst fileKey = Object.keys(item.binary || {})[0];\nif (!fileKey || !item.binary || !item.binary[fileKey]) {\n  throw new Error('NO_FILE — No file was uploaded. Please attach a PDF.');\n}\nconst file = item.binary[fileKey];\nconst DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';\nif (file.mimeType === DOCX_MIME) {\n  throw new Error('DOCX_NOT_SUPPORTED — Word files can\\'t be parsed by this workflow. Save the document as PDF and try again.');\n}\nif (file.mimeType !== 'application/pdf') {\n  throw new Error(`INVALID_FILE_TYPE — Got \"${file.mimeType}\". Only PDF is accepted.`);\n}\nif (file.fileSize > 10 * 1024 * 1024) {\n  throw new Error(`FILE_TOO_LARGE — ${(file.fileSize / 1024 / 1024).toFixed(1)} MB exceeds the 10 MB limit.`);\n}\nif (!file.fileSize || file.fileSize === 0) {\n  throw new Error('EMPTY_FILE — The uploaded file contains no data.');\n}\nconst candidateId = item.json['Candidate ID'] || item.json.candidate_id || `auto-${Date.now()}`;\nreturn [{ json: { valid: true, mimeType: file.mimeType, fileSize: file.fileSize, candidateId }, binary: { data: file } }];"
+      },
+      "id": "a-validator",
+      "name": "File Validator",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        304
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "id": "a-pdf",
+      "name": "Extract PDF Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        720,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nlet text = item.json.text || item.json.extractedText || '';\n\ntext = text.replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]/g, '');\ntext = text.replace(/\\n{3,}/g, '\\n\\n');\ntext = text.replace(/[ \\t]{2,}/g, ' ');\ntext = text.trim();\n\nif (text.length < 50) {\n  throw new Error('EXTRACTION_FAILED — Could not read meaningful text. File may be a scanned image.');\n}\n\nif (text.length > 12000) text = text.substring(0, 12000) + '\\n[TRUNCATED]';\n\nreturn [{ json: { ...item.json, cleanText: text, charCount: text.length } }];"
+      },
+      "id": "a-sanitizer",
+      "name": "Text Sanitizer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        304
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst text = item.json.cleanText || '';\n\nconst find = (re) => { const m = text.match(re); return m ? m[0].trim() : null; };\n\nconst email = find(/[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}/);\nconst phone = find(/\\(?\\+?[\\d\\s\\-().]{7,20}\\d/);\n\nconst linkedinRaw = find(/(?:https?:\\/\\/)?(?:www\\.)?linkedin\\.com\\/in\\/[\\w\\-]+/i);\nconst linkedin = linkedinRaw\n  ? (linkedinRaw.startsWith('http') ? linkedinRaw : 'https://' + linkedinRaw)\n  : null;\n\nconst websiteRaw = find(/https?:\\/\\/(?!(?:www\\.)?linkedin)[\\w\\-.]+\\.[a-z]{2,}(?:\\/\\S*)?/i);\nconst website = websiteRaw || null;\n\nconst lines = text.split('\\n').map(l => l.trim()).filter(l => l.length > 1);\nconst full_name = lines[0] || null;\n\nconst line2 = lines[1] || '';\nconst location = (line2.includes('\\u2022') || line2.includes('\\u00b7') || line2.includes('•'))\n  ? line2.split(/[\\u2022\\u00b7•]/)[0].trim() || null\n  : (!line2.includes('@') && !line2.match(/^[\\d]{4}/) ? line2 || null : null);\n\nconst getSection = (headers) => {\n  const re = new RegExp('(?:^|\\\\n)(?:' + headers + ')\\\\s*:?\\\\s*\\\\n([\\\\s\\\\S]*?)(?=\\\\n[A-Z][A-Za-z &\\\\/()]+\\\\s*\\\\n|$)', 'i');\n  const m = text.match(re);\n  return m ? m[1].trim() : null;\n};\n\nconst getInline = (headers) => {\n  const re = new RegExp('(?:^|\\\\n)(?:' + headers + ')\\\\s*:\\\\s*(.+)', 'i');\n  const m = text.match(re);\n  return m ? m[1].trim() : null;\n};\n\nconst summaryRaw = getSection('SUMMARY|PROFILE|OBJECTIVE|ABOUT(?: ME)?|OVERVIEW');\nconst skillsRaw  = getSection('(?:TECHNICAL )?SKILLS?(?: & EXPERTISE| & INTERESTS)?|COMPETENCIES|TECHNOLOGIES');\nconst expRaw     = getSection('(?:WORK |PROFESSIONAL )?EXPERIENCE|EMPLOYMENT(?: HISTORY)?');\nconst eduRaw     = getSection('EDUCATION(?:(?: &)? TRAINING)?|ACADEMIC(?: BACKGROUND)?');\nconst certRaw    = getSection('CERTIFICATIONS?|CERTIFICATES?|LICENSES?');\nconst langRaw    = getSection('LANGUAGES?(?: SKILLS?)?|LANGUAGE') || getInline('LANGUAGES?|LANGUAGE');\n\nconst SKILL_HEADERS = /^(Technical Skills?|Soft Skills?|Core Competencies?|Programming|Frontend|Backend|DevOps|Specialized|AI\\/ML|Cloud|Database|Other)$/i;\nconst skills = skillsRaw\n  ? skillsRaw.split('\\n').flatMap(line => {\n      const colonIdx = line.indexOf(':');\n      const content = (colonIdx > -1 && colonIdx < 50) ? line.substring(colonIdx + 1) : line;\n      return content\n        .split(/[,\\u2022|\\t\\xb7]+/)\n        .map(s => s.replace(/^[-*\\s]+/, '').trim())\n        .filter(s => s.length > 1 && s.length < 60 && !SKILL_HEADERS.test(s));\n    })\n  : [];\n\nconst certifications = certRaw\n  ? certRaw.split('\\n').map(s => s.replace(/^[-\\u2022*]\\s*/, '').trim()).filter(s => s.length > 3)\n  : [];\n\nconst languages = langRaw\n  ? langRaw.split(/[,\\n\\u2022|]+/).map(s => s.trim()).filter(s => s.length > 1 && s.length < 60)\n  : [];\n\nconst experience = [];\nif (expRaw) {\n  const expLines = expRaw.split('\\n').filter(l => l.trim());\n  const MONTHS = 'January|February|March|April|May|June|July|August|September|October|November|December';\n  const DATE_RE = new RegExp('(?:' + MONTHS + ')\\\\s+\\\\d{4}.*?[\\\\-\\u2013]\\\\s*(?:\\\\d{4}|[Pp]resent|[Cc]urrent)', 'i');\n  const YEAR_RE = /(\\d{4})\\s*[\\-\\u2013]\\s*(\\d{4}|[Pp]resent|[Cc]urrent)/;\n\n  const jobStarts = [];\n  for (let i = 0; i < expLines.length - 1; i++) {\n    if (DATE_RE.test(expLines[i + 1])) jobStarts.push(i);\n  }\n\n  for (let j = 0; j < jobStarts.length; j++) {\n    const s = jobStarts[j];\n    const e = j + 1 < jobStarts.length ? jobStarts[j + 1] : expLines.length;\n    const company = expLines[s].trim();\n    const titleLine = expLines[s + 1].trim();\n    const titleClean = titleLine.replace(DATE_RE, '').replace(/[\\-\\u2013,]+$/, '').trim();\n    const yearMatch = titleLine.match(YEAR_RE);\n    const desc = expLines.slice(s + 2, e)\n      .join(' ')\n      .replace(/[\\u2022•]\\s*/g, ' | ')\n      .replace(/\\s{2,}/g, ' ')\n      .trim()\n      .substring(0, 500);\n    experience.push({\n      company,\n      title: titleClean,\n      start_date: yearMatch ? yearMatch[1] : null,\n      end_date: yearMatch ? yearMatch[2] : null,\n      description: desc || null\n    });\n  }\n}\n\nconst education = [];\nif (eduRaw) {\n  const SKIP = /^(Relevant|Awards|Coursework|Honors|GPA|Dean|Thesis|Major|Minor|Bachelor|Master|Doctor|College of)/i;\n  const DEGREE_WORDS = /Bachelor|Master|Doctor|Associate|Diploma|Certificate|B\\.S|M\\.S|Ph\\.D/i;\n  const eduLines = eduRaw.split('\\n').filter(l => l.trim() && !l.trim().startsWith('\\u2022') && !l.trim().startsWith('•'));\n  let i = 0;\n  while (i < eduLines.length) {\n    const cur = eduLines[i].trim();\n    if (/^[A-Z]/.test(cur) && !SKIP.test(cur) && !DEGREE_WORDS.test(cur) && cur.length > 5) {\n      let degree = null;\n      let gradYear = null;\n      const yr = cur.match(/\\b(19|20)\\d{2}\\b/);\n      if (!yr && i + 1 < eduLines.length) {\n        const nxt = eduLines[i + 1].trim();\n        if (DEGREE_WORDS.test(nxt) || /\\d{4}/.test(nxt)) {\n          degree = nxt.replace(/\\s+\\d{4}$/, '').trim();\n          const nxtYr = nxt.match(/\\b(19|20)\\d{2}\\b/);\n          gradYear = nxtYr ? nxtYr[0] : null;\n          i++;\n        }\n      }\n      education.push({\n        institution: cur.replace(/\\s+(19|20)\\d{2}.*$/, '').trim(),\n        degree,\n        field: null,\n        graduation_year: yr ? yr[0] : gradYear\n      });\n    }\n    i++;\n  }\n}\n\nif (!full_name && !email) {\n  throw new Error('EXTRACTION_EMPTY — Could not extract name or email.');\n}\n\nreturn [{\n  json: {\n    extractedData: {\n      full_name, email, phone, location, linkedin,\n      website,\n      summary: summaryRaw,\n      skills, experience, education, certifications, languages\n    },\n    candidateId: item.json.candidateId,\n    cleanText: text,\n    parsedAt: new Date().toISOString(),\n    method: 'regex'\n  }\n}];"
+      },
+      "id": "a-regex",
+      "name": "Regex Extractor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        304
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  success: true,\n  message: 'Resume parsed successfully (regex).',\n  candidate: {\n    name: $json.extractedData.full_name,\n    email: $json.extractedData.email,\n    skills_found: ($json.extractedData.skills || []).length,\n    jobs_found: ($json.extractedData.experience || []).length,\n    education_found: ($json.extractedData.education || []).length,\n    candidate_id: $json.candidateId\n  },\n  data: $json.extractedData\n}) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a-success",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ (() => {\n  const raw = String($json.error || ($json.error && $json.error.message) || $json.message || 'Unknown error');\n  const KNOWN = ['NO_FILE','EMPTY_FILE','FILE_TOO_LARGE','INVALID_FILE_TYPE','DOCX_NOT_SUPPORTED','EXTRACTION_FAILED','EXTRACTION_EMPTY'];\n  const m = raw.match(new RegExp('\\\\b(' + KNOWN.join('|') + ')\\\\b'));\n  const code = m ? m[1] : 'UNKNOWN_ERROR';\n  const message = m ? raw.replace(new RegExp('^' + m[1] + '\\\\s*[—:-]\\\\s*'), '').replace(/\\s*\\[line \\d+\\]\\s*$/, '').trim() : raw;\n  return JSON.stringify({success: false, error: message, code});\n})() }}",
+        "options": {
+          "responseCode": 400,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a-error",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        720,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Programmatic POST works too\n\nThis form trigger also accepts POSTs from your own app:\n\n```\nPOST  https://<n8n-host>/form/<path-uuid>\nContent-Type: multipart/form-data\nFields:\n  - \"Resume File\"   (file, required)\n  - \"Candidate ID\"  (text, optional)\n```\n\nResponse: JSON via the Success Response / Error Response nodes (responseMode = responseNode).",
+        "height": 240,
+        "width": 380,
+        "color": 4
+      },
+      "id": "a-sticky",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        528
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Resume Upload Form": {
+      "main": [
+        [
+          {
+            "node": "File Validator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "File Validator": {
+      "main": [
+        [
+          {
+            "node": "Extract PDF Text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract PDF Text": {
+      "main": [
+        [
+          {
+            "node": "Text Sanitizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Sanitizer": {
+      "main": [
+        [
+          {
+            "node": "Regex Extractor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Regex Extractor": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "c5fea6e7-ae5a-4a98-b8f1-ef52bc388417",
+  "meta": {
+    "instanceId": "6b386af7136a0dcc8fa5c054c7f6833f2e54755797a22833e05465e4a75a36d2"
+  },
+  "id": "74Dq1kDNgLtSSxcF",
+  "tags": [
+    {
+      "updatedAt": "2026-04-23T09:17:29.544Z",
+      "createdAt": "2026-04-23T09:17:29.544Z",
+      "id": "DJqtCHbng6p1dlyR",
+      "name": "ocr"
+    }
+  ]
+}

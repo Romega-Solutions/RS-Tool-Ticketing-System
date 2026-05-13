@@ -53,6 +53,12 @@
   --animate-pulse-soft: pulse-soft 2s ease-in-out infinite;
   --animate-slide-up: slide-up 0.2s ease-out;
   --animate-fade-in: fade-in 0.15s ease-out;
+  --animate-skeleton-wave: skeleton-wave 1.6s ease-in-out infinite;
+  --animate-battery-charge: battery-charge 1.4s ease-in-out infinite;
+  --animate-battery-scan: battery-scan 1.6s ease-in-out infinite;
+  --animate-lead-enter: lead-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-lead-enter-delayed: lead-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both;
+  --animate-lead-card: lead-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 /* Copy protection styles */
@@ -376,6 +382,67 @@ select,
   }
 }
 
+@keyframes skeleton-wave {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+
+  50% {
+    opacity: 1;
+    background-color: color-mix(in srgb, var(--rs-primary-100) 26%, white);
+  }
+}
+
+@keyframes battery-charge {
+  0% {
+    width: 22%;
+    opacity: 0.72;
+  }
+
+  55% {
+    width: 70%;
+    opacity: 1;
+  }
+
+  100% {
+    width: 46%;
+    opacity: 0.82;
+  }
+}
+
+@keyframes battery-scan {
+  0% {
+    transform: translateX(-120%);
+    opacity: 0;
+  }
+
+  20% {
+    opacity: 0.42;
+  }
+
+  65% {
+    opacity: 0.22;
+  }
+
+  100% {
+    transform: translateX(260%);
+    opacity: 0;
+  }
+}
+
+@keyframes lead-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @utility no-scrollbar {
   scrollbar-width: none;
 
@@ -398,6 +465,30 @@ select,
 
 @utility animate-fade-in {
   animation: fade-in 0.2s ease-out both;
+}
+
+@utility animate-skeleton-wave {
+  animation: skeleton-wave 1.6s ease-in-out infinite;
+}
+
+@utility animate-battery-charge {
+  animation: battery-charge 1.4s ease-in-out infinite;
+}
+
+@utility animate-battery-scan {
+  animation: battery-scan 1.6s ease-in-out infinite;
+}
+
+@utility animate-lead-enter {
+  animation: lead-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@utility animate-lead-enter-delayed {
+  animation: lead-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both;
+}
+
+@utility animate-lead-card {
+  animation: lead-enter 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @utility tabular-nums {

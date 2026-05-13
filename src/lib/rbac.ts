@@ -1,4 +1,5 @@
 export type AppRole = 'intern' | 'ic' | 'lead' | 'admin';
+export type LeadToolKey = 'ceo' | 'pm' | 'sales' | 'marketing' | 'recruiting';
 
 export function normalizeRole(role: unknown): AppRole {
   const value = String(role || '').trim().toLowerCase();
@@ -26,9 +27,37 @@ export function canAccessAdmin(role: AppRole): boolean {
   return role === 'admin';
 }
 
-export function canAccessPath(pathname: string, role: AppRole): boolean {
+export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string | null): boolean {
+  void tool;
+  void role;
+  void team;
+  // Temporary testing mode: expose all lead tools to any authenticated user.
+  // Keep destructive actions behind explicit typed confirmation in the tool UI.
+  return true;
+
+  /*
+  const normalizeTeamName = (value: string | null | undefined) => String(value ?? '').trim().toLowerCase();
+  const LEAD_TOOL_TEAMS: Record<LeadToolKey, string[]> = {
+    ceo: ['executive', 'executive & admin', 'admin'],
+    pm: ['operations', 'project management', 'design/pm'],
+    sales: ['sales', 'sales & account management'],
+    marketing: ['marketing', 'marketing & brand content', 'hr/marketing'],
+    recruiting: ['recruiting', 'talent acquisition', 'people operations', 'operations', 'hr/marketing', 'marketing & brand content'],
+  };
+  if (role === 'admin') return true;
+  if (role !== 'lead') return false;
+  return LEAD_TOOL_TEAMS[tool].includes(normalizeTeamName(team));
+  */
+}
+
+export function canAccessPath(pathname: string, role: AppRole, team: string | null = null): boolean {
   if (pathname.startsWith('/admin'))      return canAccessAdmin(role);
   if (pathname.startsWith('/attendance')) return canAccessReports(role);
+  if (pathname.startsWith('/ceo/'))       return canAccessLeadTool('ceo', role, team);
+  if (pathname.startsWith('/pm/'))        return canAccessLeadTool('pm', role, team);
+  if (pathname.startsWith('/sales/'))     return canAccessLeadTool('sales', role, team);
+  if (pathname.startsWith('/marketing/')) return canAccessLeadTool('marketing', role, team);
+  if (pathname.startsWith('/recruiting/')) return canAccessLeadTool('recruiting', role, team);
   return true;
 }
 

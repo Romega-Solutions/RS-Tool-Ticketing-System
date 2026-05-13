@@ -1,0 +1,327 @@
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { Card, CardContent } from '@/components/ui/card';
+import {
+  ArrowLeft, Mail, Phone, MapPin, Link2, Globe, Briefcase,
+  GraduationCap, Award, Languages as LanguagesIcon, Tag, Calendar,
+  Sparkles, FileText, AlertCircle,
+} from 'lucide-react';
+import { CandidateStatus, CandidateRating, CandidateDelete } from '../candidate-row';
+import { ResumeUploadCard } from '../resume-upload';
+
+type Candidate = {
+  id:             number;
+  full_name:      string;
+  email:          string | null;
+  phone:          string | null;
+  position:       string | null;
+  source:         string | null;
+  status:         string;
+  rating:         number | null;
+  notes:          string | null;
+  linkedin_url:   string | null;
+  resume_url:     string | null;
+  location:       string | null;
+  website:        string | null;
+  summary:        string | null;
+  skills:         string[] | null;
+  experience:     Array<{ company?: string|null; title?: string|null; start_date?: string|null; end_date?: string|null; description?: string|null }> | null;
+  education:      Array<{ institution?: string|null; degree?: string|null; field?: string|null; graduation_year?: string|null }> | null;
+  certifications: string[] | null;
+  languages:      string[] | null;
+  parsed_at:      string | null;
+  created_at:     string;
+};
+
+const SOURCE_LABEL: Record<string, string> = {
+  referral: 'Referral', linkedin: 'LinkedIn', job_board: 'Job board', direct: 'Direct', manual: 'Manual',
+};
+
+function initials(name: string) {
+  return name.split(' ').filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase() ?? '').join('') || '?';
+}
+
+function formatDate(iso: string | null) {
+  if (!iso) return null;
+  try { return new Date(iso).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }); }
+  catch { return iso; }
+}
+
+function formatDateRange(start: string | null | undefined, end: string | null | undefined) {
+  const s = start?.trim() || '';
+  const e = end?.trim() || '';
+  if (!s && !e) return null;
+  if (!e) return `${s} — Present`;
+  if (!s) return e;
+  return `${s} — ${e}`;
+}
+
+export default async function CandidateDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id: idParam } = await params;
+  const id = parseInt(idParam, 10);
+  if (!Number.isInteger(id) || id <= 0) notFound();
+
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from('candidates')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error?.message?.toLowerCase().includes('does not exist')) {
+    return <SetupRequired />;
+  }
+  if (!data) notFound();
+
+  const c = data as Candidate;
+  const hasParsedData =
+    c.parsed_at || c.summary || (c.skills?.length ?? 0) > 0 ||
+    (c.experience?.length ?? 0) > 0 || (c.education?.length ?? 0) > 0;
+
+  return (
+    <div className="space-y-6">
+      <Link
+        href="/recruiting/candidates"
+        className="inline-flex items-center gap-1.5 text-sm text-(--rs-neutral-grey-500) hover:text-(--rs-primary-600) transition-colors"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        Back to candidates
+      </Link>
+
+      {/* Hero */}
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex flex-col md:flex-row md:items-start gap-5">
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-(--rs-primary-500) to-(--rs-primary-700) text-white text-xl font-bold shadow-sm">
+              {initials(c.full_name)}
+            </div>
+
+            <div className="min-w-0 flex-1 space-y-3">
+              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                <div className="min-w-0">
+                  <h1 className="font-serif text-2xl font-bold text-(--rs-neutral-grey-900) leading-tight">
+                    {c.full_name}
+                  </h1>
+                  {c.position && (
+                    <p className="mt-0.5 text-sm text-(--rs-neutral-grey-600)">
+                      Applying for <strong className="text-(--rs-neutral-grey-900)">{c.position}</strong>
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <CandidateRating id={c.id} rating={c.rating} />
+                  <CandidateStatus id={c.id} status={c.status} />
+                  <CandidateDelete id={c.id} />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-(--rs-neutral-grey-700)">
+                {c.email    && <ContactPill icon={<Mail     className="w-3.5 h-3.5" />} text={c.email}    href={`mailto:${c.email}`} />}
+                {c.phone    && <ContactPill icon={<Phone    className="w-3.5 h-3.5" />} text={c.phone}    href={`tel:${c.phone}`} />}
+                {c.location && <ContactPill icon={<MapPin   className="w-3.5 h-3.5" />} text={c.location} />}
+                {c.linkedin_url && <ContactPill icon={<Link2 className="w-3.5 h-3.5" />} text="LinkedIn" href={c.linkedin_url} />}
+                {c.website  && <ContactPill icon={<Globe    className="w-3.5 h-3.5" />} text="Website"  href={c.website} />}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-(--rs-neutral-grey-500)">
+                <span className="inline-flex items-center gap-1.5">
+                  <Calendar className="w-3 h-3" /> Added {formatDate(c.created_at)}
+                </span>
+                {c.source && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Tag className="w-3 h-3" /> {SOURCE_LABEL[c.source] ?? c.source}
+                  </span>
+                )}
+                {c.parsed_at && (
+                  <span className="inline-flex items-center gap-1.5 text-(--rs-primary-600)">
+                    <Sparkles className="w-3 h-3" /> Resume parsed {formatDate(c.parsed_at)}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          {c.summary && (
+            <Section title="Summary">
+              <p className="text-sm text-(--rs-neutral-grey-700) leading-relaxed whitespace-pre-wrap">{c.summary}</p>
+            </Section>
+          )}
+
+          {(c.skills?.length ?? 0) > 0 && (
+            <Section title={`Skills · ${c.skills!.length}`}>
+              <div className="flex flex-wrap gap-1.5">
+                {c.skills!.map((s, i) => (
+                  <span key={i} className="rounded-md bg-(--rs-primary-50) px-2.5 py-1 text-xs font-medium text-(--rs-primary-800)">
+                    {s}
+                  </span>
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {(c.experience?.length ?? 0) > 0 && (
+            <Section title={`Experience · ${c.experience!.length}`} icon={<Briefcase className="w-4 h-4" />}>
+              <ol className="relative space-y-5 border-l border-(--rs-neutral-grey-200) pl-5">
+                {c.experience!.map((e, i) => (
+                  <li key={i} className="relative">
+                    <span className="absolute -left-[26px] top-1.5 h-2 w-2 rounded-full bg-(--rs-primary-500) ring-4 ring-white" />
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <h4 className="font-semibold text-(--rs-neutral-grey-900)">
+                        {e.title || 'Role'} {e.company && <span className="font-normal text-(--rs-neutral-grey-600)">@ {e.company}</span>}
+                      </h4>
+                      {formatDateRange(e.start_date, e.end_date) && (
+                        <span className="text-xs text-(--rs-neutral-grey-500) whitespace-nowrap">
+                          {formatDateRange(e.start_date, e.end_date)}
+                        </span>
+                      )}
+                    </div>
+                    {e.description && (
+                      <p className="mt-1.5 text-sm text-(--rs-neutral-grey-700) leading-relaxed whitespace-pre-wrap">{e.description}</p>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            </Section>
+          )}
+
+          {(c.education?.length ?? 0) > 0 && (
+            <Section title={`Education · ${c.education!.length}`} icon={<GraduationCap className="w-4 h-4" />}>
+              <ul className="space-y-3">
+                {c.education!.map((e, i) => (
+                  <li key={i} className="flex items-start gap-3">
+                    <div className="mt-1 h-2 w-2 rounded-full bg-(--rs-accent-500) shrink-0" />
+                    <div className="flex flex-wrap items-baseline justify-between gap-2 flex-1">
+                      <div>
+                        <p className="text-sm font-semibold text-(--rs-neutral-grey-900)">{e.institution || 'Institution'}</p>
+                        <p className="text-xs text-(--rs-neutral-grey-600)">
+                          {[e.degree, e.field].filter(Boolean).join(' · ') || '—'}
+                        </p>
+                      </div>
+                      {e.graduation_year && (
+                        <span className="text-xs text-(--rs-neutral-grey-500) whitespace-nowrap">{e.graduation_year}</span>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          )}
+
+          {((c.certifications?.length ?? 0) > 0 || (c.languages?.length ?? 0) > 0) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {(c.certifications?.length ?? 0) > 0 && (
+                <Section title="Certifications" icon={<Award className="w-4 h-4" />}>
+                  <ul className="space-y-1.5 text-sm text-(--rs-neutral-grey-700)">
+                    {c.certifications!.map((cert, i) => <li key={i}>· {cert}</li>)}
+                  </ul>
+                </Section>
+              )}
+              {(c.languages?.length ?? 0) > 0 && (
+                <Section title="Languages" icon={<LanguagesIcon className="w-4 h-4" />}>
+                  <div className="flex flex-wrap gap-1.5">
+                    {c.languages!.map((lang, i) => (
+                      <span key={i} className="rounded-md bg-(--rs-neutral-grey-100) px-2.5 py-1 text-xs font-medium text-(--rs-neutral-grey-700)">
+                        {lang}
+                      </span>
+                    ))}
+                  </div>
+                </Section>
+              )}
+            </div>
+          )}
+
+          {c.notes && (
+            <Section title="Internal notes" icon={<FileText className="w-4 h-4" />}>
+              <p className="text-sm text-(--rs-neutral-grey-700) leading-relaxed whitespace-pre-wrap">{c.notes}</p>
+            </Section>
+          )}
+        </div>
+
+        {/* Right rail */}
+        <aside className="space-y-5">
+          <ResumeUploadCard candidateId={c.id} />
+
+          {!hasParsedData && (
+            <div className="rounded-xl border border-(--rs-accent-200) bg-(--rs-accent-50)/50 p-4">
+              <div className="flex gap-2 text-(--rs-accent-700)">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold">No parsed resume yet</p>
+                  <p className="text-xs mt-1 text-(--rs-accent-700)/80">
+                    Upload a PDF/DOCX above to auto-fill summary, skills, experience, and education.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-4 space-y-2.5">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-(--rs-neutral-grey-500)">Quick facts</h3>
+            <KvRow label="Status"   value={<span className="capitalize">{c.status}</span>} />
+            <KvRow label="Rating"   value={c.rating ? `${c.rating}/5` : '—'} />
+            <KvRow label="Source"   value={c.source ? (SOURCE_LABEL[c.source] ?? c.source) : '—'} />
+            <KvRow label="Added"    value={formatDate(c.created_at) ?? '—'} />
+            <KvRow label="Parsed"   value={c.parsed_at ? formatDate(c.parsed_at) : <span className="text-(--rs-neutral-grey-400)">Not yet</span>} />
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <Card>
+      <CardContent className="p-5">
+        <h2 className="font-serif text-base font-bold text-(--rs-neutral-grey-900) flex items-center gap-2 mb-3">
+          {icon && <span className="text-(--rs-primary-600)">{icon}</span>}
+          {title}
+        </h2>
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ContactPill({ icon, text, href }: { icon: React.ReactNode; text: string; href?: string }) {
+  const content = (
+    <span className="inline-flex items-center gap-1.5 rounded-md hover:bg-(--rs-neutral-grey-100) px-1.5 py-0.5 transition-colors">
+      <span className="text-(--rs-neutral-grey-500)">{icon}</span>
+      <span className="truncate">{text}</span>
+    </span>
+  );
+  return href ? <a href={href} target="_blank" rel="noreferrer" className="text-(--rs-primary-700) hover:underline">{content}</a> : content;
+}
+
+function KvRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-2 text-xs">
+      <span className="text-(--rs-neutral-grey-500)">{label}</span>
+      <span className="text-(--rs-neutral-grey-900) font-medium text-right">{value}</span>
+    </div>
+  );
+}
+
+function SetupRequired() {
+  return (
+    <Card>
+      <CardContent className="p-6 space-y-3">
+        <h2 className="font-serif text-lg font-bold text-(--rs-neutral-grey-900)">Setup required</h2>
+        <p className="text-sm text-(--rs-neutral-grey-600)">
+          The candidates table hasn&apos;t been created yet. Run the migrations under{' '}
+          <code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">docs/migrations/</code>{' '}
+          in the Supabase SQL Editor.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}

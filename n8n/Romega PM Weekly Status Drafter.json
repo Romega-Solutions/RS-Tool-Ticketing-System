@@ -1,0 +1,81 @@
+{
+  "name": "Romega PM Weekly Status Drafter",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 5"
+            }
+          ]
+        }
+      },
+      "id": "pm-cron",
+      "name": "Friday 4 PM PHT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 304],
+      "notesInFlow": true,
+      "notes": "08:00 UTC = 16:00 PHT every Friday"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_BASE_URL }}/api/pm/status-drafter/generate?week=current",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.N8N_BRIEFING_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "pm-post",
+      "name": "POST /api/pm/status-drafter/generate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [492, 304]
+    },
+    {
+      "parameters": {
+        "content": "## Romega PM Weekly Status Drafter\n\n**Schedule:** every Friday at 08:00 UTC = 16:00 PHT.\n\n**What it does:** POSTs to `/api/pm/status-drafter/generate?week=current`. That endpoint aggregates the current week's weekly reports, attendance, and timesheets, calls Groq once for a stakeholder-ready summary, and upserts one row into `status_drafts`.\n\n**Required env vars** on this n8n container:\n- `APP_BASE_URL` — public URL of the Romega app\n- `N8N_BRIEFING_SECRET` — same shared secret used by the app\n\n**Run behavior:** cached if the row already exists unless the endpoint is called with `force=1`.\n",
+        "height": 300,
+        "width": 490
+      },
+      "id": "pm-sticky",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 468]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Friday 4 PM PHT": {
+      "main": [
+        [
+          {
+            "node": "POST /api/pm/status-drafter/generate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "versionId": "00000000-0000-0000-0000-000000000002",
+  "meta": {},
+  "tags": []
+}

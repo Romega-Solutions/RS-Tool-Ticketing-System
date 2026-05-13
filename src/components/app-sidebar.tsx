@@ -4,20 +4,25 @@ import React, { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2 } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2 } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import type { AppRole } from "@/lib/rbac";
-import { canAccessReports, canAccessAdmin, roleLabel } from "@/lib/rbac";
+import { canAccessReports, canAccessAdmin, canAccessLeadTool, roleLabel } from "@/lib/rbac";
 
 const navItems = [
-  { href: "/dashboard",     label: "Dashboard",      icon: LayoutDashboard, category: "main"    },
-  { href: "/my-tasks",      label: "My Tasks",        icon: CheckSquare,     category: "main"    },
-  { href: "/projects",      label: "Projects",        icon: Briefcase,       category: "main"    },
-  { href: "/reports",       label: "Weekly Reports",  icon: FileText,        category: "main"    },
-  { href: "/weekly-report", label: "Status Report",   icon: ClipboardList,   category: "main"    },
-  { href: "/attendance",    label: "Attendance",      icon: Calendar,        category: "reports" },
-  { href: "/admin/users",   label: "User Management", icon: Shield,          category: "admin"   },
+  { href: "/dashboard",         label: "Dashboard",           icon: LayoutDashboard, category: "main"      },
+  { href: "/my-tasks",          label: "My Tasks",             icon: CheckSquare,     category: "main"      },
+  { href: "/projects",          label: "Projects",             icon: Briefcase,       category: "main"      },
+  { href: "/reports",           label: "Weekly Reports",       icon: FileText,        category: "main"      },
+  { href: "/weekly-report",     label: "Status Report",        icon: ClipboardList,   category: "main"      },
+  { href: "/attendance",        label: "Attendance",           icon: Calendar,        category: "reports"   },
+  { href: "/sales/leads",            label: "Sales / Leads",       icon: Users2,        category: "leadTools" },
+  { href: "/recruiting/candidates",  label: "Recruiting / ATS",    icon: UserPlus2,     category: "leadTools" },
+  { href: "/pm/status-drafter",      label: "PM / Status Drafter", icon: ClipboardList, category: "leadTools" },
+  { href: "/ceo/briefing",           label: "CEO / Briefing",      icon: Sun,           category: "leadTools" },
+  { href: "/marketing/content",      label: "Marketing / Content", icon: Wand2,         category: "leadTools" },
+  { href: "/admin/users",       label: "User Management",      icon: Shield,          category: "admin"     },
 ];
 
 function NavLink({
@@ -88,12 +93,21 @@ function NavSection({
   );
 }
 
-function NavLinks({ collapsed = false, role }: { collapsed?: boolean; role: AppRole }) {
+function NavLinks({ collapsed = false, role, team }: { collapsed?: boolean; role: AppRole; team: string | null }) {
   const pathname = usePathname();
 
-  const mainItems    = navItems.filter(i => i.category === "main");
-  const reportItems  = navItems.filter(i => i.category === "reports" && canAccessReports(role));
-  const adminItems   = navItems.filter(i => i.category === "admin" && canAccessAdmin(role));
+  const mainItems     = navItems.filter(i => i.category === "main");
+  const reportItems   = navItems.filter(i => i.category === "reports" && canAccessReports(role));
+  const leadToolItems = navItems.filter(i => {
+    if (i.category !== "leadTools") return false;
+    if (i.href.startsWith('/sales/')) return canAccessLeadTool('sales', role, team);
+    if (i.href.startsWith('/recruiting/')) return canAccessLeadTool('recruiting', role, team);
+    if (i.href.startsWith('/pm/')) return canAccessLeadTool('pm', role, team);
+    if (i.href.startsWith('/ceo/')) return canAccessLeadTool('ceo', role, team);
+    if (i.href.startsWith('/marketing/')) return canAccessLeadTool('marketing', role, team);
+    return false;
+  });
+  const adminItems    = navItems.filter(i => i.category === "admin" && canAccessAdmin(role));
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -113,8 +127,9 @@ function NavLinks({ collapsed = false, role }: { collapsed?: boolean; role: AppR
         ))}
       </div>
 
-      <NavSection label="Reports" items={reportItems} collapsed={collapsed} isActive={isActive} />
-      <NavSection label="Admin" items={adminItems} collapsed={collapsed} isActive={isActive} />
+      <NavSection label="Reports"    items={reportItems}   collapsed={collapsed} isActive={isActive} />
+      <NavSection label="Lead Tools" items={leadToolItems} collapsed={collapsed} isActive={isActive} />
+      <NavSection label="Admin"      items={adminItems}    collapsed={collapsed} isActive={isActive} />
     </nav>
   );
 }
@@ -273,7 +288,7 @@ export function AppSidebar({ role, userName, team }: { role: AppRole; userName: 
 
       {/* Nav */}
       <div className={`flex-1 ${collapsed ? "px-2 py-3" : "px-3 py-3"} flex flex-col overflow-hidden`}>
-        <NavLinks collapsed={collapsed} role={role} />
+        <NavLinks collapsed={collapsed} role={role} team={team} />
       </div>
 
       {/* Footer */}
@@ -315,7 +330,7 @@ export function AppSidebar({ role, userName, team }: { role: AppRole; userName: 
   );
 }
 
-export function MobileNav({ role }: { role: AppRole }) {
+export function MobileNav({ role, team }: { role: AppRole; team: string | null }) {
   return (
     <Sheet>
       <SheetTrigger render={<Button variant="ghost" size="icon" className="md:hidden" aria-label="Open navigation menu" />}>
@@ -340,7 +355,7 @@ export function MobileNav({ role }: { role: AppRole }) {
           </div>
 
           <div className="flex-1 px-3 py-3 overflow-y-auto flex flex-col">
-            <NavLinks role={role} />
+            <NavLinks role={role} team={team} />
             <div className="mt-auto pt-4 border-t border-white/10 space-y-0.5">
               <Link
                 href="/profile"

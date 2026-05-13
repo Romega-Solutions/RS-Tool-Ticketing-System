@@ -1,0 +1,81 @@
+{
+  "name": "Romega CEO Daily Briefing",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 23 * * *"
+            }
+          ]
+        }
+      },
+      "id": "a-cron",
+      "name": "Daily 7 AM PHT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 304],
+      "notesInFlow": true,
+      "notes": "23:00 UTC = 07:00 PHT (UTC+8)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.APP_BASE_URL }}/api/ceo/briefing/generate?for=yesterday",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name":  "Authorization",
+              "value": "=Bearer {{ $env.N8N_BRIEFING_SECRET }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "a-post",
+      "name": "POST /api/ceo/briefing/generate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [480, 304]
+    },
+    {
+      "parameters": {
+        "content": "## Romega CEO Daily Briefing\n\n**Schedule:** every day at 23:00 UTC = 07:00 PHT.\n\n**What it does:** POSTs to the Romega Ticketing System's `/api/ceo/briefing/generate?for=yesterday` endpoint. That endpoint aggregates yesterday's stats from Supabase, calls Groq (Llama-3.3-70B) once for the narrative, and saves the row to the `briefings` table.\n\n**Required env vars** on this n8n container (set in easypanel → service → environment):\n- `APP_BASE_URL` — public URL of the Romega Ticketing System (e.g. https://romega-tickets.vercel.app)\n- `N8N_BRIEFING_SECRET` — same value as in the app's .env\n\n**Token cost per run:** ~700 Groq tokens (~$0.0006 if on paid tier).",
+        "height": 320,
+        "width": 480
+      },
+      "id": "a-sticky",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 480]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily 7 AM PHT": {
+      "main": [
+        [
+          {
+            "node": "POST /api/ceo/briefing/generate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "versionId": "00000000-0000-0000-0000-000000000001",
+  "meta": {},
+  "tags": []
+}
