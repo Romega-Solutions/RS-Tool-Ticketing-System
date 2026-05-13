@@ -47,3 +47,4 @@ next-env.d.ts
 # SQLite WAL/lock files (never commit these)
 sqlite.db-shm
 sqlite.db-wal
+.env*.local
