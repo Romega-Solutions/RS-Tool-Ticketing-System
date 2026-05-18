@@ -159,7 +159,7 @@ function LoginContent() {
         {/* Logo */}
         <div className="relative z-10">
           <Image src="/images/rs-logo.svg" alt="Romega Solutions" width={132} height={40}
-            className="object-contain brightness-0 invert" priority unoptimized />
+            className="object-contain brightness-0 invert" style={{ height: 'auto' }} priority unoptimized />
         </div>
 
         {/* Hero copy + features */}
@@ -197,7 +197,7 @@ function LoginContent() {
         {/* Mobile-only logo */}
         <div className="mb-8 flex flex-col items-center gap-2 lg:hidden">
           <Image src="/images/rs-logo.svg" alt="Romega Solutions" width={140} height={42}
-            className="object-contain" priority unoptimized />
+            className="object-contain" style={{ height: 'auto' }} priority unoptimized />
           <p className="text-sm text-(--rs-neutral-grey-600)">Internal workspace — Romega Solutions</p>
         </div>
 
@@ -377,7 +377,7 @@ function LoginContent() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-white animate-fade-in">
           <div className="flex flex-col items-center gap-5">
             <Image src="/images/rs-logo.svg" alt="Romega Solutions" width={148} height={44}
-              className="object-contain" unoptimized />
+              className="object-contain" style={{ height: 'auto' }} unoptimized />
             <div className="flex flex-col items-center gap-2">
               <Loader2 className="h-6 w-6 animate-spin text-(--rs-primary-500)" />
               <p className="text-sm font-medium text-(--rs-neutral-grey-600)">Loading your workspace…</p>

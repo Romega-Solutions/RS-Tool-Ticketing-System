@@ -1,10 +1,9 @@
 'use client';
 
-import { Fragment, useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Fragment, useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
-import { DataExportButtons } from '@/components/data-export-buttons';
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock } from 'lucide-react';
+import { AttendanceExportSheet } from '@/components/attendance-export-sheet';
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock, Search, X } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -19,10 +18,11 @@ interface AttendanceRecord {
   notes: string | null; submittedAt: string | null;
 }
 
-interface TeamUser { id: number; name: string; team: string | null; role: string; }
+interface TeamUser { id: number; name: string; team: string | null; role: string; memberCode?: string | null; hourlyRateUsd?: number | null; }
 
 interface MonthlySummary {
   userId: number; name: string; team: string | null; role: string;
+  hourlyRateUsd?: number | null;
   present: number; wfh: number; leave: number; absent: number; workdays: number;
   weekendWork: number; totalSeconds: number;
 }
@@ -81,6 +81,48 @@ function detailDayStatusLabel(day: DetailDay): string {
   if (day.status) return statusLabel(day.status);
   if (day.label === 'Sat' || day.label === 'Sun') return 'Weekend';
   return '—';
+}
+
+// ── Avatar / today helpers ─────────────────────────────────────────────────────
+
+const AVATAR_PALETTE = [
+  'bg-blue-100 text-blue-700',
+  'bg-purple-100 text-purple-700',
+  'bg-emerald-100 text-emerald-700',
+  'bg-amber-100 text-amber-700',
+  'bg-rose-100 text-rose-700',
+  'bg-cyan-100 text-cyan-700',
+  'bg-indigo-100 text-indigo-700',
+  'bg-orange-100 text-orange-700',
+];
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0][0].toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function avatarColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
+  return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
+}
+
+function MemberAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' }) {
+  const sizeClass = size === 'sm' ? 'w-7 h-7 text-[10px]' : 'w-9 h-9 text-xs';
+  return (
+    <div className={`shrink-0 rounded-full flex items-center justify-center font-semibold ${sizeClass} ${avatarColor(name)}`}>
+      {getInitials(name)}
+    </div>
+  );
+}
+
+function isSameLocalDay(iso: string, ref: Date): boolean {
+  const y = ref.getFullYear();
+  const m = String(ref.getMonth() + 1).padStart(2, '0');
+  const d = String(ref.getDate()).padStart(2, '0');
+  return iso === `${y}-${m}-${d}`;
 }
 
 // ── Date helpers ───────────────────────────────────────────────────────────────
@@ -276,9 +318,18 @@ export function AttendanceClient() {
   const [teamUsers,        setTeamUsers]         = useState<TeamUser[]>([]);
   const [teamRecords,      setTeamRecords]       = useState<AttendanceRecord[]>([]);
   const [timesheetsByDay,  setTimesheetsByDay]   = useState<Record<string, number>>({});
+  const [fx,               setFx]                = useState<{ rate: number; label: string } | null>(null);
 
   // Which user row is expanded to show clock-in detail
   const [expandedUserId, setExpandedUserId] = useState<number | null>(null);
+
+  // Search + pagination (shared shape for weekly & monthly)
+  const [weeklySearch, setWeeklySearch] = useState('');
+  const [weeklyPage,   setWeeklyPage]   = useState(1);
+  const [monthlySearch, setMonthlySearch] = useState('');
+  const [monthlyPage,   setMonthlyPage]   = useState(1);
+  const PAGE_SIZE = 10;
+  const today = new Date();
 
   useEffect(() => {
     let cancelled = false;
@@ -295,6 +346,25 @@ export function AttendanceClient() {
       .finally(() => { if (!cancelled) setWeekLoading(false); });
     return () => { cancelled = true; };
   }, [weekStart]);
+
+  // Live USD→PHP rate for the payroll timesheet export.
+  useEffect(() => {
+    let cancelled = false;
+    const pull = async () => {
+      try {
+        const res  = await fetch('/api/fx/usd-php', { cache: 'no-store' });
+        const data = await res.json() as { rate?: number; fetchedAt?: string; stale?: boolean };
+        if (cancelled || !res.ok || typeof data.rate !== 'number') return;
+        const when = data.fetchedAt
+          ? new Date(data.fetchedAt).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
+          : 'unknown time';
+        setFx({ rate: data.rate, label: `${data.stale ? 'cached' : 'live'} · as of ${when}` });
+      } catch { /* leave fx null — export falls back to USD only */ }
+    };
+    void pull();
+    const id = setInterval(pull, 5 * 60 * 1000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
 
   // Monthly state
   const [month, setMonth] = useState(getCurrentYearMonth());
@@ -326,6 +396,34 @@ export function AttendanceClient() {
     };
   });
 
+  // Structured per-day hours for the Romega Weekly Timesheet template.
+  const timesheetMemberRows = teamUsers.map(user => {
+    const daySeconds = weekdayDateStrs.map(date => timesheetsByDay[`${user.id}:${date}`] ?? 0);
+    return {
+      name: user.name,
+      memberCode: user.memberCode ?? '',
+      daySeconds,
+      weekSeconds: daySeconds.reduce((a, b) => a + b, 0),
+      hourlyRateUsd: user.hourlyRateUsd ?? null,
+    };
+  });
+
+  // Member name → USD gross for the week (tracked hours × rate), null if no rate.
+  const weeklyWiseAmounts: Record<string, number | null> = Object.fromEntries(
+    timesheetMemberRows.map(r => [
+      r.name,
+      r.hourlyRateUsd != null ? (r.weekSeconds / 3600) * r.hourlyRateUsd : null,
+    ]),
+  );
+  const timesheetMeta = {
+    weekRangeLabel:
+      `${monday.getDate()} ${monday.toLocaleDateString('en-US', { month: 'short' })} ${monday.getFullYear()}`
+      + ` - ${sunday.getDate()} ${sunday.toLocaleDateString('en-US', { month: 'short' })} ${sunday.getFullYear()}`,
+    dayDateLabels: DAY_KEYS.map((_, i) =>
+      new Date(monday.getTime() + i * 86400000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    ),
+  };
+
   const monthlyExportRows = monthlySummary.map(row => ({
     member: row.name,
     team: row.team ?? '',
@@ -338,6 +436,14 @@ export function AttendanceClient() {
     workdays: monthWorkdays,
     total_hours: fmtSeconds(row.totalSeconds),
   }));
+
+  // Member name → USD gross for the month (tracked hours × rate), null if no rate.
+  const monthlyWiseAmounts: Record<string, number | null> = Object.fromEntries(
+    monthlySummary.map(row => [
+      row.name,
+      row.hourlyRateUsd != null ? (row.totalSeconds / 3600) * row.hourlyRateUsd : null,
+    ]),
+  );
 
   useEffect(() => {
     if (activeTab !== 'monthly') return;
@@ -360,14 +466,48 @@ export function AttendanceClient() {
     setWeekLoading(true);
     setWeekError('');
     setExpandedUserId(null);
+    setWeeklyPage(1);
     setWeekOffset(updater);
   }
 
   function changeMonth(updater: string | ((value: string) => string)) {
     setMonthLoading(true);
     setMonthError('');
+    setMonthlyPage(1);
     setMonth(updater);
   }
+
+  // Filtered & paginated rows for the weekly tab
+  const filteredWeeklyUsers = useMemo(() => {
+    const q = weeklySearch.trim().toLowerCase();
+    if (!q) return teamUsers;
+    return teamUsers.filter(u =>
+      u.name.toLowerCase().includes(q) || (u.team ?? '').toLowerCase().includes(q),
+    );
+  }, [teamUsers, weeklySearch]);
+
+  const weeklyTotalPages = Math.max(1, Math.ceil(filteredWeeklyUsers.length / PAGE_SIZE));
+  const weeklyPageSafe   = Math.min(weeklyPage, weeklyTotalPages);
+  const pagedWeeklyUsers = filteredWeeklyUsers.slice(
+    (weeklyPageSafe - 1) * PAGE_SIZE,
+    weeklyPageSafe * PAGE_SIZE,
+  );
+
+  // Filtered & paginated rows for the monthly tab
+  const filteredMonthly = useMemo(() => {
+    const q = monthlySearch.trim().toLowerCase();
+    if (!q) return monthlySummary;
+    return monthlySummary.filter(r =>
+      r.name.toLowerCase().includes(q) || (r.team ?? '').toLowerCase().includes(q),
+    );
+  }, [monthlySummary, monthlySearch]);
+
+  const monthlyTotalPages = Math.max(1, Math.ceil(filteredMonthly.length / PAGE_SIZE));
+  const monthlyPageSafe   = Math.min(monthlyPage, monthlyTotalPages);
+  const pagedMonthly      = filteredMonthly.slice(
+    (monthlyPageSafe - 1) * PAGE_SIZE,
+    monthlyPageSafe * PAGE_SIZE,
+  );
 
   function activateTab(tab: 'weekly' | 'monthly') {
     if (tab === 'monthly') {
@@ -423,11 +563,16 @@ export function AttendanceClient() {
               </Button>
             )}
             <div className="ml-auto">
-              <DataExportButtons
+              <AttendanceExportSheet
+                mode="weekly"
                 baseName={`attendance_week_${weekStart}`}
                 rows={weeklyExportRows}
-                jsonData={{ weekStart, weekEnd: toLocalISO(sunday), users: weeklyExportRows }}
-                title="Export Week"
+                jsonMeta={{ weekStart, weekEnd: toLocalISO(sunday) }}
+                rangeLabel={`${fmtDate(monday)} – ${fmtDate(sunday)}, ${sunday.getFullYear()}`}
+                timesheet={{ rows: timesheetMemberRows, meta: timesheetMeta }}
+                wisePaymentReference={`Payroll Period ${fmtDate(monday)} - ${fmtDate(sunday)}`}
+                wiseAmounts={weeklyWiseAmounts}
+                fx={fx ?? undefined}
               />
             </div>
           </div>
@@ -437,103 +582,160 @@ export function AttendanceClient() {
           )}
 
           {weekLoading ? (
-            <div className="flex items-center gap-2 text-(--rs-neutral-grey-500)">
+            <div className="flex items-center gap-2 text-(--rs-neutral-grey-500) py-8">
               <Loader2 className="w-4 h-4 animate-spin" />
               <span className="text-sm">Loading attendance data…</span>
             </div>
           ) : (
-            <Card>
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between">
-                  <CardTitle className="text-base font-serif">Team Attendance</CardTitle>
-                  <p className="text-xs text-(--rs-neutral-grey-400) mt-0.5">Click a row to see status details, notes, and clock-in/out times</p>
+            <div className="rounded-lg border border-(--rs-neutral-grey-100) bg-white">
+              {/* Search bar */}
+              <div className="px-4 py-3 border-b border-(--rs-neutral-grey-100)">
+                <div className="relative max-w-xs">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-(--rs-neutral-grey-400)" />
+                  <input
+                    type="text"
+                    value={weeklySearch}
+                    onChange={e => { setWeeklySearch(e.target.value); setWeeklyPage(1); }}
+                    placeholder="Search member or team…"
+                    className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white pl-8 pr-7 py-1.5 text-sm placeholder:text-(--rs-neutral-grey-400) focus:outline-none focus:border-(--rs-primary-500) focus:ring-2 focus:ring-(--rs-primary-100)"
+                  />
+                  {weeklySearch && (
+                    <button
+                      type="button"
+                      onClick={() => { setWeeklySearch(''); setWeeklyPage(1); }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-(--rs-neutral-grey-400) hover:text-(--rs-neutral-grey-700) hover:bg-(--rs-neutral-grey-100)"
+                      aria-label="Clear search"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[760px]">
-                    <thead>
-                      <tr className="border-b border-(--rs-neutral-grey-200)">
-                        <th className="w-6 py-2" />
-                        <th className="text-left py-2 pr-4 font-medium text-(--rs-neutral-grey-600) w-40">Member</th>
-                        {DAY_KEYS.map((day, i) => (
-                          <th key={day} className="text-center py-2 px-2 font-medium text-(--rs-neutral-grey-600) w-24">
-                            <div>{DAY_LABELS[day]}</div>
-                            <div className="text-xs font-normal text-(--rs-neutral-grey-400)">{weekdayDates[i]}</div>
-                          </th>
-                        ))}
-                        <th className="text-center py-2 px-3 font-medium text-(--rs-neutral-grey-600) w-20">Hrs/Wk</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {teamUsers.map(user => {
-                        const rec = teamRecords.find(r => r.userId === user.id);
-                        const weekSeconds = weekdayDateStrs.reduce((sum, d) => sum + (timesheetsByDay[`${user.id}:${d}`] ?? 0), 0);
-                        const isExpanded = expandedUserId === user.id;
-                        const detailDays: DetailDay[] = DAY_KEYS.map((dayKey, index) => ({
-                          key: dayKey,
-                          label: DAY_LABELS[dayKey] as WeekdayLabel,
-                          date: weekdayDateStrs[index],
-                          status: rec ? (rec[`${dayKey}Status` as keyof AttendanceRecord] as string | null) : null,
-                        }));
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[920px]">
+                  <thead>
+                    <tr className="border-b border-(--rs-neutral-grey-100) bg-(--rs-neutral-grey-50)/40">
+                      <th className="w-6 py-3" />
+                      <th className="text-left py-3 pl-2 pr-4 font-medium text-(--rs-neutral-grey-500) text-xs uppercase tracking-wide">Member</th>
+                      {DAY_KEYS.map((day, i) => {
+                        const isTodayCol = isSameLocalDay(weekdayDateStrs[i], today);
                         return (
-                          <Fragment key={user.id}>
-                            <tr
-                              className={`border-b border-(--rs-neutral-grey-100) hover:bg-(--rs-neutral-grey-50) cursor-pointer transition-colors ${isExpanded ? 'bg-(--rs-neutral-grey-50)' : ''}`}
-                              onClick={() => setExpandedUserId(isExpanded ? null : user.id)}
-                            >
-                              <td className="py-3 pl-2">
-                                {isExpanded
-                                  ? <ChevronUp className="w-3.5 h-3.5 text-(--rs-neutral-grey-400)" />
-                                  : <ChevronDown className="w-3.5 h-3.5 text-(--rs-neutral-grey-400)" />}
-                              </td>
-                              <td className="py-3 pr-4">
-                                <div className="font-medium text-(--rs-neutral-grey-900)">{user.name}</div>
-                                {user.team && <div className="text-xs text-(--rs-neutral-grey-400)">{user.team}</div>}
-                              </td>
-                              {DAY_KEYS.map((day, i) => {
-                                const val  = rec ? (rec[`${day}Status` as keyof AttendanceRecord] as string | null) : null;
-                                const secs = timesheetsByDay[`${user.id}:${weekdayDateStrs[i]}`] ?? 0;
-                                return (
-                                  <td key={day} className="text-center py-3 px-2">
-                                    <span className={`inline-block px-2 py-0.5 rounded border text-xs font-medium ${statusColor(val)}`}>
-                                      {statusLabel(val)}
-                                    </span>
-                                    {secs > 0 && (
-                                      <div className="text-[10px] text-(--rs-neutral-grey-400) mt-0.5">{fmtSeconds(secs)}</div>
-                                    )}
-                                  </td>
-                                );
-                              })}
-                              <td className="text-center py-3 px-3">
-                                {weekSeconds > 0
-                                  ? <span className="text-sm font-semibold text-(--rs-primary-700)">{fmtSeconds(weekSeconds)}</span>
-                                  : <span className="text-xs text-(--rs-neutral-grey-400)">—</span>}
-                              </td>
-                            </tr>
-                            {isExpanded && (
-                              <TimesheetDetailPanel
-                                userId={user.id}
-                                weekStart={weekStart}
-                                detailDays={detailDays}
-                                notes={rec?.notes ?? null}
-                              />
-                            )}
-                          </Fragment>
+                          <th key={day} className="text-center py-3 px-2 font-medium w-24">
+                            <div className={`text-xs uppercase tracking-wide ${isTodayCol ? 'text-(--rs-primary-600) font-bold' : 'text-(--rs-neutral-grey-500)'}`}>
+                              {DAY_LABELS[day][0]}
+                            </div>
+                            <div className={`text-xs font-normal mt-0.5 ${isTodayCol ? 'text-(--rs-primary-600) font-bold' : 'text-(--rs-neutral-grey-400)'}`}>
+                              {weekdayDates[i]}
+                            </div>
+                          </th>
                         );
                       })}
-                      {teamUsers.length === 0 && (
-                        <tr>
-                          <td colSpan={10} className="text-center py-8 text-(--rs-neutral-grey-400) italic text-sm">
-                            No team members found.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                      <th className="text-center py-3 px-4 font-medium text-(--rs-neutral-grey-500) text-xs uppercase tracking-wide w-24">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedWeeklyUsers.map(user => {
+                      const rec = teamRecords.find(r => r.userId === user.id);
+                      const weekSeconds = weekdayDateStrs.reduce((sum, d) => sum + (timesheetsByDay[`${user.id}:${d}`] ?? 0), 0);
+                      const isExpanded = expandedUserId === user.id;
+                      const detailDays: DetailDay[] = DAY_KEYS.map((dayKey, index) => ({
+                        key: dayKey,
+                        label: DAY_LABELS[dayKey] as WeekdayLabel,
+                        date: weekdayDateStrs[index],
+                        status: rec ? (rec[`${dayKey}Status` as keyof AttendanceRecord] as string | null) : null,
+                      }));
+                      return (
+                        <Fragment key={user.id}>
+                          <tr
+                            className={`border-b border-(--rs-neutral-grey-100) hover:bg-(--rs-neutral-grey-50)/60 cursor-pointer transition-colors ${isExpanded ? 'bg-(--rs-neutral-grey-50)/60' : ''}`}
+                            onClick={() => setExpandedUserId(isExpanded ? null : user.id)}
+                          >
+                            <td className="py-4 pl-3 align-middle">
+                              {isExpanded
+                                ? <ChevronUp className="w-3.5 h-3.5 text-(--rs-neutral-grey-400)" />
+                                : <ChevronDown className="w-3.5 h-3.5 text-(--rs-neutral-grey-400)" />}
+                            </td>
+                            <td className="py-4 pl-2 pr-4 align-middle">
+                              <div className="flex items-center gap-3">
+                                <MemberAvatar name={user.name} />
+                                <div className="min-w-0">
+                                  <div className="font-medium text-(--rs-neutral-grey-900) truncate">{user.name}</div>
+                                  {user.team && <div className="text-xs text-(--rs-neutral-grey-400) truncate">{user.team}</div>}
+                                </div>
+                              </div>
+                            </td>
+                            {DAY_KEYS.map((day, i) => {
+                              const val  = rec ? (rec[`${day}Status` as keyof AttendanceRecord] as string | null) : null;
+                              const secs = timesheetsByDay[`${user.id}:${weekdayDateStrs[i]}`] ?? 0;
+                              const isWeekend = day === 'saturday' || day === 'sunday';
+                              const isRestDay = isWeekend && !val && secs === 0;
+                              const isTodayCol = isSameLocalDay(weekdayDateStrs[i], today);
+                              return (
+                                <td key={day} className={`text-center py-4 px-2 align-middle ${isTodayCol ? 'bg-(--rs-primary-50)/30' : ''}`}>
+                                  {isRestDay ? (
+                                    <span className="inline-block w-full rounded bg-(--rs-neutral-grey-200) text-(--rs-neutral-grey-500) text-[10px] font-medium px-2 py-1">
+                                      Rest day
+                                    </span>
+                                  ) : (
+                                    <>
+                                      {val ? (
+                                        <span className={`inline-block px-2 py-0.5 rounded border text-xs font-medium ${statusColor(val)}`}>
+                                          {statusLabel(val)}
+                                        </span>
+                                      ) : (
+                                        <span className="text-(--rs-neutral-grey-300) text-sm">—</span>
+                                      )}
+                                      {secs > 0 && (
+                                        <div className="text-[11px] text-(--rs-neutral-grey-500) mt-1">{fmtSeconds(secs)}</div>
+                                      )}
+                                    </>
+                                  )}
+                                </td>
+                              );
+                            })}
+                            <td className="text-center py-4 px-4 align-middle">
+                              {weekSeconds > 0
+                                ? <span className="text-sm font-semibold text-(--rs-neutral-grey-900)">{fmtSeconds(weekSeconds)}</span>
+                                : <span className="text-(--rs-neutral-grey-300) text-sm">—</span>}
+                            </td>
+                          </tr>
+                          {isExpanded && (
+                            <TimesheetDetailPanel
+                              userId={user.id}
+                              weekStart={weekStart}
+                              detailDays={detailDays}
+                              notes={rec?.notes ?? null}
+                            />
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                    {filteredWeeklyUsers.length === 0 && (
+                      <tr>
+                        <td colSpan={10} className="text-center py-10 text-(--rs-neutral-grey-400) italic text-sm">
+                          {weeklySearch ? 'No members match your search.' : 'No team members found.'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              {filteredWeeklyUsers.length > 0 && (
+                <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-(--rs-neutral-grey-100) text-xs text-(--rs-neutral-grey-500)">
+                  <span>
+                    Showing {(weeklyPageSafe - 1) * PAGE_SIZE + 1}–{Math.min(weeklyPageSafe * PAGE_SIZE, filteredWeeklyUsers.length)} of {filteredWeeklyUsers.length}
+                  </span>
+                  <Pagination page={weeklyPageSafe} totalPages={weeklyTotalPages} onChange={p => { setWeeklyPage(p); setExpandedUserId(null); }} />
                 </div>
-              </CardContent>
-            </Card>
+              )}
+
+              <p className="px-4 py-2.5 text-[11px] text-(--rs-neutral-grey-400) border-t border-(--rs-neutral-grey-100) bg-(--rs-neutral-grey-50)/40">
+                Click any row to see status details, notes, and clock-in/out times.
+              </p>
+            </div>
           )}
         </>
       )}
@@ -563,11 +765,14 @@ export function AttendanceClient() {
               </Button>
             )}
             <div className="ml-auto">
-              <DataExportButtons
+              <AttendanceExportSheet
+                mode="monthly"
                 baseName={`attendance_month_${month}`}
                 rows={monthlyExportRows}
-                jsonData={{ month, workdays: monthWorkdays, summary: monthlyExportRows }}
-                title="Export Month"
+                jsonMeta={{ month, workdays: monthWorkdays }}
+                rangeLabel={fmtMonth(month)}
+                wisePaymentReference={`Payroll Period ${fmtMonth(month)}`}
+                wiseAmounts={monthlyWiseAmounts}
               />
             </div>
           </div>
@@ -577,87 +782,176 @@ export function AttendanceClient() {
           )}
 
           {monthLoading ? (
-            <div className="flex items-center gap-2 text-(--rs-neutral-grey-500)">
+            <div className="flex items-center gap-2 text-(--rs-neutral-grey-500) py-8">
               <Loader2 className="w-4 h-4 animate-spin" />
               <span className="text-sm">Loading monthly data…</span>
             </div>
           ) : (
-            <Card>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base font-serif">Monthly Summary</CardTitle>
-                  <span className="text-xs text-(--rs-neutral-grey-400)">{monthWorkdays} workdays this month</span>
+            <div className="rounded-lg border border-(--rs-neutral-grey-100) bg-white">
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-(--rs-neutral-grey-100)">
+                <div className="relative max-w-xs flex-1">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-(--rs-neutral-grey-400)" />
+                  <input
+                    type="text"
+                    value={monthlySearch}
+                    onChange={e => { setMonthlySearch(e.target.value); setMonthlyPage(1); }}
+                    placeholder="Search member or team…"
+                    className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white pl-8 pr-7 py-1.5 text-sm placeholder:text-(--rs-neutral-grey-400) focus:outline-none focus:border-(--rs-primary-500) focus:ring-2 focus:ring-(--rs-primary-100)"
+                  />
+                  {monthlySearch && (
+                    <button
+                      type="button"
+                      onClick={() => { setMonthlySearch(''); setMonthlyPage(1); }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-(--rs-neutral-grey-400) hover:text-(--rs-neutral-grey-700) hover:bg-(--rs-neutral-grey-100)"
+                      aria-label="Clear search"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-[560px]">
-                    <thead>
-                      <tr className="border-b border-(--rs-neutral-grey-200)">
-                        <th className="text-left py-2 pr-4 font-medium text-(--rs-neutral-grey-600) w-40">Member</th>
-                        <th className="text-center py-2 px-3 font-medium text-green-700">Present</th>
-                        <th className="text-center py-2 px-3 font-medium text-blue-700">WFH</th>
-                        <th className="text-center py-2 px-3 font-medium text-yellow-700">Leave</th>
-                        <th className="text-center py-2 px-3 font-medium text-red-700">Absent</th>
-                        <th className="text-center py-2 px-3 font-medium text-purple-700">Weekend</th>
-                        <th className="text-center py-2 px-3 font-medium text-(--rs-neutral-grey-500)">Tracked</th>
-                        <th className="text-center py-2 px-3 font-medium text-(--rs-primary-600)">Hours</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {monthlySummary.map(row => {
-                        const tracked = row.present + row.wfh + row.leave + row.absent;
-                        const pct = monthWorkdays > 0 ? Math.round((row.present + row.wfh) / monthWorkdays * 100) : 0;
-                        return (
-                          <tr key={row.userId} className="border-b border-(--rs-neutral-grey-100) hover:bg-(--rs-neutral-grey-50)">
-                            <td className="py-3 pr-4">
-                              <div className="font-medium text-(--rs-neutral-grey-900)">{row.name}</div>
-                              {row.team && <div className="text-xs text-(--rs-neutral-grey-400)">{row.team}</div>}
-                            </td>
-                            <td className="text-center py-3 px-3">
-                              <span className="font-semibold text-green-700">{row.present}</span>
-                            </td>
-                            <td className="text-center py-3 px-3">
-                              <span className="font-semibold text-blue-700">{row.wfh}</span>
-                            </td>
-                            <td className="text-center py-3 px-3">
-                              <span className="font-semibold text-yellow-700">{row.leave}</span>
-                            </td>
-                            <td className="text-center py-3 px-3">
-                              <span className="font-semibold text-red-700">{row.absent}</span>
-                            </td>
-                            <td className="text-center py-3 px-3">
-                              {row.weekendWork > 0
-                                ? <span className="font-semibold text-purple-700">{row.weekendWork}</span>
-                                : <span className="text-xs text-(--rs-neutral-grey-300)">—</span>}
-                            </td>
-                            <td className="text-center py-3 px-3">
-                              <div className="text-xs text-(--rs-neutral-grey-500)">{tracked}/{monthWorkdays}</div>
-                              <div className="text-[10px] text-(--rs-neutral-grey-400)">{pct}% present/WFH</div>
-                            </td>
-                            <td className="text-center py-3 px-3">
-                              {row.totalSeconds > 0
-                                ? <span className="text-sm font-semibold text-(--rs-primary-700)">{fmtSeconds(row.totalSeconds)}</span>
-                                : <span className="text-xs text-(--rs-neutral-grey-400)">—</span>}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {monthlySummary.length === 0 && (
-                        <tr>
-                          <td colSpan={8} className="text-center py-8 text-(--rs-neutral-grey-400) italic text-sm">
-                            No attendance data for this month.
+                <span className="shrink-0 text-xs text-(--rs-neutral-grey-400)">{monthWorkdays} workdays this month</span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[640px]">
+                  <thead>
+                    <tr className="border-b border-(--rs-neutral-grey-100) bg-(--rs-neutral-grey-50)/40">
+                      <th className="text-left py-3 pl-4 pr-4 font-medium text-(--rs-neutral-grey-500) text-xs uppercase tracking-wide">Member</th>
+                      <th className="text-center py-3 px-3 font-medium text-green-700 text-xs uppercase tracking-wide">Present</th>
+                      <th className="text-center py-3 px-3 font-medium text-blue-700 text-xs uppercase tracking-wide">WFH</th>
+                      <th className="text-center py-3 px-3 font-medium text-yellow-700 text-xs uppercase tracking-wide">Leave</th>
+                      <th className="text-center py-3 px-3 font-medium text-red-700 text-xs uppercase tracking-wide">Absent</th>
+                      <th className="text-center py-3 px-3 font-medium text-purple-700 text-xs uppercase tracking-wide">Weekend</th>
+                      <th className="text-center py-3 px-3 font-medium text-(--rs-neutral-grey-500) text-xs uppercase tracking-wide">Tracked</th>
+                      <th className="text-center py-3 px-4 font-medium text-(--rs-neutral-grey-500) text-xs uppercase tracking-wide">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedMonthly.map(row => {
+                      const tracked = row.present + row.wfh + row.leave + row.absent;
+                      const pct = monthWorkdays > 0 ? Math.round((row.present + row.wfh) / monthWorkdays * 100) : 0;
+                      return (
+                        <tr key={row.userId} className="border-b border-(--rs-neutral-grey-100) hover:bg-(--rs-neutral-grey-50)/60">
+                          <td className="py-4 pl-4 pr-4 align-middle">
+                            <div className="flex items-center gap-3">
+                              <MemberAvatar name={row.name} />
+                              <div className="min-w-0">
+                                <div className="font-medium text-(--rs-neutral-grey-900) truncate">{row.name}</div>
+                                {row.team && <div className="text-xs text-(--rs-neutral-grey-400) truncate">{row.team}</div>}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="text-center py-4 px-3 align-middle">
+                            <span className="font-semibold text-green-700">{row.present}</span>
+                          </td>
+                          <td className="text-center py-4 px-3 align-middle">
+                            <span className="font-semibold text-blue-700">{row.wfh}</span>
+                          </td>
+                          <td className="text-center py-4 px-3 align-middle">
+                            <span className="font-semibold text-yellow-700">{row.leave}</span>
+                          </td>
+                          <td className="text-center py-4 px-3 align-middle">
+                            <span className="font-semibold text-red-700">{row.absent}</span>
+                          </td>
+                          <td className="text-center py-4 px-3 align-middle">
+                            {row.weekendWork > 0
+                              ? <span className="font-semibold text-purple-700">{row.weekendWork}</span>
+                              : <span className="text-(--rs-neutral-grey-300) text-sm">—</span>}
+                          </td>
+                          <td className="text-center py-4 px-3 align-middle">
+                            <div className="text-xs text-(--rs-neutral-grey-600)">{tracked}/{monthWorkdays}</div>
+                            <div className="text-[10px] text-(--rs-neutral-grey-400) mt-0.5">{pct}% present/WFH</div>
+                          </td>
+                          <td className="text-center py-4 px-4 align-middle">
+                            {row.totalSeconds > 0
+                              ? <span className="text-sm font-semibold text-(--rs-neutral-grey-900)">{fmtSeconds(row.totalSeconds)}</span>
+                              : <span className="text-(--rs-neutral-grey-300) text-sm">—</span>}
                           </td>
                         </tr>
-                      )}
-                    </tbody>
-                  </table>
+                      );
+                    })}
+                    {filteredMonthly.length === 0 && (
+                      <tr>
+                        <td colSpan={8} className="text-center py-10 text-(--rs-neutral-grey-400) italic text-sm">
+                          {monthlySearch ? 'No members match your search.' : 'No attendance data for this month.'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {filteredMonthly.length > 0 && (
+                <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-(--rs-neutral-grey-100) text-xs text-(--rs-neutral-grey-500)">
+                  <span>
+                    Showing {(monthlyPageSafe - 1) * PAGE_SIZE + 1}–{Math.min(monthlyPageSafe * PAGE_SIZE, filteredMonthly.length)} of {filteredMonthly.length}
+                  </span>
+                  <Pagination page={monthlyPageSafe} totalPages={monthlyTotalPages} onChange={setMonthlyPage} />
                 </div>
-              </CardContent>
-            </Card>
+              )}
+            </div>
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// ── Pagination control ─────────────────────────────────────────────────────────
+
+function Pagination({
+  page, totalPages, onChange,
+}: { page: number; totalPages: number; onChange: (p: number) => void }) {
+  if (totalPages <= 1) return null;
+
+  // Build a compact list: 1 … (page-1) page (page+1) … last
+  const pages: (number | 'ellipsis')[] = [];
+  const add = (p: number | 'ellipsis') => pages.push(p);
+  const window = new Set([1, totalPages, page - 1, page, page + 1].filter(n => typeof n === 'number' && n >= 1 && n <= totalPages));
+  const sorted = Array.from(window).sort((a, b) => a - b);
+  for (let i = 0; i < sorted.length; i++) {
+    if (i > 0 && sorted[i] - sorted[i - 1] > 1) add('ellipsis');
+    add(sorted[i]);
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => onChange(Math.max(1, page - 1))}
+        disabled={page <= 1}
+        className="rounded p-1 text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-900) hover:bg-(--rs-neutral-grey-100) disabled:opacity-30 disabled:cursor-not-allowed"
+        aria-label="Previous page"
+      >
+        <ChevronLeft className="w-3.5 h-3.5" />
+      </button>
+      {pages.map((p, idx) =>
+        p === 'ellipsis' ? (
+          <span key={`e-${idx}`} className="px-1.5 text-(--rs-neutral-grey-400)">…</span>
+        ) : (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onChange(p)}
+            className={`min-w-6 h-6 px-1.5 rounded text-xs font-medium ${
+              p === page
+                ? 'bg-(--rs-primary-500) text-white'
+                : 'text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-100)'
+            }`}
+          >
+            {p}
+          </button>
+        ),
+      )}
+      <button
+        type="button"
+        onClick={() => onChange(Math.min(totalPages, page + 1))}
+        disabled={page >= totalPages}
+        className="rounded p-1 text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-900) hover:bg-(--rs-neutral-grey-100) disabled:opacity-30 disabled:cursor-not-allowed"
+        aria-label="Next page"
+      >
+        <ChevronRight className="w-3.5 h-3.5" />
+      </button>
     </div>
   );
 }

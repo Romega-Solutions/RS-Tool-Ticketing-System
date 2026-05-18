@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, serial, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, jsonb, numeric } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id:            serial('id').primaryKey(),
@@ -11,6 +11,7 @@ export const users = pgTable('users', {
   team:          text('team'),
   jobTitle:      text('job_title'),
   planeMemberId: text('plane_member_id'),
+  hourlyRateUsd: numeric('hourly_rate_usd', { precision: 10, scale: 2 }),
   isActive:               integer('is_active').notNull().default(1),
   reminderEnabled:        integer('reminder_enabled').notNull().default(1),
   reminderIntervalMinutes: integer('reminder_interval_minutes').notNull().default(120),

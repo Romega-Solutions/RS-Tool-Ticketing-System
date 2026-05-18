@@ -96,7 +96,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Invalid month format (YYYY-MM)' }, { status: 400 });
     }
 
-    let usersQuery = admin.from('users').select('id, name, team, role').eq('is_active', 1);
+    let usersQuery = admin.from('users').select('id, name, team, role, member_code, hourly_rate_usd').eq('is_active', 1);
     if (session.role !== 'admin') {
       usersQuery = usersQuery.eq('team', session.team ?? '');
     }
@@ -117,7 +117,7 @@ export async function GET(req: Request) {
     const workdays = countWorkdaysInMonth(monthParam);
     const recordsByUserAndWeek = new Map(records.map(record => [`${record.user_id}:${record.week_start}`, record] as const));
 
-    const summary = teamUsers.map((user: { id: number; name: string; team: string | null; role: string }) => {
+    const summary = teamUsers.map((user: { id: number; name: string; team: string | null; role: string; hourly_rate_usd: number | string | null }) => {
       let present = 0, wfh = 0, leave = 0, absent = 0, weekendWork = 0;
       const [year, month] = monthParam.split('-').map(Number);
       const lastDay = new Date(year, month, 0).getDate();
@@ -142,7 +142,11 @@ export async function GET(req: Request) {
         }
       }
 
-      return { userId: user.id, name: user.name, team: user.team, role: user.role, present, wfh, leave, absent, weekendWork, workdays };
+      return {
+        userId: user.id, name: user.name, team: user.team, role: user.role,
+        hourlyRateUsd: user.hourly_rate_usd == null ? null : Number(user.hourly_rate_usd),
+        present, wfh, leave, absent, weekendWork, workdays,
+      };
     });
 
     // Fetch timesheet hours for the month
@@ -179,7 +183,7 @@ export async function GET(req: Request) {
     .eq('week_start', weekStart);
   const rawRecords = rawRecordsData ?? [];
 
-  let usersQuery = admin.from('users').select('id, name, team, role').eq('is_active', 1);
+  let usersQuery = admin.from('users').select('id, name, team, role, member_code, hourly_rate_usd').eq('is_active', 1);
   if (session.role !== 'admin') {
     usersQuery = usersQuery.eq('team', session.team ?? '');
   }
@@ -225,7 +229,14 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({ weekStart, records, users: teamUsers, timesheetsByDay });
+  const usersOut = (teamUsers as { id: number; name: string; team: string | null; role: string; member_code: string | null; hourly_rate_usd: number | string | null }[])
+    .map(u => ({
+      id: u.id, name: u.name, team: u.team, role: u.role,
+      memberCode: u.member_code ?? null,
+      hourlyRateUsd: u.hourly_rate_usd == null ? null : Number(u.hourly_rate_usd),
+    }));
+
+  return NextResponse.json({ weekStart, records, users: usersOut, timesheetsByDay });
 }
 
 export async function POST(req: Request) {

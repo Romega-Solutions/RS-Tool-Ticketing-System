@@ -11,7 +11,7 @@ export default async function AdminUsersPage() {
   const admin = createAdminClient();
   const { data } = await admin
     .from('users')
-    .select('id, username, name, email, role, team, job_title, plane_member_id, is_active')
+    .select('id, username, name, email, role, team, job_title, plane_member_id, member_code, hourly_rate_usd, is_active')
     .order('name');
   const rawUsers = data ?? [];
 
@@ -24,6 +24,8 @@ export default async function AdminUsersPage() {
     team:          u.team as string | null,
     jobTitle:      u.job_title as string | null,
     planeMemberId: u.plane_member_id as string | null,
+    memberCode:    u.member_code as string | null,
+    hourlyRateUsd: u.hourly_rate_usd == null ? null : Number(u.hourly_rate_usd),
     isActive:      Boolean(u.is_active),
   }));
 

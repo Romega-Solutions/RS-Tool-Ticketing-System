@@ -152,7 +152,7 @@ export default function OnboardingPage() {
         {/* Logo */}
         <div className="relative z-10">
           <Image src="/images/rs-logo.svg" alt="Romega Solutions" width={132} height={40}
-            className="object-contain brightness-0 invert" priority unoptimized />
+            className="object-contain brightness-0 invert" style={{ height: 'auto' }} priority unoptimized />
         </div>
 
         {/* Hero copy */}
@@ -206,7 +206,7 @@ export default function OnboardingPage() {
         {/* Mobile logo */}
         <div className="mb-8 flex flex-col items-center gap-2 lg:hidden">
           <Image src="/images/rs-logo.svg" alt="Romega Solutions" width={140} height={42}
-            className="object-contain" priority unoptimized />
+            className="object-contain" style={{ height: 'auto' }} priority unoptimized />
         </div>
 
         <div className="w-full max-w-md animate-auth-enter">

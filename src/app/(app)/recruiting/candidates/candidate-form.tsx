@@ -44,10 +44,8 @@ export function CandidateForm() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button className="gap-2">
-          <UserPlus2 className="w-4 h-4" /> Add candidate
-        </Button>
+      <DialogTrigger render={<Button className="gap-2" />}>
+        <UserPlus2 className="w-4 h-4" /> Add candidate
       </DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>

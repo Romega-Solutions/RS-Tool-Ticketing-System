@@ -15,6 +15,20 @@ const VALID_ROLES = new Set([
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USERNAME_RE = /^[a-z0-9_.-]{2,64}$/;
 
+// Parse an hourly rate. Returns:
+//   { ok: true, value }  — value is a number rounded to 2dp, or null to clear
+//   { ok: false, error } — invalid input
+function parseHourlyRate(
+  raw: unknown,
+): { ok: true; value: number | null } | { ok: false; error: string } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, value: null };
+  const n = typeof raw === 'number' ? raw : Number(String(raw).trim());
+  if (!Number.isFinite(n)) return { ok: false, error: 'Hourly rate must be a number' };
+  if (n < 0) return { ok: false, error: 'Hourly rate cannot be negative' };
+  if (n >= 100_000_000) return { ok: false, error: 'Hourly rate is too large' };
+  return { ok: true, value: Math.round(n * 100) / 100 };
+}
+
 async function requireAdmin() {
   const session = await getSession();
   if (!session || !canAccessAdmin(session.role)) return null;
@@ -28,7 +42,7 @@ export async function GET() {
   const admin = createAdminClient();
   const { data } = await admin
     .from('users')
-    .select('id, username, name, email, role, team, job_title, plane_member_id, is_active')
+    .select('id, username, name, email, role, team, job_title, plane_member_id, member_code, hourly_rate_usd, is_active')
     .order('name');
   const allUsers = data ?? [];
 
@@ -41,6 +55,8 @@ export async function GET() {
     team:          u.team,
     jobTitle:      u.job_title,
     planeMemberId: u.plane_member_id,
+    memberCode:    u.member_code,
+    hourlyRateUsd: u.hourly_rate_usd == null ? null : Number(u.hourly_rate_usd),
     isActive:      Boolean(u.is_active),
   }));
 
@@ -60,10 +76,15 @@ export async function POST(req: Request) {
     role?: string;
     team?: string;
     jobTitle?: string;
+    memberCode?: string;
+    hourlyRateUsd?: number | string | null;
   } = {};
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
+
+  const rate = parseHourlyRate(body.hourlyRateUsd);
+  if (!rate.ok) return NextResponse.json({ error: rate.error }, { status: 400 });
 
   const email    = body.email?.trim().toLowerCase() ?? '';
   const password = body.password?.trim() ?? '';
@@ -71,6 +92,7 @@ export async function POST(req: Request) {
   const username = body.username?.trim().toLowerCase() ?? '';
   const role     = body.role?.trim() || 'ic';
   const team     = body.team?.trim() || null;
+  const memberCode = body.memberCode?.trim() || null;
   const jobTitle = body.jobTitle?.trim() || null;
 
   if (!email || !password || !name || !username) {
@@ -127,12 +149,14 @@ export async function POST(req: Request) {
         email,
         role,
         team,
-        job_title:  jobTitle,
+        job_title:   jobTitle,
+        member_code: memberCode,
+        hourly_rate_usd: rate.value,
         is_active:  1,
         created_at: now,
         updated_at: now,
       })
-      .select('id, username, name, email, role, team, job_title, plane_member_id, is_active')
+      .select('id, username, name, email, role, team, job_title, plane_member_id, member_code, hourly_rate_usd, is_active')
       .single();
 
     if (dbErr) throw new Error(dbErr.message);
@@ -147,6 +171,8 @@ export async function POST(req: Request) {
         team:          inserted.team,
         jobTitle:      inserted.job_title,
         planeMemberId: inserted.plane_member_id,
+        memberCode:    inserted.member_code,
+        hourlyRateUsd: inserted.hourly_rate_usd == null ? null : Number(inserted.hourly_rate_usd),
         isActive:      Boolean(inserted.is_active),
       },
     }, { status: 201 });
@@ -166,7 +192,15 @@ export async function PATCH(req: Request) {
   const session = await requireAdmin();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  let body: { id?: number; role?: string; planeMemberId?: string | null; isActive?: number } = {};
+  let body: {
+    id?: number;
+    role?: string;
+    planeMemberId?: string | null;
+    isActive?: number;
+    team?: string | null;
+    memberCode?: string | null;
+    hourlyRateUsd?: number | string | null;
+  } = {};
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
@@ -189,6 +223,13 @@ export async function PATCH(req: Request) {
   if (body.role !== undefined)          updates.role           = body.role;
   if (body.planeMemberId !== undefined) updates.plane_member_id = body.planeMemberId || null;
   if (body.isActive !== undefined)      updates.is_active      = body.isActive;
+  if (body.team !== undefined)          updates.team           = body.team?.trim() || null;
+  if (body.memberCode !== undefined)    updates.member_code    = body.memberCode?.trim() || null;
+  if (body.hourlyRateUsd !== undefined) {
+    const rate = parseHourlyRate(body.hourlyRateUsd);
+    if (!rate.ok) return NextResponse.json({ error: rate.error }, { status: 400 });
+    updates.hourly_rate_usd = rate.value;
+  }
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
@@ -202,7 +243,7 @@ export async function PATCH(req: Request) {
 
   const { data: updated } = await admin
     .from('users')
-    .select('id, username, name, email, role, team, job_title, plane_member_id, is_active')
+    .select('id, username, name, email, role, team, job_title, plane_member_id, member_code, hourly_rate_usd, is_active')
     .eq('id', body.id)
     .maybeSingle();
 
@@ -218,6 +259,8 @@ export async function PATCH(req: Request) {
       team:          updated.team,
       jobTitle:      updated.job_title,
       planeMemberId: updated.plane_member_id,
+      memberCode:    updated.member_code,
+      hourlyRateUsd: updated.hourly_rate_usd == null ? null : Number(updated.hourly_rate_usd),
       isActive:      Boolean(updated.is_active),
     },
   });

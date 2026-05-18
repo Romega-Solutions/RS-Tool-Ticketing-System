@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS public.users (
   team                      TEXT,
   job_title                 TEXT,
   plane_member_id           TEXT,
+  member_code               TEXT,
+  hourly_rate_usd           NUMERIC(10,2),
   is_active                 INTEGER NOT NULL DEFAULT 1,
   reminder_enabled          INTEGER NOT NULL DEFAULT 1,
   reminder_interval_minutes INTEGER NOT NULL DEFAULT 120,
@@ -92,6 +94,14 @@ ALTER TABLE public.users
 
 ALTER TABLE public.users
   ADD COLUMN IF NOT EXISTS reminder_interval_minutes INTEGER NOT NULL DEFAULT 120;
+
+-- users: payroll/timesheet member code (admin-editable)
+ALTER TABLE public.users
+  ADD COLUMN IF NOT EXISTS member_code TEXT;
+
+-- users: per-user hourly rate in USD (admin-editable; migration 0007)
+ALTER TABLE public.users
+  ADD COLUMN IF NOT EXISTS hourly_rate_usd NUMERIC(10,2);
 
 -- weekly_reports: meetings column
 ALTER TABLE public.weekly_reports
@@ -249,7 +259,8 @@ WHERE pubname = 'supabase_realtime'
 --               (complete schema — all 6 migrations included)
 --
 --  users        id, username, password_hash, name, email, role,
---               team, job_title, plane_member_id, is_active,
+--               team, job_title, plane_member_id, member_code,
+--               hourly_rate_usd, is_active,
 --               reminder_enabled, reminder_interval_minutes,
 --               created_at, updated_at
 --

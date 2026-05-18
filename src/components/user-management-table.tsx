@@ -14,6 +14,8 @@ export type UserRow = {
   team: string | null;
   jobTitle: string | null;
   planeMemberId: string | null;
+  memberCode: string | null;
+  hourlyRateUsd: number | null;
   isActive: boolean;
 };
 
@@ -41,7 +43,7 @@ const ROLE_BADGE: Record<string, string> = {
   ic:      'bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-600) border-(--rs-neutral-grey-200)',
 };
 
-type EditState = { role: string; planeMemberId: string; isActive: boolean };
+type EditState = { role: string; planeMemberId: string; isActive: boolean; team: string; memberCode: string; hourlyRateUsd: string };
 
 type NewUserForm = {
   email: string;
@@ -51,11 +53,18 @@ type NewUserForm = {
   role: string;
   team: string;
   jobTitle: string;
+  memberCode: string;
+  hourlyRateUsd: string;
 };
 
 const EMPTY_FORM: NewUserForm = {
-  email: '', password: '', name: '', username: '', role: 'ic', team: '', jobTitle: '',
+  email: '', password: '', name: '', username: '', role: 'ic', team: '', jobTitle: '', memberCode: '', hourlyRateUsd: '',
 };
+
+function formatUsd(value: number | null): string {
+  if (value == null) return '';
+  return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] }) {
   const [userList, setUserList] = useState<UserRow[]>(initialUsers);
@@ -95,7 +104,7 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
 
   // Edit existing user
   const [editingId, setEditingId]   = useState<number | null>(null);
-  const [editForm, setEditForm]     = useState<EditState>({ role: '', planeMemberId: '', isActive: true });
+  const [editForm, setEditForm]     = useState<EditState>({ role: '', planeMemberId: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '' });
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState('');
 
@@ -108,7 +117,14 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
 
   const startEdit = (user: UserRow) => {
     setEditingId(user.id);
-    setEditForm({ role: user.role, planeMemberId: user.planeMemberId ?? '', isActive: user.isActive });
+    setEditForm({
+      role: user.role,
+      planeMemberId: user.planeMemberId ?? '',
+      isActive: user.isActive,
+      team: user.team ?? '',
+      memberCode: user.memberCode ?? '',
+      hourlyRateUsd: user.hourlyRateUsd != null ? String(user.hourlyRateUsd) : '',
+    });
     setError('');
   };
   const cancelEdit = () => { setEditingId(null); setError(''); };
@@ -125,6 +141,9 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
           role:          editForm.role,
           planeMemberId: editForm.planeMemberId.trim() || null,
           isActive:      editForm.isActive ? 1 : 0,
+          team:          editForm.team.trim() || null,
+          memberCode:    editForm.memberCode.trim() || null,
+          hourlyRateUsd: editForm.hourlyRateUsd.trim() === '' ? null : editForm.hourlyRateUsd.trim(),
         }),
       });
       const data = (await res.json()) as { user?: UserRow; error?: string };
@@ -198,6 +217,8 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
                 <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-48">Name</th>
                 <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-28">Role</th>
                 <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600)">Plane Member ID</th>
+                <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-36">Member Code</th>
+                <th className="text-right px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-32">Rate (USD/hr)</th>
                 <th className="text-center px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-20">Active</th>
                 <th className="text-right px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-28">Actions</th>
               </tr>
@@ -211,7 +232,20 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
                     <td className="px-4 py-3">
                       <div className="font-medium text-(--rs-neutral-grey-900)">{user.name}</div>
                       <div className="text-xs text-(--rs-neutral-grey-400)">{user.username} · {user.email}</div>
-                      {user.team && <div className="text-xs text-(--rs-neutral-grey-400)">{user.team}</div>}
+                      {isEditing ? (
+                        <select
+                          value={editForm.team}
+                          onChange={e => setEditForm(f => ({ ...f, team: e.target.value }))}
+                          className="mt-1.5 text-xs border border-(--rs-neutral-grey-300) rounded px-2 py-1 bg-white w-full"
+                        >
+                          <option value="">— No team —</option>
+                          {Array.from(new Set([editForm.team, ...DEPARTMENTS].filter(Boolean))).map(d => (
+                            <option key={d} value={d}>{d}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        user.team && <div className="text-xs text-(--rs-neutral-grey-400)">{user.team}</div>
+                      )}
                     </td>
 
                     <td className="px-4 py-3">
@@ -240,6 +274,43 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
                         />
                       ) : user.planeMemberId ? (
                         <code className="text-[11px] font-mono text-(--rs-neutral-grey-600) break-all">{user.planeMemberId}</code>
+                      ) : (
+                        <span className="text-xs text-(--rs-neutral-grey-300) italic">Not set</span>
+                      )}
+                    </td>
+
+                    <td className="px-4 py-3">
+                      {isEditing ? (
+                        <input
+                          value={editForm.memberCode}
+                          onChange={e => setEditForm(f => ({ ...f, memberCode: e.target.value }))}
+                          placeholder="e.g. ACNG-1"
+                          className="text-xs w-full border border-(--rs-neutral-grey-300) rounded px-2 py-1 font-mono"
+                        />
+                      ) : user.memberCode ? (
+                        <code className="text-[11px] font-mono text-(--rs-neutral-grey-600)">{user.memberCode}</code>
+                      ) : (
+                        <span className="text-xs text-(--rs-neutral-grey-300) italic">Not set</span>
+                      )}
+                    </td>
+
+                    <td className="px-4 py-3 text-right">
+                      {isEditing ? (
+                        <div className="relative">
+                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-(--rs-neutral-grey-400)">$</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            inputMode="decimal"
+                            value={editForm.hourlyRateUsd}
+                            onChange={e => setEditForm(f => ({ ...f, hourlyRateUsd: e.target.value }))}
+                            placeholder="0.00"
+                            className="text-xs w-full border border-(--rs-neutral-grey-300) rounded pl-5 pr-2 py-1 text-right tabular-nums"
+                          />
+                        </div>
+                      ) : user.hourlyRateUsd != null ? (
+                        <span className="text-sm font-medium text-(--rs-neutral-grey-800) tabular-nums">${formatUsd(user.hourlyRateUsd)}</span>
                       ) : (
                         <span className="text-xs text-(--rs-neutral-grey-300) italic">Not set</span>
                       )}
@@ -287,7 +358,7 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
 
               {userList.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-(--rs-neutral-grey-400) italic text-sm">
+                  <td colSpan={7} className="px-4 py-10 text-center text-(--rs-neutral-grey-400) italic text-sm">
                     No users found.
                   </td>
                 </tr>
@@ -357,9 +428,24 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
                 </Field>
               </div>
 
-              <Field label="Job Title">
-                <input value={newForm.jobTitle} onChange={e => setNewForm(f => ({ ...f, jobTitle: e.target.value }))}
-                  className={inputCls} placeholder="e.g. Software Engineer" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="Job Title">
+                  <input value={newForm.jobTitle} onChange={e => setNewForm(f => ({ ...f, jobTitle: e.target.value }))}
+                    className={inputCls} placeholder="e.g. Software Engineer" />
+                </Field>
+                <Field label="Member Code">
+                  <input value={newForm.memberCode} onChange={e => setNewForm(f => ({ ...f, memberCode: e.target.value }))}
+                    className={inputCls} placeholder="e.g. ACNG-1" />
+                </Field>
+              </div>
+
+              <Field label="Hourly Rate (USD)">
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-(--rs-neutral-grey-400)">$</span>
+                  <input type="number" min="0" step="0.01" inputMode="decimal"
+                    value={newForm.hourlyRateUsd} onChange={e => setNewForm(f => ({ ...f, hourlyRateUsd: e.target.value }))}
+                    className={`${inputCls} pl-7 tabular-nums`} placeholder="0.00" />
+                </div>
               </Field>
 
               <div className="flex justify-end gap-2 pt-1">

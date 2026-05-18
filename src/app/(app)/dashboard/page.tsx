@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { AlertCircle, Clock, Users, FileText } from "lucide-react";
 import Link from 'next/link';
 import { HoursChart } from '@/components/hours-chart';
+import { FxRateWidget } from '@/components/fx-rate-widget';
 
 function stateGroup(item: { state_detail?: { group?: string } }) {
   return (item.state_detail?.group ?? '').toLowerCase();
@@ -232,6 +233,8 @@ export default async function DashboardPage() {
           <code className="bg-red-100 px-1 rounded">PLANE_WORKSPACE_SLUG</code> in <code className="bg-red-100 px-1 rounded">.env</code>.
         </div>
       )}
+
+      <FxRateWidget />
 
       {/* Quick Summary Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

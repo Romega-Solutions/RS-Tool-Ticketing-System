@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
   team           TEXT,
   job_title      TEXT,
   plane_member_id TEXT,
+  member_code    TEXT,
+  hourly_rate_usd NUMERIC(10,2),
   is_active      INTEGER NOT NULL DEFAULT 1,
   created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

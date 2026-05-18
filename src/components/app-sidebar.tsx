@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2 } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import type { AppRole } from "@/lib/rbac";
@@ -22,7 +22,9 @@ const navItems = [
   { href: "/pm/status-drafter",      label: "PM / Status Drafter", icon: ClipboardList, category: "leadTools" },
   { href: "/ceo/briefing",           label: "CEO / Briefing",      icon: Sun,           category: "leadTools" },
   { href: "/marketing/content",      label: "Marketing / Content", icon: Wand2,         category: "leadTools" },
-  { href: "/admin/users",       label: "User Management",      icon: Shield,          category: "admin"     },
+  { href: "/admin/users",       label: "User Management",      icon: Shield,            category: "admin"     },
+  { href: "/rates",             label: "Rates & Currency",     icon: CircleDollarSign,  category: "admin"     },
+  { href: "/wise-guide",        label: "Wise Integration",     icon: BookOpen,          category: "admin"     },
 ];
 
 function NavLink({
@@ -181,6 +183,7 @@ function LogoutButton({ collapsed = false }: { collapsed?: boolean }) {
               width={148}
               height={44}
               className="object-contain"
+              style={{ height: 'auto' }}
               priority
               unoptimized
             />
@@ -271,6 +274,7 @@ export function AppSidebar({ role, userName, team }: { role: AppRole; userName: 
             width={108}
             height={30}
             className="object-contain brightness-0 invert shrink-0"
+            style={{ height: 'auto' }}
             priority
             unoptimized
           />
@@ -349,6 +353,7 @@ export function MobileNav({ role, team }: { role: AppRole; team: string | null }
               width={108}
               height={30}
               className="object-contain brightness-0 invert"
+              style={{ height: 'auto' }}
               priority
               unoptimized
             />

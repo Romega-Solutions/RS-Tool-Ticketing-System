@@ -52,6 +52,8 @@ export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string
 
 export function canAccessPath(pathname: string, role: AppRole, team: string | null = null): boolean {
   if (pathname.startsWith('/admin'))      return canAccessAdmin(role);
+  if (pathname.startsWith('/rates'))      return canAccessAdmin(role);
+  if (pathname.startsWith('/wise-guide')) return canAccessAdmin(role);
   if (pathname.startsWith('/attendance')) return canAccessReports(role);
   if (pathname.startsWith('/ceo/'))       return canAccessLeadTool('ceo', role, team);
   if (pathname.startsWith('/pm/'))        return canAccessLeadTool('pm', role, team);

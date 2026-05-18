@@ -126,6 +126,7 @@ export default function GuidePage() {
             width={148}
             height={44}
             className="object-contain"
+            style={{ height: 'auto' }}
             priority
             unoptimized
           />

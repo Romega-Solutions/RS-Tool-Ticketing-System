@@ -13,16 +13,29 @@ type ProfileUser = {
   team: string | null;
   jobTitle: string | null;
   planeMemberId?: string | null;
+  hourlyRateUsd?: number | null;
   isActive: boolean;
   reminderEnabled: boolean;
   reminderIntervalMinutes: number;
 };
 
+type FxRate = { rate: number; fetchedAt: string; stale: boolean };
+
 const inputBase =
   'w-full rounded-lg border border-(--rs-neutral-grey-200) px-3 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:border-(--rs-primary-400) focus:ring-2 focus:ring-(--rs-primary-100)';
-const inputDisabled =
-  'w-full rounded-lg border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-3 py-2 text-sm text-(--rs-neutral-grey-400) cursor-not-allowed';
 const labelCls = 'block text-xs font-semibold uppercase tracking-wide text-(--rs-neutral-grey-500) mb-1';
+
+function InfoRow({ label, value }: { label: string; value: string | null | undefined }) {
+  const has = value != null && String(value).trim() !== '';
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-2.5">
+      <span className="text-xs font-medium text-(--rs-neutral-grey-500)">{label}</span>
+      <span className={`text-sm text-right truncate ${has ? 'font-medium text-(--rs-neutral-grey-900)' : 'italic text-(--rs-neutral-grey-400)'}`}>
+        {has ? value : 'Not set'}
+      </span>
+    </div>
+  );
+}
 
 function OrgAvatar({ person, size = 80 }: { person: OrgPerson; size?: number }) {
   const initials = person.name
@@ -64,13 +77,13 @@ export default function ProfilePage() {
   const [success, setSuccess]   = useState('');
   const [syncMsg, setSyncMsg]   = useState('');
   const [user, setUser]         = useState<ProfileUser | null>(null);
-  const [availableTeams, setAvailableTeams]         = useState<string[]>([]);
-  const [availableJobTitles, setAvailableJobTitles] = useState<string[]>([]);
   const [orgProfile, setOrgProfile] = useState<OrgPerson | null>(null);
   const [orgLoading, setOrgLoading] = useState(false);
+  const [fx, setFx] = useState<FxRate | null>(null);
+  // Identity is read-only and sourced from the org chart; only password +
+  // reminder settings remain editable here.
   const [form, setForm] = useState({
-    name: '', team: '', jobTitle: '', password: '',
-    reminderEnabled: true, reminderIntervalMinutes: 120,
+    password: '', reminderEnabled: true, reminderIntervalMinutes: 120,
   });
 
   useEffect(() => {
@@ -78,14 +91,14 @@ export default function ProfilePage() {
       setLoading(true);
       try {
         const res  = await fetch('/api/profile/me', { cache: 'no-store' });
-        const data = await res.json() as { user?: ProfileUser; availableTeams?: string[]; availableJobTitles?: string[]; error?: string };
+        const data = await res.json() as { user?: ProfileUser; error?: string };
         if (!res.ok || !data.user) { setError(data.error || 'Failed to load profile'); return; }
         setUser(data.user);
-        setAvailableTeams(data.availableTeams ?? []);
-        setAvailableJobTitles(data.availableJobTitles ?? []);
-        setForm({ name: data.user.name || '', team: data.user.team || '', jobTitle: data.user.jobTitle || '',
-          password: '', reminderEnabled: data.user.reminderEnabled ?? true,
-          reminderIntervalMinutes: data.user.reminderIntervalMinutes ?? 120 });
+        setForm({
+          password: '',
+          reminderEnabled: data.user.reminderEnabled ?? true,
+          reminderIntervalMinutes: data.user.reminderIntervalMinutes ?? 120,
+        });
 
         if (data.user.email || data.user.name) {
           setOrgLoading(true);
@@ -104,18 +117,47 @@ export default function ProfilePage() {
     void load();
   }, []);
 
+  // Live USD→PHP rate — only fetched when the user actually has a rate set.
+  useEffect(() => {
+    if (user?.hourlyRateUsd == null) return;
+    let active = true;
+    const pull = async () => {
+      try {
+        const res  = await fetch('/api/fx/usd-php', { cache: 'no-store' });
+        const data = await res.json() as { rate?: number; fetchedAt?: string; stale?: boolean; error?: string };
+        if (active && res.ok && typeof data.rate === 'number') {
+          setFx({ rate: data.rate, fetchedAt: data.fetchedAt ?? new Date().toISOString(), stale: Boolean(data.stale) });
+        }
+      } catch { /* keep last known */ }
+    };
+    void pull();
+    const id = setInterval(pull, 5 * 60 * 1000); // refresh every 5 min
+    return () => { active = false; clearInterval(id); };
+  }, [user?.hourlyRateUsd]);
+
+  // Single read-only identity, sourced from the org chart with a graceful
+  // fallback to the stored account values when there is no org chart match.
+  const identity = {
+    linked:     Boolean(orgProfile),
+    name:       orgProfile?.name          ?? user?.name      ?? '',
+    title:      orgProfile?.title         ?? user?.jobTitle  ?? null,
+    department: orgProfile?.department    ?? user?.team      ?? null,
+    reportsTo:  orgProfile?.reportsToName ?? null,
+    email:      orgProfile?.email         ?? user?.email     ?? '',
+  };
+
   const handleOrgSync = async () => {
-    if (!form.name.trim() && !user?.email) return;
+    const lookupName = user?.name?.trim() ?? '';
+    if (!lookupName && !user?.email) return;
     setSyncing(true); setSyncMsg(''); setError('');
     try {
       const p = new URLSearchParams();
-      if (user?.email)      p.set('email', user.email);
-      if (form.name.trim()) p.set('name',  form.name.trim());
+      if (user?.email) p.set('email', user.email);
+      if (lookupName)  p.set('name',  lookupName);
       const res  = await fetch(`/api/orgchart/lookup?${p}`);
       const data = await res.json() as { match: OrgPerson | null };
       if (data.match) {
         setOrgProfile(data.match);
-        setForm(prev => ({ ...prev, team: data.match!.department, jobTitle: data.match!.title }));
         setSyncMsg(`Matched — ${data.match.name}`);
       } else { setSyncMsg('No match found.'); }
     } catch { setSyncMsg('Could not reach org chart.'); }
@@ -126,7 +168,17 @@ export default function ProfilePage() {
     e.preventDefault();
     setSaving(true); setError(''); setSuccess('');
     try {
-      const res  = await fetch('/api/profile/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+      // Identity is read-only; we still send it so the DB stays in sync with
+      // the org chart. The API requires a non-empty name.
+      const payload = {
+        name:     identity.name || user?.name || '',
+        team:     identity.department,
+        jobTitle: identity.title,
+        password: form.password,
+        reminderEnabled: form.reminderEnabled,
+        reminderIntervalMinutes: form.reminderIntervalMinutes,
+      };
+      const res  = await fetch('/api/profile/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await res.json() as { user?: ProfileUser; error?: string };
       if (!res.ok || !data.user) { setError(data.error || 'Failed to update profile'); return; }
       setUser(data.user);
@@ -231,48 +283,40 @@ export default function ProfilePage() {
           {/* Scrollable fields */}
           <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
 
-            {/* Read-only account row */}
-            <div className="grid grid-cols-3 gap-3">
-              {[['Username', user?.username], ['Role', user?.role], ['Email', user?.email]].map(([lbl, val]) => (
-                <div key={lbl}>
-                  <span className={labelCls}>{lbl}</span>
-                  <input value={val || ''} disabled className={inputDisabled} />
-                </div>
-              ))}
-            </div>
-
-            <div className="border-t border-(--rs-neutral-grey-100)" />
-
-            {/* Full Name */}
+            {/* Identity — read-only, sourced from the Org Chart */}
             <div>
-              <div className="flex items-center justify-between mb-1">
-                <label htmlFor="name" className={labelCls + ' mb-0'}>Full Name <span className="text-red-400 normal-case font-normal">*</span></label>
+              <div className="flex items-center justify-between mb-2">
+                <span className={labelCls + ' mb-0'}>Identity</span>
+                {orgLoading ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-(--rs-neutral-grey-400)">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Checking org chart…
+                  </span>
+                ) : identity.linked ? (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+                    <CheckCircle2 className="w-3 h-3" /> Synced from Org Chart
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-(--rs-neutral-grey-400)">
+                    From your account · not linked to org chart
+                  </span>
+                )}
               </div>
-              <input id="name" value={form.name} required
-                onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                className={inputBase} />
-            </div>
 
-            {/* Team + Job Title */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label htmlFor="team" className={labelCls}>Team</label>
-                <select id="team" value={form.team} onChange={e => setForm(p => ({ ...p, team: e.target.value }))}
-                  className={inputBase + ' bg-white cursor-pointer'}>
-                  <option value="">— No team</option>
-                  {form.team && !availableTeams.includes(form.team) && <option value={form.team}>{form.team}</option>}
-                  {availableTeams.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
+              <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) divide-y divide-(--rs-neutral-grey-100)">
+                <InfoRow label="Full Name"  value={identity.name} />
+                <InfoRow label="Job Title"  value={identity.title} />
+                <InfoRow label="Department" value={identity.department} />
+                <InfoRow label="Reports To" value={identity.reportsTo} />
+                <InfoRow label="Email"      value={identity.email} />
+                <InfoRow label="Username"   value={user?.username ?? null} />
+                <InfoRow label="Role"       value={user?.role ?? null} />
               </div>
-              <div>
-                <label htmlFor="jobTitle" className={labelCls}>Job Title</label>
-                <select id="jobTitle" value={form.jobTitle} onChange={e => setForm(p => ({ ...p, jobTitle: e.target.value }))}
-                  className={inputBase + ' bg-white cursor-pointer'}>
-                  <option value="">— No title</option>
-                  {form.jobTitle && !availableJobTitles.includes(form.jobTitle) && <option value={form.jobTitle}>{form.jobTitle}</option>}
-                  {availableJobTitles.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
+
+              {!identity.linked && !orgLoading && (
+                <p className="mt-1.5 text-[11px] text-(--rs-neutral-grey-400)">
+                  Showing your stored account details. Use <span className="font-medium text-(--rs-neutral-grey-600)">Sync from Org Chart</span> on the left to link your profile.
+                </p>
+              )}
             </div>
 
             <div className="border-t border-(--rs-neutral-grey-100)" />
@@ -316,6 +360,42 @@ export default function ProfilePage() {
               </div>
             </div>
 
+            {/* Compensation — read-only; only admins can change the rate */}
+            <div className="border-t border-(--rs-neutral-grey-100)" />
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-(--rs-neutral-grey-500) uppercase tracking-wide">Hourly Rate</span>
+                <span className="text-[11px] text-(--rs-neutral-grey-400)">Set by admin</span>
+              </div>
+              {user?.hourlyRateUsd != null ? (
+                <div className="flex items-end justify-between rounded-lg border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-4 py-3">
+                  <div>
+                    <p className="text-2xl font-serif font-bold text-(--rs-neutral-grey-900) tabular-nums leading-none">
+                      ${user.hourlyRateUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <span className="text-sm font-sans font-normal text-(--rs-neutral-grey-400)"> / hr</span>
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    {fx ? (
+                      <>
+                        <p className="text-lg font-semibold text-(--rs-primary-600) tabular-nums leading-none">
+                          ₱{(user.hourlyRateUsd * fx.rate).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          <span className="text-xs font-normal text-(--rs-neutral-grey-400)"> / hr</span>
+                        </p>
+                        <p className="text-[10px] text-(--rs-neutral-grey-400) mt-1">
+                          @ ₱{fx.rate.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/$1{fx.stale ? ' · cached' : ' · live'}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-xs text-(--rs-neutral-grey-400)">Loading PHP…</p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-(--rs-neutral-grey-400) italic">No rate set — ask your admin.</p>
+              )}
+            </div>
+
             {/* Plane Member ID */}
             {user?.planeMemberId !== undefined && (
               <>
@@ -339,7 +419,7 @@ export default function ProfilePage() {
             <button type="submit" disabled={saving}
               className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-(--rs-primary-500) px-5 py-2 text-sm font-semibold text-white hover:bg-(--rs-primary-600) transition-colors disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              {saving ? 'Saving…' : 'Save Profile'}
+              {saving ? 'Saving…' : 'Save Settings'}
             </button>
           </div>
         </form>
