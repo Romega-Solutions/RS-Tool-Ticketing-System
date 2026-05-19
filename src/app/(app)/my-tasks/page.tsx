@@ -1,5 +1,5 @@
 import { getSession } from '@/lib/session';
-import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems, PlaneWorkItem, PlaneState } from '@/lib/plane';
+import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems, PlaneWorkItem, PlaneState } from '@/lib/tickets';
 import { Card, CardContent } from "@/components/ui/card";
 import { TaskCard } from '@/components/task-card';
 
@@ -92,14 +92,14 @@ export default async function MyTasksPage({
 
       {!planeMemberId && (
         <div className="bg-(--rs-primary-50) border border-(--rs-primary-200) text-(--rs-primary-800) px-4 py-3 rounded-lg text-sm">
-          Your Plane account isn&apos;t linked. Ask your admin to set your Plane Member ID in your{' '}
+          Your member profile isn&apos;t linked yet. Ask an admin to link it in your{' '}
           <a href="/profile" className="underline font-medium">profile</a>.
         </div>
       )}
 
       {planeError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-          <strong>Plane connection failed:</strong> {planeError}
+          Couldn&apos;t load your tasks. Refresh; if it persists, contact an admin.
         </div>
       )}
 

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, serial, jsonb, numeric } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, jsonb, numeric, unique } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id:            serial('id').primaryKey(),
@@ -134,4 +134,48 @@ export const attendance = pgTable('attendance', {
   notes:           text('notes'),
   submittedAt:     text('submitted_at'),
   createdAt:       text('created_at').default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const projects = pgTable('projects', {
+  id:          serial('id').primaryKey(),
+  identifier:  text('identifier').notNull().unique(),
+  name:        text('name').notNull(),
+  description: text('description'),
+  network:     integer('network').notNull().default(2),
+  nextSequence: integer('next_sequence').notNull().default(1),
+  archived:    integer('archived').notNull().default(0),
+  createdAt:   text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt:   text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const projectStates = pgTable('project_states', {
+  id:        serial('id').primaryKey(),
+  projectId: integer('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  name:      text('name').notNull(),
+  group:     text('group').notNull(), // backlog|unstarted|started|completed|cancelled
+  color:     text('color').notNull().default('#6b7280'),
+  sequence:  integer('sequence').notNull().default(0),
+});
+
+export const workItems = pgTable('work_items', {
+  id:           serial('id').primaryKey(),
+  projectId:    integer('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  sequenceId:   integer('sequence_id').notNull(),
+  name:         text('name').notNull(),
+  description:  text('description'),
+  priority:     text('priority').notNull().default('none'),
+  stateId:      integer('state_id').references(() => projectStates.id, { onDelete: 'set null' }),
+  targetDate:   text('target_date'),
+  completedAt:  text('completed_at'),
+  createdBy:    integer('created_by'),
+  createdAt:    text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt:    text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  unique('work_items_project_seq_unique').on(t.projectId, t.sequenceId),
+]);
+
+export const workItemAssignees = pgTable('work_item_assignees', {
+  id:         serial('id').primaryKey(),
+  workItemId: integer('work_item_id').notNull().references(() => workItems.id, { onDelete: 'cascade' }),
+  memberKey:  text('member_key').notNull(), // == users.plane_member_id (legacy continuity)
 });

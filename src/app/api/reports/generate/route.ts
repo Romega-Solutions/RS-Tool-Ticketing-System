@@ -8,7 +8,7 @@ import {
   buildStateLookup,
   enrichWorkItems,
   PlaneWorkItem,
-} from '@/lib/plane';
+} from '@/lib/tickets';
 
 export const runtime = 'nodejs';
 

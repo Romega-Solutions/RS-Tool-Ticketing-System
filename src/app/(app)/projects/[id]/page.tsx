@@ -1,4 +1,4 @@
-import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems } from '@/lib/plane';
+import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems } from '@/lib/tickets';
 import { notFound } from 'next/navigation';
 import { AlertCircle } from 'lucide-react';
 import { KanbanBoard } from '@/components/kanban-board';
@@ -51,13 +51,13 @@ export default async function ProjectBoardPage({
       {planeError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-center gap-2">
           <AlertCircle className="w-4 h-4 shrink-0" />
-          <span><strong>Plane connection failed:</strong> {planeError}</span>
+          <span><strong>Couldn&apos;t load this board.</strong> {planeError}</span>
         </div>
       )}
 
       {!planeError && states.length === 0 && (
         <p className="text-(--rs-neutral-grey-500) italic text-sm">
-          No states configured for this project in Plane.
+          No workflow states configured for this project.
         </p>
       )}
 

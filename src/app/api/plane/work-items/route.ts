@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
-import { updateWorkItem, createWorkItem } from '@/lib/plane';
+import { updateWorkItem, createWorkItem } from '@/lib/tickets';
 
 export const runtime = 'nodejs';
 

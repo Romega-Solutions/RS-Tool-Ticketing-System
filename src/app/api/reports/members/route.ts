@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
 import { canAccessReports } from '@/lib/rbac';
-import { getWorkspaceMembers } from '@/lib/plane';
+import { getWorkspaceMembers } from '@/lib/tickets';
 
 export const runtime = 'nodejs';
 
