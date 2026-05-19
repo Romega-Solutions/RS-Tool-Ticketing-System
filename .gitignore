@@ -51,3 +51,6 @@ sqlite.db-wal
 
 # Git worktrees (isolated agent workspaces)
 .claude/worktrees/
+
+# Plane export snapshot (one-time, not committed)
+plane-snapshot.json
