@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems } from '@/lib/plane';
+import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems } from '@/lib/tickets';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Briefcase } from 'lucide-react';
 
@@ -39,7 +39,7 @@ export default async function ProjectsPage() {
 
       {planeError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
-          <strong>Plane connection failed:</strong> {planeError}. Check PLANE_BASE_URL, PLANE_API_KEY, and PLANE_WORKSPACE_SLUG in <code>.env</code>.
+          Couldn&apos;t load projects. Refresh; if it persists, contact an admin.
         </div>
       )}
 
@@ -96,7 +96,7 @@ export default async function ProjectsPage() {
       {projects.length === 0 && planeError && (
         <div className="flex flex-col items-center justify-center py-16 text-(--rs-neutral-grey-400)">
           <Briefcase className="w-12 h-12 mb-4 opacity-30" />
-          <p className="text-sm">Projects will appear here once Plane is connected.</p>
+          <p className="text-sm">No projects yet.</p>
         </div>
       )}
     </div>
