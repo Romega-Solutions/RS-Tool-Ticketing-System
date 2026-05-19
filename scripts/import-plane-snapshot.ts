@@ -22,7 +22,7 @@ async function main() {
   for (const entry of snap.projects) {
     const p = entry.project;
     const maxSeq = entry.items.reduce(
-      (m: number, i: any) => Math.max(m, Number(i.sequence_id ?? 0)), 0);
+      (m: number, i: { sequence_id?: number | null }) => Math.max(m, Number(i.sequence_id ?? 0)), 0);
 
     const { data: proj, error: projErr } = await sb.from('projects').insert({
       identifier: p.identifier || p.id,

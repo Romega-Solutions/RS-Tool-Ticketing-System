@@ -8,7 +8,15 @@ import {
 async function main() {
   const members = await getWorkspaceMembers();
   const projects = await getProjects();
-  const out: any = { exportedAt: new Date().toISOString(), members, projects: [] };
+  const out: {
+    exportedAt: string;
+    members: Awaited<ReturnType<typeof getWorkspaceMembers>>;
+    projects: Array<{
+      project: Awaited<ReturnType<typeof getProjects>>[number];
+      states: Awaited<ReturnType<typeof getProjectStates>>;
+      items: Awaited<ReturnType<typeof getWorkItems>>;
+    }>;
+  } = { exportedAt: new Date().toISOString(), members, projects: [] };
 
   for (const p of projects) {
     const [states, items] = await Promise.all([
