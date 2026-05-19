@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
-import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems, isCompletedGroup } from '@/lib/plane';
+import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems, isCompletedGroup } from '@/lib/tickets';
 
 export const runtime = 'nodejs';
 
@@ -21,7 +21,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ planeConfigured: false, pending: [], accomplishments: [] });
   }
 
-  const planeConfigured = !!(process.env.PLANE_BASE_URL && process.env.PLANE_API_KEY);
+  const planeConfigured = true;
   if (!planeConfigured) {
     return NextResponse.json({ planeConfigured: false, pending: [], accomplishments: [] });
   }
