@@ -48,3 +48,6 @@ next-env.d.ts
 sqlite.db-shm
 sqlite.db-wal
 .env*.local
+
+# Git worktrees (isolated agent workspaces)
+.claude/worktrees/
