@@ -53,6 +53,9 @@ describe('group predicates', () => {
     expect(isBacklogGroup('todo')).toBe(true);
     expect(isActiveGroup('started')).toBe(true);
     expect(isActiveGroup('in_progress')).toBe(true);
+    // 'unstarted' is intentionally in both predicates (mimics Plane's dual classification)
+    expect(isBacklogGroup('unstarted')).toBe(true);
+    expect(isActiveGroup('unstarted')).toBe(true);
     expect(getStateGroup({
       id: 'w', sequence_id: 1, name: 'n', state: 's',
       state_detail: { id: 's', name: 'D', group: 'Completed', color: '#0' },

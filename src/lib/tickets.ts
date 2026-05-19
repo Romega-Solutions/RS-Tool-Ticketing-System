@@ -119,7 +119,8 @@ export async function getWorkItems(
   const { data, error } = await sb
     .from('work_items')
     .select('id, sequence_id, name, description, priority, state_id, target_date, completed_at, created_at, updated_at, work_item_assignees(member_key)')
-    .eq('project_id', Number(projectId));
+    .eq('project_id', Number(projectId))
+    .order('sequence_id');
 
   if (error) throw new PlaneApiError(500, `work-items/${projectId}`);
 
@@ -164,16 +165,18 @@ export async function updateWorkItem(
   if (updates.state !== undefined) {
     const { data: st } = await sb.from('project_states')
       .select('group').eq('id', Number(updates.state)).maybeSingle();
-    patch.completed_at = st && String(st.group) === 'completed'
-      ? new Date().toISOString() : null;
+    if (st) {
+      patch.completed_at = String(st.group) === 'completed' ? new Date().toISOString() : null;
+    }
   }
 
   const { error } = await sb.from('work_items')
     .update(patch).eq('id', Number(itemId)).eq('project_id', Number(projectId));
   if (error) throw new PlaneApiError(502, `work-items/${itemId}`);
 
-  const [one] = await getWorkItems(projectId);
-  return (await getWorkItems(projectId)).find(w => w.id === String(itemId)) ?? one;
+  const updated = (await getWorkItems(projectId)).find(w => w.id === String(itemId));
+  if (!updated) throw new PlaneApiError(502, `work-items/${itemId} readback`);
+  return updated;
 }
 
 export async function createWorkItem(
@@ -183,6 +186,9 @@ export async function createWorkItem(
   const sb = createAdminClient();
   const pid = Number(projectId);
 
+  // NOTE: read-modify-write on next_sequence is not atomic. The UNIQUE(project_id, sequence_id)
+  // constraint makes a concurrent collision fail loudly rather than silently duplicate.
+  // TODO: replace with an atomic Postgres RPC if write concurrency increases.
   // Per-project sequence counter (Plane auto-assigned this).
   const { data: proj } = await sb.from('projects')
     .select('next_sequence').eq('id', pid).maybeSingle();

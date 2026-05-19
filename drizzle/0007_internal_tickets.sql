@@ -40,3 +40,13 @@ CREATE TABLE "work_item_assignees" (
 	"work_item_id" integer NOT NULL,
 	"member_key" text NOT NULL
 );
+--> statement-breakpoint
+ALTER TABLE "project_states" ADD CONSTRAINT "project_states_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "projects"("id") ON DELETE CASCADE;
+--> statement-breakpoint
+ALTER TABLE "work_items" ADD CONSTRAINT "work_items_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "projects"("id") ON DELETE CASCADE;
+--> statement-breakpoint
+ALTER TABLE "work_items" ADD CONSTRAINT "work_items_state_id_fkey" FOREIGN KEY ("state_id") REFERENCES "project_states"("id") ON DELETE SET NULL;
+--> statement-breakpoint
+ALTER TABLE "work_item_assignees" ADD CONSTRAINT "work_item_assignees_work_item_id_fkey" FOREIGN KEY ("work_item_id") REFERENCES "work_items"("id") ON DELETE CASCADE;
+--> statement-breakpoint
+ALTER TABLE "work_items" ADD CONSTRAINT "work_items_project_seq_unique" UNIQUE("project_id","sequence_id");
