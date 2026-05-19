@@ -71,7 +71,7 @@ export async function GET(req: Request) {
 
   const { data: tsData } = await admin
     .from('timesheets')
-    .select('id, clocked_in_at, clocked_out_at, duration_seconds, date')
+    .select('id, clocked_in_at, clocked_out_at, duration_seconds, is_overtime, overtime_seconds, date')
     .eq('user_id', userId)
     .in('date', weekDates)
     .order('clocked_in_at', { ascending: true });
@@ -81,6 +81,8 @@ export async function GET(req: Request) {
     clocked_in_at: string;
     clocked_out_at: string | null;
     duration_seconds: number | null;
+    is_overtime: number | null;
+    overtime_seconds: number | null;
     date: string;
   }) => ({
     id:              row.id,
@@ -88,6 +90,8 @@ export async function GET(req: Request) {
     clockedInAt:     row.clocked_in_at,
     clockedOutAt:    row.clocked_out_at,
     durationSeconds: row.duration_seconds,
+    isOvertime:      row.is_overtime === 1,
+    overtimeSeconds: row.overtime_seconds,
   }));
 
   return NextResponse.json({ userId, weekStart, timesheets });

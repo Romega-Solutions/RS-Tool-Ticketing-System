@@ -2,8 +2,12 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { AlertTriangle, Loader2, LogIn, LogOut } from 'lucide-react';
-import { formatDuration } from '@/lib/utils';
+import { formatDuration, isOvertime, OVERTIME_THRESHOLD_SECONDS } from '@/lib/utils';
 import { ClockOutReminderBanner } from '@/components/clock-out-reminder-banner';
+import { OvertimeGuardrailDialog } from '@/components/overtime-guardrail-dialog';
+import { OvertimeStatusBanner } from '@/components/overtime-status-banner';
+
+const OVERTIME_REPROMPT_SECONDS = 3600; // re-prompt every additional hour
 
 type WidgetState = 'loading' | 'out' | 'in';
 type PendingAction = 'clock-in' | 'clock-out' | null;
@@ -120,9 +124,17 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
   const [reminderEnabled, setReminderEnabled] = useState(true);
   const [reminderIntervalMinutes, setReminderIntervalMinutes] = useState(120);
   const [reminderVisible, setReminderVisible] = useState(false);
+  const [overtimeConsented, setOvertimeConsented] = useState(false);
+  const [overtimePromptVisible, setOvertimePromptVisible] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedRef = useRef(0);
   const lastReminderFiredRef = useRef<number>(0);
+  const lastOvertimeBlockRef = useRef<number>(-1);
+
+  const overtimeBlock = (sec: number) =>
+    sec < OVERTIME_THRESHOLD_SECONDS
+      ? -1
+      : Math.floor((sec - OVERTIME_THRESHOLD_SECONDS) / OVERTIME_REPROMPT_SECONDS);
 
   function startTimer(sinceIso: string) {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -191,6 +203,26 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
     return () => clearInterval(id);
   }, [state, reminderEnabled, reminderIntervalMinutes]);
 
+  // Overtime guardrail: hard prompt at 3h, then again every additional hour.
+  useEffect(() => {
+    if (state !== 'in') return;
+    const check = () => {
+      const block = overtimeBlock(elapsedRef.current);
+      if (block > lastOvertimeBlockRef.current) {
+        setOvertimePromptVisible(true);
+      }
+    };
+    check();
+    const id = setInterval(check, 15_000);
+    return () => clearInterval(id);
+  }, [state]);
+
+  function consentOvertime() {
+    lastOvertimeBlockRef.current = overtimeBlock(elapsedRef.current);
+    setOvertimeConsented(true);
+    setOvertimePromptVisible(false);
+  }
+
   function dismissReminder() {
     setReminderVisible(false);
   }
@@ -253,6 +285,9 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
       stopTimer();
       setReminderVisible(false);
       lastReminderFiredRef.current = 0;
+      setOvertimeConsented(false);
+      setOvertimePromptVisible(false);
+      lastOvertimeBlockRef.current = -1;
       setSessionNote('');
       setNoteDraft('');
       setNoteSaved(true);
@@ -271,17 +306,45 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
     ? 'This session is active, but note saving is not available until the database update is applied.'
     : '';
 
+  const inOvertime = state === 'in' && isOvertime(elapsed);
+
+  const overtimeOverlays = (
+    <>
+      {state === 'in' && overtimeConsented && (
+        <OvertimeStatusBanner
+          elapsedSeconds={elapsed}
+          busy={busy}
+          onClockOut={confirmClockOut}
+        />
+      )}
+      {state === 'in' && overtimePromptVisible && (
+        <OvertimeGuardrailDialog
+          elapsedSeconds={elapsed}
+          busy={busy}
+          onContinue={consentOvertime}
+          onClockOut={confirmClockOut}
+        />
+      )}
+    </>
+  );
+
   if (variant === 'topbar') {
     return (
       <>
+        {overtimeOverlays}
         {state === 'loading' ? (
           <div className="flex items-center gap-1.5 text-(--rs-neutral-grey-400) text-xs">
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
           </div>
         ) : state === 'in' ? (
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-full">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+            <div className={`flex items-center gap-1.5 text-xs font-medium border px-2.5 py-1 rounded-full ${
+              inOvertime
+                ? 'text-amber-800 bg-amber-50 border-amber-300'
+                : 'text-green-700 bg-green-50 border-green-200'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${inOvertime ? 'bg-amber-500' : 'bg-green-500'}`} />
+              {inOvertime && <span className="font-semibold">OT</span>}
               {formatDuration(elapsed)}
             </div>
             <button
@@ -329,13 +392,14 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
 
   return (
     <>
+      {overtimeOverlays}
       {collapsed ? (
         <button
           onClick={state === 'out' ? openClockInConfirm : openClockOutConfirm}
           disabled={busy || state === 'loading'}
           className={`w-full flex justify-center py-2 transition-colors ${
             state === 'in'
-              ? 'text-green-400 hover:text-green-300'
+              ? inOvertime ? 'text-amber-400 hover:text-amber-300' : 'text-green-400 hover:text-green-300'
               : 'text-white/40 hover:text-white/80'
           } disabled:opacity-50`}
           title={state === 'in' ? `Clocked in · ${formatDuration(elapsed)}` : 'Clock In'}
@@ -343,16 +407,16 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
           {busy || state === 'loading'
             ? <Loader2 className="w-4 h-4 animate-spin" />
             : state === 'in'
-            ? <span className="w-2 h-2 rounded-full bg-green-400 mt-1" />
+            ? <span className={`w-2 h-2 rounded-full mt-1 ${inOvertime ? 'bg-amber-400' : 'bg-green-400'}`} />
             : <LogIn className="w-4 h-4" />}
         </button>
       ) : (
         <div className="space-y-1">
           {state === 'in' ? (
             <>
-              <div className="flex items-center gap-2 px-3 py-1 text-xs text-green-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-400 shrink-0" />
-                <span className="font-medium">Clocked in · {formatDuration(elapsed)}</span>
+              <div className={`flex items-center gap-2 px-3 py-1 text-xs ${inOvertime ? 'text-amber-400' : 'text-green-400'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${inOvertime ? 'bg-amber-400' : 'bg-green-400'}`} />
+                <span className="font-medium">{inOvertime ? 'Overtime' : 'Clocked in'} · {formatDuration(elapsed)}</span>
               </div>
               {noteHint && (
                 <p className="px-3 text-[10px] text-white/50 line-clamp-2">{noteHint}</p>

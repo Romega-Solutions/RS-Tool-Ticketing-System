@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Users } from 'lucide-react';
+import { isOvertime } from '@/lib/utils';
 
 type PresenceUser = {
   userId:      number;
@@ -39,7 +40,13 @@ function LiveDuration({ clockedInAt }: { clockedInAt: string }) {
 
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
-  return <span className="text-xs text-(--rs-neutral-grey-400)">{h > 0 ? `${h}h ${m}m` : `${m}m`}</span>;
+  const over = isOvertime(secs);
+  const label = h > 0 ? `${h}h ${m}m` : `${m}m`;
+  return (
+    <span className={`text-xs ${over ? 'font-semibold text-amber-600' : 'text-(--rs-neutral-grey-400)'}`}>
+      {over ? `OT ${label}` : label}
+    </span>
+  );
 }
 
 export function PresencePanel() {

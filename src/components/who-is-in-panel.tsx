@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
+import { isOvertime } from '@/lib/utils';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -43,8 +44,14 @@ function LiveDuration({ clockedInAt }: { clockedInAt: string }) {
 
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
-  if (h > 0) return <span>{h}h {m}m</span>;
-  return <span>{m}m</span>;
+  const over = isOvertime(secs);
+  const label = h > 0 ? `${h}h ${m}m` : `${m}m`;
+  return (
+    <span className={over ? 'text-amber-600' : 'text-green-600'}>
+      {over && <span className="font-bold">OT </span>}
+      {label}
+    </span>
+  );
 }
 
 // ── Panel content (pure presentation) ────────────────────────────────────────
@@ -101,7 +108,7 @@ function PanelContent({ sorted, connected }: { sorted: PresenceUser[]; connected
 
                 {/* Time */}
                 <div className="shrink-0 text-right">
-                  <p className="text-xs font-semibold text-green-600 tabular-nums">
+                  <p className="text-xs font-semibold tabular-nums">
                     <LiveDuration clockedInAt={user.clockedInAt} />
                   </p>
                   <p className="text-[10px] text-(--rs-neutral-grey-400)">since {sinceLabel(user.clockedInAt)}</p>

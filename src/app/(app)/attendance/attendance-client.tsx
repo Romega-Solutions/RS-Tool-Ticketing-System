@@ -33,6 +33,8 @@ interface TimesheetEntry {
   clockedInAt: string;
   clockedOutAt: string | null;
   durationSeconds: number | null;
+  isOvertime?: boolean;
+  overtimeSeconds?: number | null;
 }
 
 interface DetailDay {
@@ -283,6 +285,11 @@ function TimesheetDetailPanel({
                               )}
                               {s.durationSeconds != null && (
                                 <div className="text-[10px] text-(--rs-neutral-grey-400)">{fmtSeconds(s.durationSeconds)}</div>
+                              )}
+                              {s.isOvertime && (
+                                <div className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
+                                  OT{s.overtimeSeconds ? ` +${fmtSeconds(s.overtimeSeconds)}` : ''}
+                                </div>
                               )}
                             </div>
                           ))

@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { TrendingUp, RefreshCw, Loader2 } from 'lucide-react';
+import { TrendingUp, RefreshCw, Loader2, ExternalLink } from 'lucide-react';
 
-type Fx = { rate: number; fetchedAt: string; stale: boolean };
+// Wise's public mid-market converter — open it to confirm our number is real.
+const WISE_VERIFY_URL = 'https://wise.com/us/currency-converter/usd-to-php-rate?amount=1';
+
+type Fx = { rate: number; fetchedAt: string; stale: boolean; source: 'wise' | 'erapi' | null };
 
 const php = (n: number) => n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -26,10 +29,10 @@ export function FxRateWidget() {
   const load = useCallback(async () => {
     try {
       const res  = await fetch('/api/fx/usd-php', { cache: 'no-store' });
-      const data = await res.json() as { rate?: number; fetchedAt?: string; stale?: boolean; error?: string };
+      const data = await res.json() as { rate?: number; fetchedAt?: string; stale?: boolean; source?: 'wise' | 'erapi'; error?: string };
       if (!res.ok || typeof data.rate !== 'number') { setError(data.error || 'Rate unavailable'); return; }
       setError('');
-      setFx({ rate: data.rate, fetchedAt: data.fetchedAt ?? new Date().toISOString(), stale: Boolean(data.stale) });
+      setFx({ rate: data.rate, fetchedAt: data.fetchedAt ?? new Date().toISOString(), stale: Boolean(data.stale), source: data.source ?? null });
     } catch {
       setError('Rate service unreachable');
     }
@@ -38,7 +41,7 @@ export function FxRateWidget() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
-    const id = setInterval(() => { void load(); }, 5 * 60 * 1000);
+    const id = setInterval(() => { void load(); }, 60 * 1000); // re-pull every minute
     return () => clearInterval(id);
   }, [load]);
 
@@ -86,7 +89,18 @@ export function FxRateWidget() {
               <span className={`w-1.5 h-1.5 rounded-full ${fx.stale ? 'bg-amber-500' : 'bg-emerald-500'}`} />
               {fx.stale ? 'Cached' : 'Live'}
             </span>
-            <p className="mt-1 text-[11px] text-(--rs-neutral-grey-400)">Updated {timeAgo(fx.fetchedAt)}</p>
+            <p className="mt-1 text-[11px] text-(--rs-neutral-grey-400)">
+              {fx.source === 'wise' ? 'via Wise · ' : fx.source === 'erapi' ? 'fallback · ' : ''}
+              {timeAgo(fx.fetchedAt)}
+            </p>
+            <a
+              href={WISE_VERIFY_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-0.5 inline-flex items-center gap-0.5 text-[11px] font-medium text-(--rs-primary-600) hover:text-(--rs-primary-700) hover:underline"
+            >
+              Verify on Wise <ExternalLink className="w-3 h-3" />
+            </a>
           </div>
         )}
         <button

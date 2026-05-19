@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { RefreshCw, ArrowRightLeft, TrendingUp, Loader2 } from 'lucide-react';
+import { RefreshCw, ArrowRightLeft, TrendingUp, Loader2, ExternalLink } from 'lucide-react';
+
+// Wise's public mid-market converter — anyone can open this and confirm the
+// rate we show matches Wise live, no login needed.
+const WISE_VERIFY_URL = 'https://wise.com/us/currency-converter/usd-to-php-rate?amount=1';
 
 export type RateUser = {
   id: number;
@@ -17,6 +21,7 @@ type FxState = {
   fetchedAt: string;
   upstreamUpdatedAt: string | null;
   stale: boolean;
+  source: 'wise' | 'erapi' | null;
 };
 
 const usd = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -57,6 +62,7 @@ export function RatesClient({ users }: { users: RateUser[] }) {
         fetchedAt: data.fetchedAt ?? new Date().toISOString(),
         upstreamUpdatedAt: data.upstreamUpdatedAt ?? null,
         stale: Boolean(data.stale),
+        source: data.source ?? null,
       });
     } catch {
       setFxError('Could not reach the exchange-rate service');
@@ -68,7 +74,7 @@ export function RatesClient({ users }: { users: RateUser[] }) {
     // first await, so this is a safe async data-load, not a cascading render.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadFx();
-    const id = setInterval(() => { void loadFx(); }, 5 * 60 * 1000); // auto-refresh every 5 min
+    const id = setInterval(() => { void loadFx(); }, 60 * 1000); // auto-refresh every minute
     return () => clearInterval(id);
   }, [loadFx]);
 
@@ -123,7 +129,7 @@ export function RatesClient({ users }: { users: RateUser[] }) {
                 ₱{php(fx.rate)}
                 <span className="ml-2 text-sm font-sans font-normal text-(--rs-neutral-grey-400)">per $1 USD</span>
               </p>
-              <div className="mt-3 flex items-center gap-2 text-xs text-(--rs-neutral-grey-400)">
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-(--rs-neutral-grey-400)">
                 <span
                   className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium ${
                     fx.stale
@@ -134,7 +140,20 @@ export function RatesClient({ users }: { users: RateUser[] }) {
                   <span className={`w-1.5 h-1.5 rounded-full ${fx.stale ? 'bg-amber-500' : 'bg-emerald-500'}`} />
                   {fx.stale ? 'Cached' : 'Live'}
                 </span>
+                {fx.source === 'wise' ? (
+                  <span className="font-semibold text-(--rs-primary-600)">via Wise (real payout rate)</span>
+                ) : fx.source === 'erapi' ? (
+                  <span className="font-medium text-amber-600">fallback feed — Wise unavailable</span>
+                ) : null}
                 <span>Updated {timeAgo(fx.fetchedAt)}</span>
+                <a
+                  href={WISE_VERIFY_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-0.5 font-medium text-(--rs-primary-600) hover:text-(--rs-primary-700) hover:underline"
+                >
+                  Double-check on Wise <ExternalLink className="w-3 h-3" />
+                </a>
               </div>
             </>
           ) : (

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Radio, Loader2 } from 'lucide-react';
+import { isOvertime } from '@/lib/utils';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -64,10 +65,15 @@ function LiveDuration({ clockedInAt }: { clockedInAt: string }) {
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
   const s = secs % 60;
+  const over = isOvertime(secs);
 
-  if (h > 0)  return <span>{h}h {m}m</span>;
-  if (m > 0)  return <span>{m}m {s}s</span>;
-  return <span>{s}s</span>;
+  const label = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
+  return (
+    <span className={over ? 'text-amber-600' : 'text-green-600'}>
+      {over && <span className="font-bold">OT </span>}
+      {label}
+    </span>
+  );
 }
 
 // ── User Card ─────────────────────────────────────────────────────────────────
@@ -109,7 +115,7 @@ function PersonCard({ user }: { user: PresenceUser }) {
         </div>
         <div className="flex items-center justify-between text-xs">
           <span className="text-(--rs-neutral-grey-400)">Duration</span>
-          <span className="font-semibold text-green-600 tabular-nums">
+          <span className="font-semibold tabular-nums">
             <LiveDuration clockedInAt={user.clockedInAt} />
           </span>
         </div>
