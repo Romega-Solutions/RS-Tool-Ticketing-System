@@ -1,5 +1,5 @@
 import { getSession } from '@/lib/session';
-import { getProjects, getProjectStates, getWorkspaceMembers, getWorkItems, buildStateLookup, enrichWorkItems } from '@/lib/plane';
+import { getProjects, getProjectStates, getWorkspaceMembers, getWorkItems, buildStateLookup, enrichWorkItems } from '@/lib/tickets';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { AlertCircle, Clock, Users, FileText } from "lucide-react";
@@ -227,10 +227,7 @@ export default async function DashboardPage() {
 
       {planeError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-          <strong>Plane connection failed:</strong> {planeError}.{' '}
-          Check <code className="bg-red-100 px-1 rounded">PLANE_BASE_URL</code>,{' '}
-          <code className="bg-red-100 px-1 rounded">PLANE_API_KEY</code>, and{' '}
-          <code className="bg-red-100 px-1 rounded">PLANE_WORKSPACE_SLUG</code> in <code className="bg-red-100 px-1 rounded">.env</code>.
+          Could not load project data. Try refreshing; if it persists, contact an admin.
         </div>
       )}
 
@@ -365,7 +362,7 @@ export default async function DashboardPage() {
             {!planeMemberId ? (
               <div className="flex flex-col items-center gap-3 py-5 text-center">
                 <p className="text-sm text-(--rs-neutral-grey-500)">
-                  My Tasks will appear here once your Plane account is linked.
+                  My Tasks will appear here once your member profile is linked. Ask an admin.
                 </p>
                 <Link
                   href="/profile"
