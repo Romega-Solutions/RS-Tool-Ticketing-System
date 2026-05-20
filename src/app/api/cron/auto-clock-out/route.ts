@@ -15,14 +15,7 @@ type OpenRow = {
   user_id:                 number;
   clocked_in_at:           string;
   overtime_consent_until:  string | null;
-  users:                   { role: string } | { role: string }[] | null;
 };
-
-function rowRole(row: OpenRow): string {
-  const u = row.users;
-  if (Array.isArray(u)) return u[0]?.role ?? '';
-  return u?.role ?? '';
-}
 
 // GET /api/cron/auto-clock-out
 // Vercel cron hits this every minute. Closes open sessions that have:
@@ -41,19 +34,33 @@ export async function GET(req: Request) {
   const admin = createAdminClient();
   const now = new Date();
 
-  // Pull every open session with the user's role joined in. The room is
-  // small enough (10s of people) that filtering in JS is simpler than
-  // building a date-math SQL filter that has to handle TZ correctly.
-  const { data, error } = await admin
+  // Pull every open session, then fetch the matching users in one extra
+  // round-trip. We avoid the PostgREST embed because there is no FK between
+  // timesheets.user_id and users.id in this DB.
+  const { data: openRows, error: openErr } = await admin
     .from('timesheets')
-    .select('id, user_id, clocked_in_at, overtime_consent_until, users:user_id ( role )')
+    .select('id, user_id, clocked_in_at, overtime_consent_until')
     .is('clocked_out_at', null);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (openErr) {
+    return NextResponse.json({ error: openErr.message }, { status: 500 });
   }
 
-  const rows = (data ?? []) as OpenRow[];
+  const rows = (openRows ?? []) as OpenRow[];
+  const userIds = [...new Set(rows.map(r => r.user_id))];
+  const roleByUserId = new Map<number, string>();
+  if (userIds.length > 0) {
+    const { data: users, error: userErr } = await admin
+      .from('users')
+      .select('id, role')
+      .in('id', userIds);
+    if (userErr) {
+      return NextResponse.json({ error: userErr.message }, { status: 500 });
+    }
+    for (const u of (users ?? []) as { id: number; role: string }[]) {
+      roleByUserId.set(u.id, u.role);
+    }
+  }
   const closed: Array<{ userId: number; durationSeconds: number }> = [];
   const skipped: Array<{ userId: number; reason: string }> = [];
 
@@ -70,7 +77,7 @@ export async function GET(req: Request) {
       continue;
     }
 
-    if (normalizeRole(rowRole(row)) === 'admin') {
+    if (normalizeRole(roleByUserId.get(row.user_id) ?? '') === 'admin') {
       skipped.push({ userId: row.user_id, reason: 'admin/ceo exempt' });
       continue;
     }
