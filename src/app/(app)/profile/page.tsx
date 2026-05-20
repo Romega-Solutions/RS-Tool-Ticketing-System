@@ -12,7 +12,6 @@ type ProfileUser = {
   role: string;
   team: string | null;
   jobTitle: string | null;
-  planeMemberId?: string | null;
   hourlyRateUsd?: number | null;
   isActive: boolean;
   reminderEnabled: boolean;
@@ -396,18 +395,6 @@ export default function ProfilePage() {
               )}
             </div>
 
-            {/* Plane Member ID */}
-            {user?.planeMemberId !== undefined && (
-              <>
-                <div className="border-t border-(--rs-neutral-grey-100)" />
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-(--rs-neutral-grey-500) uppercase tracking-wide">Plane Member ID</span>
-                  <span className="font-mono text-xs text-(--rs-primary-600)">
-                    {user.planeMemberId || <span className="italic font-sans text-(--rs-neutral-grey-400)">Not set — ask admin</span>}
-                  </span>
-                </div>
-              </>
-            )}
           </div>
 
           {/* ── Form footer ── */}

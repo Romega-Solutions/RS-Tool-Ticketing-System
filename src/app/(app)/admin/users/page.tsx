@@ -11,7 +11,7 @@ export default async function AdminUsersPage() {
   const admin = createAdminClient();
   const { data } = await admin
     .from('users')
-    .select('id, username, name, email, role, team, job_title, plane_member_id, member_code, hourly_rate_usd, is_active')
+    .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active')
     .order('name');
   const rawUsers = data ?? [];
 
@@ -23,7 +23,6 @@ export default async function AdminUsersPage() {
     role:          u.role as string,
     team:          u.team as string | null,
     jobTitle:      u.job_title as string | null,
-    planeMemberId: u.plane_member_id as string | null,
     memberCode:    u.member_code as string | null,
     hourlyRateUsd: u.hourly_rate_usd == null ? null : Number(u.hourly_rate_usd),
     isActive:      Boolean(u.is_active),
@@ -34,7 +33,7 @@ export default async function AdminUsersPage() {
       <div>
         <h1 className="text-2xl font-serif font-bold text-(--rs-neutral-grey-900)">User Management</h1>
         <p className="text-sm text-(--rs-neutral-grey-500) mt-1">
-          Manage team accounts, roles, and Plane member IDs.
+          Manage team accounts, roles, and per-user settings.
         </p>
       </div>
 

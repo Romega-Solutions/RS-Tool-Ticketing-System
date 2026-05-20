@@ -8,5 +8,5 @@ export default async function AttendancePage() {
   if (!session || !canAccessReports(session.role)) {
     redirect(defaultLandingPath(session?.role ?? 'ic'));
   }
-  return <AttendanceClient />;
+  return <AttendanceClient isAdmin={session.role === 'admin'} />;
 }

@@ -21,7 +21,6 @@ CREATE TABLE IF NOT EXISTS public.users (
   role                      TEXT    NOT NULL DEFAULT 'ic',
   team                      TEXT,
   job_title                 TEXT,
-  plane_member_id           TEXT,
   member_code               TEXT,
   hourly_rate_usd           NUMERIC(10,2),
   is_active                 INTEGER NOT NULL DEFAULT 1,
@@ -259,7 +258,7 @@ WHERE pubname = 'supabase_realtime'
 --               (complete schema — all 6 migrations included)
 --
 --  users        id, username, password_hash, name, email, role,
---               team, job_title, plane_member_id, member_code,
+--               team, job_title, member_code,
 --               hourly_rate_usd, is_active,
 --               reminder_enabled, reminder_interval_minutes,
 --               created_at, updated_at

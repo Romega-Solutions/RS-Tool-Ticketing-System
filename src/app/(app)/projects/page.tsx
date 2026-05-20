@@ -1,15 +1,38 @@
 import Link from 'next/link';
 import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems } from '@/lib/tickets';
+import { getSession } from '@/lib/session';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Briefcase } from 'lucide-react';
+import { NewProjectButton } from '@/components/new-project-button';
 
-export default async function ProjectsPage() {
+export default async function ProjectsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ team?: string }>;
+}) {
+  const session = await getSession();
+  const { team: teamParam } = await searchParams;
+
+  // Default-filter: leads with a team set see only their team's projects unless
+  // they pass ?team=all (or some other explicit value). Admins/CEO/IC are
+  // never auto-filtered.
+  const shouldDefaultToMyTeam =
+    session?.role === 'lead' && session.team && teamParam === undefined;
+  const effectiveTeam =
+    teamParam === 'all' ? null
+    : teamParam ? teamParam
+    : shouldDefaultToMyTeam ? session!.team
+    : null;
+
+  const showToggle = session?.role === 'lead' && !!session.team;
+  const onMyTeam = effectiveTeam !== null && effectiveTeam === session?.team;
+
   let projects: Awaited<ReturnType<typeof getProjects>> = [];
   let stats: Record<string, { total: number; open: number; done: number }> = {};
   let planeError: string | null = null;
 
   try {
-    projects = await getProjects();
+    projects = await getProjects({ team: effectiveTeam });
     const results = await Promise.all(
       projects.map(async p => {
         const [items, states] = await Promise.all([
@@ -32,9 +55,39 @@ export default async function ProjectsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-serif font-bold text-(--rs-neutral-grey-900)">Projects</h1>
-        <p className="text-(--rs-neutral-grey-500) text-sm mt-1">All active projects in the Romega Solutions workspace.</p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-serif font-bold text-(--rs-neutral-grey-900)">Projects</h1>
+          <p className="text-(--rs-neutral-grey-500) text-sm mt-1">
+            {effectiveTeam
+              ? `Showing ${effectiveTeam} team projects.`
+              : 'All active projects in the Romega Solutions workspace.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {showToggle && (
+            <div className="inline-flex border border-(--rs-neutral-grey-200) rounded-md overflow-hidden text-xs">
+              <Link
+                href="/projects"
+                className={`px-3 py-1.5 ${onMyTeam ? 'bg-(--rs-primary-500) text-white' : 'bg-white text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-50)'}`}
+              >
+                My team ({session!.team})
+              </Link>
+              <Link
+                href="/projects?team=all"
+                className={`px-3 py-1.5 border-l border-(--rs-neutral-grey-200) ${!onMyTeam ? 'bg-(--rs-primary-500) text-white' : 'bg-white text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-50)'}`}
+              >
+                All teams
+              </Link>
+            </div>
+          )}
+          {session && (
+            <NewProjectButton
+              defaultTeam={session.team}
+              canChooseTeam={session.role === 'admin' || session.role === 'lead'}
+            />
+          )}
+        </div>
       </div>
 
       {planeError && (

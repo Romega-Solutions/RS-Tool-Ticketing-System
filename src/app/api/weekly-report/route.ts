@@ -45,7 +45,7 @@ export async function GET(req: Request) {
       ideas:             (report.ideas as string) ?? '',
       submittedAt:       report.submitted_at as string | null,
     } : null,
-    user: { id: session.id, name: session.name, planeMemberId: session.planeMemberId },
+    user: { id: session.id, name: session.name },
   });
 }
 

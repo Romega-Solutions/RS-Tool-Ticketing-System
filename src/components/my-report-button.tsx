@@ -5,26 +5,13 @@ import { FileText, Loader2, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export function MyReportButton({
-  planeMemberId,
   memberName,
 }: {
-  planeMemberId: string | null;
   memberName: string;
 }) {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
-
-  if (!planeMemberId) {
-    return (
-      <div className="bg-(--rs-primary-50) border border-(--rs-primary-200) text-(--rs-primary-800) px-4 py-4 rounded-lg text-sm space-y-1 max-w-lg">
-        <p className="font-semibold">Plane account not linked</p>
-        <p className="text-(--rs-primary-700)">
-          Ask your admin to set your Plane Member ID in the User Management panel before you can generate reports.
-        </p>
-      </div>
-    );
-  }
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -71,7 +58,7 @@ export function MyReportButton({
         <div>
           <h2 className="text-base font-serif font-semibold text-(--rs-neutral-grey-900)">My Weekly Report</h2>
           <p className="text-sm text-(--rs-neutral-grey-500) mt-1">
-            Generates a report of your current and completed Plane tasks for this week.
+            Generates a report of your current and completed tasks for this week.
           </p>
         </div>
 

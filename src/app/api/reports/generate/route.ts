@@ -291,12 +291,7 @@ export async function POST(req: Request) {
       return Response.json({ error: 'targetMemberId is required.' }, { status: 400 });
     }
   } else {
-    if (!session.planeMemberId) {
-      return Response.json({
-        error: 'Your Plane account is not linked. Ask your admin to set your Plane Member ID.',
-      }, { status: 400 });
-    }
-    memberId = session.planeMemberId;
+    memberId = String(session.id);
     memberName = session.name;
   }
 

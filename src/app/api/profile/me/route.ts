@@ -45,7 +45,6 @@ export async function GET() {
       role: normalizeRole(user.role),
       team: user.team,
       jobTitle: user.job_title,
-      planeMemberId: user.plane_member_id ?? null,
       hourlyRateUsd: user.hourly_rate_usd == null ? null : Number(user.hourly_rate_usd),
       isActive: Boolean(user.is_active),
       reminderEnabled: Boolean(user.reminder_enabled ?? 1),

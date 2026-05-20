@@ -10,8 +10,8 @@ import { ChevronLeft, ChevronRight, Plus, Trash2, Loader2, CheckCircle2, AlertCi
 interface ClientEngagement { activity: string; date: string; details: string; }
 interface Risk { description: string; resolution: string; escalation: string; }
 interface Meeting { title: string; date: string; participants: string; notes: string; }
-interface PlanePending { project: string; title: string; status: string; statusGroup: string; targetDate: string | null; }
-interface PlaneAccomplishment { project: string; title: string; completedAt: string; }
+interface PendingTask { project: string; title: string; status: string; statusGroup: string; targetDate: string | null; }
+interface AccomplishmentTask { project: string; title: string; completedAt: string; }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -49,7 +49,7 @@ function statusGroupColor(group: string): string {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
-export function WeeklyReportForm({ planeMemberId }: { planeMemberId: string | null }) {
+export function WeeklyReportForm() {
   const [weekOffset, setWeekOffset] = useState(0);
   const monday = getMondayDate(weekOffset);
   const friday = new Date(monday.getTime() + 4 * 86400000);
@@ -67,12 +67,11 @@ export function WeeklyReportForm({ planeMemberId }: { planeMemberId: string | nu
   const [saveState, setSaveState] = useState<'idle' | 'saved' | 'error'>('idle');
   const [lastSaved, setLastSaved] = useState<string | null>(null);
 
-  // Plane data
-  const [planeLoading,    setPlaneLoading]    = useState(false);
-  const [planeConfigured, setPlaneConfigured] = useState(true);
-  const [pending,         setPending]         = useState<PlanePending[]>([]);
-  const [accomplishments, setAccomplishments] = useState<PlaneAccomplishment[]>([]);
-  const [planeError,      setPlaneError]      = useState('');
+  // Task data (sourced from internal tickets DB).
+  const [tasksLoading,    setTasksLoading]    = useState(false);
+  const [pending,         setPending]         = useState<PendingTask[]>([]);
+  const [accomplishments, setAccomplishments] = useState<AccomplishmentTask[]>([]);
+  const [tasksError,      setTasksError]      = useState('');
 
   // Load saved report for this week
   const loadReport = useCallback(() => {
@@ -100,22 +99,20 @@ export function WeeklyReportForm({ planeMemberId }: { planeMemberId: string | nu
 
   useEffect(() => { loadReport(); }, [loadReport]);
 
-  // Load Plane data for this week
+  // Load task data for this week from the internal tickets DB.
   useEffect(() => {
-    if (!planeMemberId) { setPlaneConfigured(false); return; }
-    setPlaneLoading(true);
-    setPlaneError('');
+    setTasksLoading(true);
+    setTasksError('');
     fetch(`/api/weekly-report/plane-data?week=${weekStart}`)
       .then(r => r.json())
-      .then((d: { planeConfigured: boolean; pending: PlanePending[]; accomplishments: PlaneAccomplishment[]; error?: string }) => {
-        setPlaneConfigured(d.planeConfigured);
+      .then((d: { configured?: boolean; pending: PendingTask[]; accomplishments: AccomplishmentTask[]; error?: string }) => {
         setPending(d.pending ?? []);
         setAccomplishments(d.accomplishments ?? []);
-        if (d.error) setPlaneError(d.error);
+        if (d.error) setTasksError(d.error);
       })
-      .catch(() => setPlaneError('Could not load Plane data.'))
-      .finally(() => setPlaneLoading(false));
-  }, [weekStart, planeMemberId]);
+      .catch(() => setTasksError('Could not load tasks.'))
+      .finally(() => setTasksLoading(false));
+  }, [weekStart]);
 
   const save = async () => {
     setSaving(true);
@@ -405,30 +402,24 @@ export function WeeklyReportForm({ planeMemberId }: { planeMemberId: string | nu
             </CardContent>
           </Card>
 
-          {/* ── Section 5: Plane auto-populated data */}
-          {!planeConfigured ? (
-            <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-md px-4 py-3 text-sm">
-              {planeMemberId
-                ? 'Plane is not configured on this server. Pending projects and accomplishments are unavailable.'
-                : 'Your Plane account is not linked. Go to Profile to add your Plane Member ID and auto-populate your tasks.'}
-            </div>
-          ) : (
+          {/* ── Section 5: tasks auto-populated from internal tickets */}
+          {(
             <>
               {/* Pending Projects */}
               <Card>
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-base font-serif">Pending Projects</CardTitle>
-                    <span className="text-xs text-(--rs-neutral-grey-400)">Auto-populated from Plane</span>
+                    <span className="text-xs text-(--rs-neutral-grey-400)">Auto-populated from your tickets</span>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {planeLoading ? (
+                  {tasksLoading ? (
                     <div className="flex items-center gap-2 text-(--rs-neutral-grey-400) text-sm">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading from Plane…
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
                     </div>
-                  ) : planeError ? (
-                    <p className="text-sm text-red-500">{planeError}</p>
+                  ) : tasksError ? (
+                    <p className="text-sm text-red-500">{tasksError}</p>
                   ) : pending.length === 0 ? (
                     <p className="text-sm text-(--rs-neutral-grey-400) italic">No pending tasks found.</p>
                   ) : (
@@ -469,13 +460,13 @@ export function WeeklyReportForm({ planeMemberId }: { planeMemberId: string | nu
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-base font-serif">Key Accomplishments</CardTitle>
-                    <span className="text-xs text-(--rs-neutral-grey-400)">Completed this week from Plane</span>
+                    <span className="text-xs text-(--rs-neutral-grey-400)">Completed this week</span>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {planeLoading ? (
+                  {tasksLoading ? (
                     <div className="flex items-center gap-2 text-(--rs-neutral-grey-400) text-sm">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading from Plane…
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
                     </div>
                   ) : accomplishments.length === 0 ? (
                     <p className="text-sm text-(--rs-neutral-grey-400) italic">No tasks completed this week yet.</p>

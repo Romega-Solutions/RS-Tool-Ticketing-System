@@ -12,14 +12,14 @@ type ReportFile = {
   modifiedAt: string;
 };
 
-type PlaneMember = {
+type WorkspaceMember = {
   id: string;
   display_name: string;
   email: string;
 };
 
 type FilesResponse = { files?: ReportFile[]; error?: string };
-type MembersResponse = { members?: PlaneMember[]; error?: string };
+type MembersResponse = { members?: WorkspaceMember[]; error?: string };
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -60,7 +60,7 @@ export function ReportsManagementPanel({ initialFiles = [] }: { initialFiles?: R
   const [filesLoading, setFilesLoading] = useState(false);
   const [filesError, setFilesError] = useState('');
 
-  const [members, setMembers] = useState<PlaneMember[] | null>(null);
+  const [members, setMembers] = useState<WorkspaceMember[] | null>(null);
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersError, setMembersError] = useState('');
 
@@ -168,7 +168,7 @@ export function ReportsManagementPanel({ initialFiles = [] }: { initialFiles?: R
             <div>
               <CardTitle className="text-lg font-serif">Workspace Members</CardTitle>
               <p className="text-xs text-(--rs-neutral-grey-400) mt-0.5">
-                Copy a member&apos;s Plane ID to paste into their profile.
+                Browse the active workspace roster used for report generation.
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -190,7 +190,7 @@ export function ReportsManagementPanel({ initialFiles = [] }: { initialFiles?: R
 
           {members === null && !membersLoading && !membersError && (
             <p className="text-sm text-(--rs-neutral-grey-500) italic">
-              Click &ldquo;Load Members&rdquo; to fetch Plane workspace users.
+              Click &ldquo;Load Members&rdquo; to fetch the workspace roster.
             </p>
           )}
 

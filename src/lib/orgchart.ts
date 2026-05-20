@@ -31,8 +31,7 @@ function resolvePhotoUrl(url: string | null | undefined): string | null {
   return `${ORG_CHART_BASE}${url.startsWith('/') ? '' : '/'}${url}`;
 }
 
-const APP_DEPARTMENTS = [
-  'AI & Technology',
+export const APP_DEPARTMENTS = [
   'Design',
   'Social Media',
   'Marketing & Brand Content',
@@ -43,6 +42,15 @@ const APP_DEPARTMENTS = [
   'Market Research & Analytics',
   'Executive & Admin',
 ] as const;
+
+/** Canonical team type — exported for callers that want compile-time safety. */
+export type CanonicalTeam = (typeof APP_DEPARTMENTS)[number];
+
+/** True if the value matches one of the canonical org-chart departments. */
+export function isCanonicalTeam(value: string | null | undefined): value is CanonicalTeam {
+  if (!value) return false;
+  return (APP_DEPARTMENTS as readonly string[]).includes(value);
+}
 
 function normalizeStr(s: string): string {
   return s
@@ -74,7 +82,7 @@ export function mapOrgDeptToAppTeam(orgDeptName: string): string {
   return contains ?? orgDeptName;
 }
 
-async function fetchPeople(): Promise<RawPerson[]> {
+export async function fetchPeople(): Promise<RawPerson[]> {
   const key = process.env.ORG_CHART_API_KEY;
   if (!key) {
     console.error('[orgchart] ORG_CHART_API_KEY is not set');
@@ -171,4 +179,145 @@ export async function lookupPerson(opts: { email?: string; name?: string }): Pro
 /** Convenience wrapper kept for backward compatibility. */
 export async function lookupPersonByName(name: string): Promise<OrgPerson | null> {
   return lookupPerson({ name });
+}
+
+/**
+ * Single source of truth for team names across the app. Tries the org-chart
+ * API first (so we pick up live additions/renames), normalizes every value to
+ * a canonical `APP_DEPARTMENTS` entry, then dedupes + sorts. Falls back to the
+ * static canonical list if the API is unreachable or the key isn't set.
+ *
+ * Cached for 5 minutes so the dropdown doesn't hammer the org-chart service.
+ */
+let _canonicalTeamsCache: { at: number; teams: string[] } | null = null;
+const CANONICAL_TEAMS_TTL_MS = 5 * 60 * 1000;
+
+export async function getCanonicalTeams(): Promise<string[]> {
+  const now = Date.now();
+  if (_canonicalTeamsCache && now - _canonicalTeamsCache.at < CANONICAL_TEAMS_TTL_MS) {
+    return _canonicalTeamsCache.teams;
+  }
+
+  const seen = new Set<string>();
+  const people = await fetchPeople();
+  for (const p of people) {
+    if (p.isActive === false || p.isActive === 0) continue;
+    const dept = (p.departmentName ?? '').trim();
+    if (!dept) continue;
+    seen.add(mapOrgDeptToAppTeam(dept));
+  }
+
+  // Always merge with APP_DEPARTMENTS so the static canonical list is the
+  // floor — even if the org-chart API briefly returns nothing.
+  for (const d of APP_DEPARTMENTS) seen.add(d);
+
+  const teams = [...seen].sort((a, b) => a.localeCompare(b));
+  _canonicalTeamsCache = { at: now, teams };
+  return teams;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Org-chart-as-source-of-truth: sync every active user's `team` from the
+// org chart, normalised through `mapOrgDeptToAppTeam`. Anything not in the
+// org chart is left alone (so manually-curated accounts don't get clobbered)
+// and surfaced in the result so an admin can review/fix.
+// ─────────────────────────────────────────────────────────────────────────
+
+export type TeamSyncResult = {
+  totalUsers: number;
+  updated: number;
+  unchanged: number;
+  unmatched: number;
+  errors: number;
+  details: Array<{
+    userId: number;
+    name: string;
+    email: string;
+    status: 'updated' | 'unchanged' | 'unmatched' | 'error';
+    from: string | null;
+    to: string | null;
+    error?: string;
+  }>;
+};
+
+export async function syncUserTeamsFromOrgChart(opts?: {
+  dryRun?: boolean;
+}): Promise<TeamSyncResult> {
+  // Inline import to keep this function callable from edge-safe contexts at
+  // import time; the admin client is server-only anyway.
+  const { createAdminClient } = await import('@/lib/supabase/admin');
+  const sb = createAdminClient();
+
+  const people = await fetchPeople();
+  if (people.length === 0) {
+    throw new Error('Org chart returned no people — check ORG_CHART_API_KEY and the org-chart service.');
+  }
+  const active = people.filter(p => p.isActive !== false && p.isActive !== 0);
+
+  // Index org-chart people by email (lower-case) and by normalised name for
+  // a fast lookup loop.
+  const byEmail = new Map<string, RawPerson>();
+  const byName  = new Map<string, RawPerson>();
+  for (const p of active) {
+    if (p.email) byEmail.set(p.email.toLowerCase().trim(), p);
+    byName.set(normalizeStr(p.name), p);
+  }
+
+  const { data: users, error } = await sb
+    .from('users')
+    .select('id, name, email, team')
+    .eq('is_active', 1);
+  if (error) throw new Error(`Failed to load users: ${error.message}`);
+
+  const result: TeamSyncResult = {
+    totalUsers: users?.length ?? 0,
+    updated: 0, unchanged: 0, unmatched: 0, errors: 0,
+    details: [],
+  };
+
+  for (const u of users ?? []) {
+    const id    = Number(u.id);
+    const name  = String(u.name ?? '');
+    const email = String(u.email ?? '');
+    const from  = (u.team as string | null) ?? null;
+
+    // 1. Email exact, then name exact, then first+last token.
+    let match: RawPerson | undefined;
+    if (email) match = byEmail.get(email.toLowerCase().trim());
+    if (!match && name) match = byName.get(normalizeStr(name));
+    if (!match && name) match = active.find(p => firstLastMatch(p.name, name));
+
+    if (!match) {
+      result.unmatched += 1;
+      result.details.push({ userId: id, name, email, status: 'unmatched', from, to: null });
+      continue;
+    }
+
+    const to = mapOrgDeptToAppTeam(match.departmentName ?? '');
+
+    if (from === to) {
+      result.unchanged += 1;
+      result.details.push({ userId: id, name, email, status: 'unchanged', from, to });
+      continue;
+    }
+
+    if (opts?.dryRun) {
+      result.updated += 1;
+      result.details.push({ userId: id, name, email, status: 'updated', from, to });
+      continue;
+    }
+
+    const { error: upErr } = await sb.from('users')
+      .update({ team: to, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (upErr) {
+      result.errors += 1;
+      result.details.push({ userId: id, name, email, status: 'error', from, to, error: upErr.message });
+    } else {
+      result.updated += 1;
+      result.details.push({ userId: id, name, email, status: 'updated', from, to });
+    }
+  }
+
+  return result;
 }

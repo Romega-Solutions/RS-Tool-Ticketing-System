@@ -42,7 +42,7 @@ export async function GET() {
   const admin = createAdminClient();
   const { data } = await admin
     .from('users')
-    .select('id, username, name, email, role, team, job_title, plane_member_id, member_code, hourly_rate_usd, is_active')
+    .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active')
     .order('name');
   const allUsers = data ?? [];
 
@@ -54,7 +54,6 @@ export async function GET() {
     role:          u.role,
     team:          u.team,
     jobTitle:      u.job_title,
-    planeMemberId: u.plane_member_id,
     memberCode:    u.member_code,
     hourlyRateUsd: u.hourly_rate_usd == null ? null : Number(u.hourly_rate_usd),
     isActive:      Boolean(u.is_active),
@@ -156,7 +155,7 @@ export async function POST(req: Request) {
         created_at: now,
         updated_at: now,
       })
-      .select('id, username, name, email, role, team, job_title, plane_member_id, member_code, hourly_rate_usd, is_active')
+      .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active')
       .single();
 
     if (dbErr) throw new Error(dbErr.message);
@@ -170,7 +169,6 @@ export async function POST(req: Request) {
         role:          inserted.role,
         team:          inserted.team,
         jobTitle:      inserted.job_title,
-        planeMemberId: inserted.plane_member_id,
         memberCode:    inserted.member_code,
         hourlyRateUsd: inserted.hourly_rate_usd == null ? null : Number(inserted.hourly_rate_usd),
         isActive:      Boolean(inserted.is_active),
@@ -195,7 +193,6 @@ export async function PATCH(req: Request) {
   let body: {
     id?: number;
     role?: string;
-    planeMemberId?: string | null;
     isActive?: number;
     team?: string | null;
     memberCode?: string | null;
@@ -221,7 +218,6 @@ export async function PATCH(req: Request) {
 
   const updates: Record<string, unknown> = {};
   if (body.role !== undefined)          updates.role           = body.role;
-  if (body.planeMemberId !== undefined) updates.plane_member_id = body.planeMemberId || null;
   if (body.isActive !== undefined)      updates.is_active      = body.isActive;
   if (body.team !== undefined)          updates.team           = body.team?.trim() || null;
   if (body.memberCode !== undefined)    updates.member_code    = body.memberCode?.trim() || null;
@@ -243,7 +239,7 @@ export async function PATCH(req: Request) {
 
   const { data: updated } = await admin
     .from('users')
-    .select('id, username, name, email, role, team, job_title, plane_member_id, member_code, hourly_rate_usd, is_active')
+    .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active')
     .eq('id', body.id)
     .maybeSingle();
 
@@ -258,7 +254,6 @@ export async function PATCH(req: Request) {
       role:          updated.role,
       team:          updated.team,
       jobTitle:      updated.job_title,
-      planeMemberId: updated.plane_member_id,
       memberCode:    updated.member_code,
       hourlyRateUsd: updated.hourly_rate_usd == null ? null : Number(updated.hourly_rate_usd),
       isActive:      Boolean(updated.is_active),

@@ -16,7 +16,7 @@ export default async function ReportsPage() {
           <h1 className="text-2xl font-serif font-bold text-(--rs-neutral-grey-900)">Weekly Reports</h1>
           <p className="text-sm text-(--rs-neutral-grey-500)">
             {isLeadOrAdmin
-              ? 'Generate reports, download existing files, and inspect Plane workspace users.'
+              ? 'Generate reports, download existing files, and inspect workspace members.'
               : 'Download your weekly activity report from Plane.'}
           </p>
         </div>
@@ -26,10 +26,7 @@ export default async function ReportsPage() {
       {isLeadOrAdmin ? (
         <ReportsManagementPanel />
       ) : (
-        <MyReportButton
-          planeMemberId={sessionUser?.planeMemberId ?? null}
-          memberName={sessionUser?.name ?? 'Unknown'}
-        />
+        <MyReportButton memberName={sessionUser?.name ?? 'Unknown'} />
       )}
     </div>
   );

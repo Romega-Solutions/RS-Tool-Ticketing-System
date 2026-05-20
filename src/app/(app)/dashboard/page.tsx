@@ -40,7 +40,10 @@ type AttStatusRow = {
 
 export default async function DashboardPage() {
   const sessionUser = await getSession();
-  const planeMemberId = sessionUser?.planeMemberId ?? null;
+  // "My tasks" matches against either the user's id (assignee_ids) or email
+  // (assignees) — getWorkItems populates both.
+  const myUserId = sessionUser ? String(sessionUser.id) : null;
+  const myEmail  = sessionUser?.email ?? null;
   const isFriday = new Date().getDay() === 5;
 
   type ItemMeta = {
@@ -97,10 +100,11 @@ export default async function DashboardPage() {
   });
 
   const assignedToMe = (item: ItemMeta) =>
-    planeMemberId &&
-    (item.assignees?.includes(planeMemberId) || item.assignee_ids?.includes(planeMemberId));
+    !!sessionUser &&
+    ((myUserId !== null && item.assignee_ids?.includes(myUserId)) ||
+     (myEmail  !== null && item.assignees?.includes(myEmail)));
 
-  const myTasks = planeMemberId
+  const myTasks = sessionUser
     ? allItems.filter(i => openGroups.has(stateGroup(i)) && assignedToMe(i)).slice(0, 3)
     : [];
 
@@ -359,18 +363,10 @@ export default async function DashboardPage() {
             </Link>
           </CardHeader>
           <CardContent>
-            {!planeMemberId ? (
-              <div className="flex flex-col items-center gap-3 py-5 text-center">
-                <p className="text-sm text-(--rs-neutral-grey-500)">
-                  My Tasks will appear here once your member profile is linked. Ask an admin.
-                </p>
-                <Link
-                  href="/profile"
-                  className="inline-flex items-center gap-1.5 rounded-md bg-(--rs-primary-500) px-3 py-1.5 text-xs font-semibold text-white hover:bg-(--rs-primary-600) transition-colors"
-                >
-                  View Profile →
-                </Link>
-              </div>
+            {!sessionUser ? (
+              <p className="text-sm text-(--rs-neutral-grey-500) py-5 text-center">
+                Sign in to see your tasks.
+              </p>
             ) : myTasks.length === 0 ? (
               <p className="text-sm text-(--rs-neutral-grey-400) italic">No active tasks.</p>
             ) : (

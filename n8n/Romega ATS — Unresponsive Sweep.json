@@ -1,0 +1,140 @@
+{
+  "name": "Romega ATS — Unresponsive Sweep",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 0 8 * * *" }
+          ]
+        }
+      },
+      "id": "node-cron",
+      "name": "Daily 08:00 PHT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 304],
+      "notes": "Cron in n8n container TZ — set TZ=Asia/Manila on the container, or shift this expression accordingly."
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "candidates",
+        "returnAll": true,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            { "keyName": "status",     "condition": "eq", "keyValue": "pending_response" },
+            { "keyName": "created_at", "condition": "lt", "keyValue": "={{ $now.minus({ days: 7 }).toISO() }}" },
+            { "keyName": "email",      "condition": "is", "keyValue": "not null" }
+          ]
+        }
+      },
+      "id": "node-find-stale",
+      "name": "Find Stale Candidates",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [480, 304],
+      "credentials": { "supabaseApi": { "id": "REPLACE_ME", "name": "Supabase — Romega" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fan out per-candidate items so subsequent nodes run once per stale row.\nconst items = $input.all();\nreturn items.map(item => ({ json: item.json }));"
+      },
+      "id": "node-fanout",
+      "name": "Fan-out",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 304]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "candidates",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            { "keyName": "id", "condition": "eq", "keyValue": "={{ $json.id }}" }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "status",              "fieldValue": "unresponsive" },
+            { "fieldId": "last_email_template", "fieldValue": "nudge-followup" },
+            { "fieldId": "last_email_sent_at",  "fieldValue": "={{ $now.toISO() }}" },
+            { "fieldId": "updated_at",          "fieldValue": "={{ $now.toISO() }}" }
+          ]
+        }
+      },
+      "id": "node-mark-unresponsive",
+      "name": "Mark Unresponsive",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [960, 304],
+      "credentials": { "supabaseApi": { "id": "REPLACE_ME", "name": "Supabase — Romega" } }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "tableId": "candidate_history",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "candidate_id", "fieldValue": "={{ $('Fan-out').item.json.id }}" },
+            { "fieldId": "user_id",      "fieldValue": "" },
+            { "fieldId": "user_name",    "fieldValue": "Recruitment Bot" },
+            { "fieldId": "field",        "fieldValue": "status" },
+            { "fieldId": "old_value",    "fieldValue": "pending_response" },
+            { "fieldId": "new_value",    "fieldValue": "unresponsive" },
+            { "fieldId": "summary",      "fieldValue": "Auto-flagged as Unresponsive (>7 days), nudge email sent" }
+          ]
+        }
+      },
+      "id": "node-log-history",
+      "name": "Log History",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1200, 304],
+      "credentials": { "supabaseApi": { "id": "REPLACE_ME", "name": "Supabase — Romega" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the nudge email content per stale candidate. Same template logic\n// as the Communication workflow's 'nudge-followup'.\nconst c = $('Fan-out').item.json;\nconst pos = c.position || 'the role';\nconst name = (c.full_name || 'there').split(' ')[0];\nconst codeSuffix = c.application_code ? ` (${c.application_code})` : '';\nreturn [{\n  json: {\n    to: c.email,\n    subject: `Still interested in ${pos}?`,\n    body: `Hi ${name},\\n\\nFollowing up on your application for ${pos}${codeSuffix}. If you're still interested, please reply to this email so we can move things forward. Otherwise we'll close out the application after 7 more days.\\n\\n— The Romega Recruitment Team`,\n  }\n}];"
+      },
+      "id": "node-build-email",
+      "name": "Build Nudge Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 304]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node-send-gmail",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1680, 304],
+      "credentials": { "gmailOAuth2": { "id": "REPLACE_ME", "name": "Gmail — Recruitment" } }
+    }
+  ],
+  "connections": {
+    "Daily 08:00 PHT":      { "main": [[{ "node": "Find Stale Candidates", "type": "main", "index": 0 }]] },
+    "Find Stale Candidates":{ "main": [[{ "node": "Fan-out",               "type": "main", "index": 0 }]] },
+    "Fan-out":              { "main": [[{ "node": "Mark Unresponsive",     "type": "main", "index": 0 }]] },
+    "Mark Unresponsive":    { "main": [[{ "node": "Log History",           "type": "main", "index": 0 }]] },
+    "Log History":          { "main": [[{ "node": "Build Nudge Email",     "type": "main", "index": 0 }]] },
+    "Build Nudge Email":    { "main": [[{ "node": "Send Gmail",            "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "ats-unresponsive-sweep-v1",
+  "meta": {
+    "description": "Runs daily at 08:00 PHT. Finds pending_response candidates older than 7 days, flips them to unresponsive, logs a history row, and sends a one-time nudge email. After import, replace `REPLACE_ME` credential IDs with the linked Supabase + Gmail credentials in n8n, then activate."
+  }
+}

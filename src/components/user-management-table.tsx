@@ -13,7 +13,6 @@ export type UserRow = {
   role: string;
   team: string | null;
   jobTitle: string | null;
-  planeMemberId: string | null;
   memberCode: string | null;
   hourlyRateUsd: number | null;
   isActive: boolean;
@@ -43,7 +42,7 @@ const ROLE_BADGE: Record<string, string> = {
   ic:      'bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-600) border-(--rs-neutral-grey-200)',
 };
 
-type EditState = { role: string; planeMemberId: string; isActive: boolean; team: string; memberCode: string; hourlyRateUsd: string };
+type EditState = { role: string; isActive: boolean; team: string; memberCode: string; hourlyRateUsd: string };
 
 type NewUserForm = {
   email: string;
@@ -104,7 +103,7 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
 
   // Edit existing user
   const [editingId, setEditingId]   = useState<number | null>(null);
-  const [editForm, setEditForm]     = useState<EditState>({ role: '', planeMemberId: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '' });
+  const [editForm, setEditForm]     = useState<EditState>({ role: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '' });
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState('');
 
@@ -119,7 +118,6 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
     setEditingId(user.id);
     setEditForm({
       role: user.role,
-      planeMemberId: user.planeMemberId ?? '',
       isActive: user.isActive,
       team: user.team ?? '',
       memberCode: user.memberCode ?? '',
@@ -139,7 +137,6 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
         body: JSON.stringify({
           id:            userId,
           role:          editForm.role,
-          planeMemberId: editForm.planeMemberId.trim() || null,
           isActive:      editForm.isActive ? 1 : 0,
           team:          editForm.team.trim() || null,
           memberCode:    editForm.memberCode.trim() || null,
@@ -216,7 +213,7 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
               <tr className="border-b border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50)">
                 <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-48">Name</th>
                 <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-28">Role</th>
-                <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600)">Plane Member ID</th>
+                <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-56">Team</th>
                 <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-36">Member Code</th>
                 <th className="text-right px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-32">Rate (USD/hr)</th>
                 <th className="text-center px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-20">Active</th>
@@ -232,20 +229,6 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
                     <td className="px-4 py-3">
                       <div className="font-medium text-(--rs-neutral-grey-900)">{user.name}</div>
                       <div className="text-xs text-(--rs-neutral-grey-400)">{user.username} · {user.email}</div>
-                      {isEditing ? (
-                        <select
-                          value={editForm.team}
-                          onChange={e => setEditForm(f => ({ ...f, team: e.target.value }))}
-                          className="mt-1.5 text-xs border border-(--rs-neutral-grey-300) rounded px-2 py-1 bg-white w-full"
-                        >
-                          <option value="">— No team —</option>
-                          {Array.from(new Set([editForm.team, ...DEPARTMENTS].filter(Boolean))).map(d => (
-                            <option key={d} value={d}>{d}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        user.team && <div className="text-xs text-(--rs-neutral-grey-400)">{user.team}</div>
-                      )}
                     </td>
 
                     <td className="px-4 py-3">
@@ -266,16 +249,23 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
 
                     <td className="px-4 py-3">
                       {isEditing ? (
-                        <input
-                          value={editForm.planeMemberId}
-                          onChange={e => setEditForm(f => ({ ...f, planeMemberId: e.target.value }))}
-                          placeholder="Paste Plane member UUID…"
-                          className="text-xs w-full border border-(--rs-neutral-grey-300) rounded px-2 py-1 font-mono"
-                        />
-                      ) : user.planeMemberId ? (
-                        <code className="text-[11px] font-mono text-(--rs-neutral-grey-600) break-all">{user.planeMemberId}</code>
+                        <select
+                          value={editForm.team}
+                          onChange={e => setEditForm(f => ({ ...f, team: e.target.value }))}
+                          aria-label="Team"
+                          className="text-xs border border-(--rs-neutral-grey-300) rounded px-2 py-1 bg-white w-full"
+                        >
+                          <option value="">— No team —</option>
+                          {/* Include the current value even if it's no longer canonical so the
+                              admin can see and re-select it instead of losing context. */}
+                          {Array.from(new Set([editForm.team, ...DEPARTMENTS].filter(Boolean))).map(d => (
+                            <option key={d} value={d}>{d}</option>
+                          ))}
+                        </select>
+                      ) : user.team ? (
+                        <span className="text-xs text-(--rs-neutral-grey-700)">{user.team}</span>
                       ) : (
-                        <span className="text-xs text-(--rs-neutral-grey-300) italic">Not set</span>
+                        <span className="text-xs text-(--rs-neutral-grey-300) italic">No team</span>
                       )}
                     </td>
 

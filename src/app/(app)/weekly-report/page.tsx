@@ -27,7 +27,7 @@ export default async function WeeklyReportPage() {
         role={role}
         myReportSlot={
           !isAdmin ? (
-            <WeeklyReportForm planeMemberId={sessionUser?.planeMemberId ?? null} />
+            <WeeklyReportForm />
           ) : null
         }
         teamSlot={null}

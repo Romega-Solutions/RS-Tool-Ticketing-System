@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
-import { canAccessReports } from '@/lib/rbac';
+import { canAccessReports, canAccessAdmin } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { computeOvertime } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 
@@ -47,7 +48,6 @@ export async function GET(req: Request) {
 
   const admin = createAdminClient();
 
-  // Verify the target user exists and lead can only see their team
   const { data: targetUser } = await admin
     .from('users')
     .select('id, name, team, is_active')
@@ -62,7 +62,6 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  // Build the Mon–Sun date range
   const base = new Date(weekStart + 'T00:00:00');
   const weekDates: string[] = [];
   for (let i = 0; i < 7; i++) {
@@ -95,4 +94,101 @@ export async function GET(req: Request) {
   }));
 
   return NextResponse.json({ userId, weekStart, timesheets });
+}
+
+// PATCH /api/admin/timesheets — admin-only edit of a specific session's
+// clock-in / clock-out times. Recomputes duration + overtime.
+//
+// Body: { id: number, clockedInAt?: ISO, clockedOutAt?: ISO | null }
+export async function PATCH(req: Request) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!canAccessAdmin(session.role)) return NextResponse.json({ error: 'Admins only' }, { status: 403 });
+
+  let body: { id?: number; clockedInAt?: string | null; clockedOutAt?: string | null };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  const id = Number(body.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return NextResponse.json({ error: 'id is required' }, { status: 400 });
+  }
+
+  const admin = createAdminClient();
+  const { data: existing } = await admin
+    .from('timesheets')
+    .select('id, clocked_in_at, clocked_out_at')
+    .eq('id', id)
+    .maybeSingle();
+  if (!existing) {
+    return NextResponse.json({ error: 'Timesheet entry not found' }, { status: 404 });
+  }
+
+  const nextInIso  = body.clockedInAt  != null ? body.clockedInAt  : existing.clocked_in_at;
+  const nextOutIso = body.clockedOutAt !== undefined ? body.clockedOutAt : existing.clocked_out_at;
+
+  const inDate = new Date(nextInIso);
+  if (isNaN(inDate.getTime())) {
+    return NextResponse.json({ error: 'clockedInAt is not a valid date' }, { status: 400 });
+  }
+
+  let outDate: Date | null = null;
+  if (nextOutIso) {
+    outDate = new Date(nextOutIso);
+    if (isNaN(outDate.getTime())) {
+      return NextResponse.json({ error: 'clockedOutAt is not a valid date' }, { status: 400 });
+    }
+    if (outDate.getTime() <= inDate.getTime()) {
+      return NextResponse.json({ error: 'clockedOutAt must be after clockedInAt' }, { status: 400 });
+    }
+  }
+
+  const update: Record<string, string | number | null> = {
+    clocked_in_at: inDate.toISOString(),
+    clocked_out_at: outDate ? outDate.toISOString() : null,
+    date: toLocalISO(inDate),
+  };
+
+  if (outDate) {
+    const durationSeconds = Math.round((outDate.getTime() - inDate.getTime()) / 1000);
+    const { isOvertime, overtimeSeconds } = computeOvertime(durationSeconds);
+    update.duration_seconds = durationSeconds;
+    update.is_overtime = isOvertime ? 1 : 0;
+    update.overtime_seconds = isOvertime ? overtimeSeconds : null;
+  } else {
+    update.duration_seconds = null;
+    update.is_overtime = 0;
+    update.overtime_seconds = null;
+  }
+
+  const { error } = await admin.from('timesheets').update(update).eq('id', id);
+  if (error) {
+    return NextResponse.json({ error: `Update failed: ${error.message}` }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
+}
+
+// DELETE /api/admin/timesheets?id=N — admin-only removal of a session entry.
+export async function DELETE(req: Request) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!canAccessAdmin(session.role)) return NextResponse.json({ error: 'Admins only' }, { status: 403 });
+
+  const { searchParams } = new URL(req.url);
+  const id = parseInt(searchParams.get('id') ?? '', 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return NextResponse.json({ error: 'id query param is required' }, { status: 400 });
+  }
+
+  const admin = createAdminClient();
+  const { error } = await admin.from('timesheets').delete().eq('id', id);
+  if (error) {
+    return NextResponse.json({ error: `Delete failed: ${error.message}` }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
 }

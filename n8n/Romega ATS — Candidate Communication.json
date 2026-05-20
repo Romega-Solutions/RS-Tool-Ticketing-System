@@ -1,0 +1,163 @@
+{
+  "name": "Romega ATS — Candidate Communication",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ats-candidate-communication",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 304],
+      "webhookId": "ats-candidate-communication"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Resolve which Gmail template to send from the inbound event + candidate row.\n// Inputs (in $json): kind (created|status_changed|resend), candidateId, status?, template?\n// Looks up candidate from Supabase via the next node; here we just compute the\n// template name. The Supabase fetch happens AFTER this node so we have\n// the canonical status when kind=resend.\n\nconst body = $input.first().json;\nconst kind = body.kind;\nlet template = null;\nlet status = body.status || null;\n\nif (kind === 'created') {\n  template = 'acknowledgment';\n} else if (kind === 'resend') {\n  template = body.template || 'acknowledgment';\n} else if (kind === 'status_changed') {\n  const STATUS_TO_TEMPLATE = {\n    interview_romega: 'interview-invite-romega',\n    endorsed_client:  'endorsement-notice',\n    final_interview:  'interview-invite-final',\n    offered:          'offer-letter',\n    hired:            'congratulations',\n    failed:           'rejection-polite',\n    withdrew:         'acknowledgment-of-withdrawal',\n  };\n  template = STATUS_TO_TEMPLATE[status] || null;\n}\n\nif (!template) {\n  // Unknown event — short-circuit. The Set→Respond branch returns a no-op.\n  return [{ json: { skip: true, reason: `No template for kind=${kind} status=${status}`, candidateId: body.candidateId } }];\n}\n\nreturn [{ json: { skip: false, candidateId: body.candidateId, template, kind, status } }];"
+      },
+      "id": "node-resolve-template",
+      "name": "Resolve Template",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 304]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.skip }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-skip-gate",
+      "name": "Skip Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.1,
+      "position": [720, 304]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "candidates",
+        "returnAll": false,
+        "limit": 1,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            { "keyName": "id", "condition": "eq", "keyValue": "={{ $('Resolve Template').first().json.candidateId }}" }
+          ]
+        }
+      },
+      "id": "node-fetch-candidate",
+      "name": "Fetch Candidate",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [960, 416],
+      "credentials": { "supabaseApi": { "id": "REPLACE_ME", "name": "Supabase — Romega" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the email subject + body from candidate + template name.\nconst candidate = $input.first().json;\nconst { template, status } = $('Resolve Template').first().json;\n\nconst recruiterName = 'The Romega Recruitment Team';\nconst pos    = candidate.position || 'the role';\nconst name   = (candidate.full_name || 'there').split(' ')[0];\nconst code   = candidate.application_code || '';\nconst codeSuffix = code ? ` (${code})` : '';\n\nconst TEMPLATES = {\n  'acknowledgment': {\n    subject: `Application received — ${pos}${codeSuffix}`,\n    body: `Hi ${name},\\n\\nThanks for applying to ${pos} at Romega Solutions. We've received your application${code ? ` (ref: ${code})` : ''} and our recruitment team will review it shortly.\\n\\nIf we'd like to move forward, you'll hear from us within 5–7 business days.\\n\\n— ${recruiterName}`,\n  },\n  'interview-invite-romega': {\n    subject: `Interview invitation — ${pos}${codeSuffix}`,\n    body: `Hi ${name},\\n\\nGood news — we'd like to invite you to an initial interview for the ${pos} role. We'll reach out separately to schedule a time that works for you.\\n\\nPlease reply to this email to confirm your availability.\\n\\n— ${recruiterName}`,\n  },\n  'endorsement-notice': {\n    subject: `Update on your application — ${pos}`,\n    body: `Hi ${name},\\n\\nQuick update: your profile has been endorsed to the client team for ${pos}. They'll review and, if there's a fit, follow up directly with next steps. We'll let you know if anything is needed from your side.\\n\\n— ${recruiterName}`,\n  },\n  'interview-invite-final': {\n    subject: `Final interview — ${pos}`,\n    body: `Hi ${name},\\n\\nYou've been invited to a final interview for ${pos}. We'll coordinate the schedule and share the meeting details.\\n\\n— ${recruiterName}`,\n  },\n  'offer-letter': {\n    subject: `Offer — ${pos}`,\n    body: `Hi ${name},\\n\\nWe're pleased to extend an offer for the ${pos} role. We'll follow up with the formal offer letter and next steps shortly. Congratulations.\\n\\n— ${recruiterName}`,\n  },\n  'congratulations': {\n    subject: `Welcome to Romega Solutions`,\n    body: `Hi ${name},\\n\\nWelcome aboard. Our HR team will be in touch this week to walk you through onboarding for the ${pos} role.\\n\\n— ${recruiterName}`,\n  },\n  'rejection-polite': {\n    subject: `Update on your application — ${pos}`,\n    body: `Hi ${name},\\n\\nThank you for the time you spent with us for the ${pos} role. After careful review, we've decided to move forward with other candidates whose experience more closely matches this role.\\n\\nWe appreciate your interest in Romega Solutions and wish you the best.\\n\\n— ${recruiterName}`,\n  },\n  'nudge-followup': {\n    subject: `Still interested in ${pos}?`,\n    body: `Hi ${name},\\n\\nFollowing up on your application for ${pos}${codeSuffix ? ` ${codeSuffix}` : ''}. If you're still interested, please reply to this email so we can move things forward. Otherwise we'll close out the application after 7 more days.\\n\\n— ${recruiterName}`,\n  },\n  'acknowledgment-of-withdrawal': {\n    subject: `Application closed — ${pos}`,\n    body: `Hi ${name},\\n\\nConfirming we've closed your application for ${pos} at your request. We'll keep your profile on file in case future roles open up. Thanks for considering Romega Solutions.\\n\\n— ${recruiterName}`,\n  },\n};\n\nconst tpl = TEMPLATES[template];\nif (!tpl) throw new Error(`Unknown template: ${template}`);\nif (!candidate.email) throw new Error('Candidate has no email — cannot send');\n\nreturn [{\n  json: {\n    to:           candidate.email,\n    subject:      tpl.subject,\n    body:         tpl.body,\n    template,\n    candidateId:  candidate.id,\n    status:       status || candidate.status,\n  },\n}];"
+      },
+      "id": "node-build-email",
+      "name": "Build Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 416]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node-send-gmail",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1440, 416],
+      "credentials": { "gmailOAuth2": { "id": "REPLACE_ME", "name": "Gmail — Recruitment" } }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "candidates",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            { "keyName": "id", "condition": "eq", "keyValue": "={{ $('Build Email').first().json.candidateId }}" }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "last_email_template", "fieldValue": "={{ $('Build Email').first().json.template }}" },
+            { "fieldId": "last_email_sent_at",  "fieldValue": "={{ $now.toISO() }}" }
+          ]
+        }
+      },
+      "id": "node-mark-sent",
+      "name": "Mark Sent",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1680, 416],
+      "credentials": { "supabaseApi": { "id": "REPLACE_ME", "name": "Supabase — Romega" } }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, template: $('Build Email').first().json.template, candidateId: $('Build Email').first().json.candidateId } }}"
+      },
+      "id": "node-respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1920, 416]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: false, skipped: true, reason: $('Resolve Template').first().json.reason } }}"
+      },
+      "id": "node-respond-skip",
+      "name": "Respond Skipped",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [960, 192]
+    }
+  ],
+  "connections": {
+    "Webhook":          { "main": [[{ "node": "Resolve Template", "type": "main", "index": 0 }]] },
+    "Resolve Template": { "main": [[{ "node": "Skip Gate",        "type": "main", "index": 0 }]] },
+    "Skip Gate": {
+      "main": [
+        [{ "node": "Respond Skipped", "type": "main", "index": 0 }],
+        [{ "node": "Fetch Candidate", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Candidate":  { "main": [[{ "node": "Build Email", "type": "main", "index": 0 }]] },
+    "Build Email":      { "main": [[{ "node": "Send Gmail",  "type": "main", "index": 0 }]] },
+    "Send Gmail":       { "main": [[{ "node": "Mark Sent",   "type": "main", "index": 0 }]] },
+    "Mark Sent":        { "main": [[{ "node": "Respond OK",  "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "ats-candidate-comm-v1",
+  "meta": {
+    "description": "Sends Gmail templates to candidates based on ATS status. Triggered by POST to /webhook/ats-candidate-communication with { kind, candidateId, status? } from the Next.js app. After import, replace `REPLACE_ME` credential IDs with the linked Supabase + Gmail credentials in n8n, then activate."
+  }
+}

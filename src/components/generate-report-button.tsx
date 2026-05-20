@@ -4,20 +4,20 @@ import { useState, useEffect } from 'react';
 import { FileText, Loader2, Users, Check, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-type PlaneMember = { id: string; display_name: string; email: string };
-type MembersResponse = { members?: PlaneMember[]; error?: string };
+type WorkspaceMember = { id: string; display_name: string; email: string };
+type MembersResponse = { members?: WorkspaceMember[]; error?: string };
 
 function initials(name: string): string {
   return name.split(' ').map(w => w[0] ?? '').join('').toUpperCase().slice(0, 2);
 }
 
 export function GenerateReportButton({ onGenerated }: { onGenerated?: () => void | Promise<void> }) {
-  const [members, setMembers] = useState<PlaneMember[]>([]);
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(true);
   const [membersError, setMembersError] = useState('');
   const [pickerOpen, setPickerOpen] = useState(true);
 
-  const [selected, setSelected] = useState<PlaneMember | null>(null);
+  const [selected, setSelected] = useState<WorkspaceMember | null>(null);
   const [generating, setGenerating] = useState(false);
   const [successName, setSuccessName] = useState('');
   const [genError, setGenError] = useState('');

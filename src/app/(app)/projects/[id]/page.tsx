@@ -1,6 +1,9 @@
-import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems } from '@/lib/tickets';
-import { notFound } from 'next/navigation';
-import { AlertCircle } from 'lucide-react';
+import { getProjects, getProjectStates, getWorkItems, getCycles, buildStateLookup, enrichWorkItems } from '@/lib/tickets';
+import { getSession } from '@/lib/session';
+import { canManageProject } from '@/lib/permissions';
+import { notFound, redirect } from 'next/navigation';
+import Link from 'next/link';
+import { AlertCircle, Settings } from 'lucide-react';
 import { KanbanBoard } from '@/components/kanban-board';
 
 const EXCLUDED_GROUPS = new Set(['cancelled', 'canceled']);
@@ -11,17 +14,21 @@ export default async function ProjectBoardPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const session = await getSession();
+  if (!session) redirect('/login');
 
   let projectName = '';
   let states: Awaited<ReturnType<typeof getProjectStates>> = [];
   let items: Awaited<ReturnType<typeof getWorkItems>> = [];
+  let cycles: Awaited<ReturnType<typeof getCycles>> = [];
   let planeError: string | null = null;
 
   try {
-    const [projects, rawStates, rawItems] = await Promise.all([
+    const [projects, rawStates, rawItems, cycleRows] = await Promise.all([
       getProjects(),
       getProjectStates(id),
       getWorkItems(id),
+      getCycles(id),
     ]);
 
     const project = projects.find(p => p.id === id);
@@ -31,21 +38,32 @@ export default async function ProjectBoardPage({
     states = rawStates.filter(s => !EXCLUDED_GROUPS.has(s.group.toLowerCase()));
     const lookup = buildStateLookup(rawStates);
     items = enrichWorkItems(rawItems, lookup);
+    cycles = cycleRows;
   } catch (err) {
     if ((err as { digest?: string })?.digest === 'NEXT_NOT_FOUND') throw err;
-    planeError = err instanceof Error ? err.message : 'Failed to connect to Plane';
+    planeError = err instanceof Error ? err.message : 'Failed to load board';
   }
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-serif font-bold text-(--rs-neutral-grey-900)">
-          {projectName || 'Project Board'}
-        </h1>
-        <p className="text-(--rs-neutral-grey-500) text-sm mt-1">
-          {items.length} work item{items.length !== 1 ? 's' : ''}
-          {!planeError && ' · Drag cards to move between states · Click + to add a task'}
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-serif font-bold text-(--rs-neutral-grey-900)">
+            {projectName || 'Project Board'}
+          </h1>
+          <p className="text-(--rs-neutral-grey-500) text-sm mt-1">
+            {items.length} work item{items.length !== 1 ? 's' : ''}
+            {!planeError && ' · Drag cards to move between states · Click + to add a task'}
+          </p>
+        </div>
+        {canManageProject(session) && (
+          <Link
+            href={`/projects/${id}/settings`}
+            className="flex items-center gap-1.5 text-sm text-(--rs-neutral-grey-600) hover:text-(--rs-primary-700) px-3 py-1.5 rounded-md border border-(--rs-neutral-grey-200) hover:border-(--rs-primary-300) bg-white"
+          >
+            <Settings className="w-3.5 h-3.5" /> Settings
+          </Link>
+        )}
       </div>
 
       {planeError && (
@@ -67,6 +85,9 @@ export default async function ProjectBoardPage({
             states={states}
             initialItems={items}
             projectId={id}
+            currentUserId={session.id}
+            isAdmin={session.role === 'admin'}
+            cycles={cycles}
           />
         </div>
       )}

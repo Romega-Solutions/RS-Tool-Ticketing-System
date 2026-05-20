@@ -5,10 +5,13 @@ import { Card, CardContent } from '@/components/ui/card';
 import {
   ArrowLeft, Mail, Phone, MapPin, Link2, Globe, Briefcase,
   GraduationCap, Award, Languages as LanguagesIcon, Tag, Calendar,
-  Sparkles, FileText, AlertCircle,
+  Sparkles, FileText, AlertCircle, User2, History as HistoryIcon,
+  Hash, MailCheck, MailWarning, Download,
 } from 'lucide-react';
 import { CandidateStatus, CandidateRating, CandidateDelete } from '../candidate-row';
 import { ResumeUploadCard } from '../resume-upload';
+import { CandidateEditForm } from '../candidate-edit-form';
+import { ResendEmailButton } from './resend-email-button';
 
 type Candidate = {
   id:             number;
@@ -32,6 +35,20 @@ type Candidate = {
   languages:      string[] | null;
   parsed_at:      string | null;
   created_at:     string;
+  created_by:     number | null;
+  assigned_to:    number | null;
+  application_code:    string | null;
+  last_email_template: string | null;
+  last_email_sent_at:  string | null;
+};
+
+type HistoryRow = {
+  id:         number;
+  user_name:  string | null;
+  field:      string | null;
+  new_value:  string | null;
+  summary:    string;
+  created_at: string;
 };
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -57,6 +74,31 @@ function formatDateRange(start: string | null | undefined, end: string | null | 
   return `${s} — ${e}`;
 }
 
+function formatHistoryTime(iso: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit',
+      hour12: true,
+      timeZone: 'Asia/Manila',
+    }).formatToParts(new Date(iso));
+    const lookup: Record<string, string> = {};
+    for (const p of parts) lookup[p.type] = p.value;
+    return `${lookup.month ?? ''} ${lookup.day ?? ''} ${lookup.hour ?? ''}:${lookup.minute ?? ''}${lookup.dayPeriod ?? ''}`.trim();
+  } catch {
+    return iso;
+  }
+}
+
+function abbreviateName(name: string | null | undefined): string {
+  const value = (name ?? '').trim();
+  if (!value) return 'Someone';
+  const parts = value.split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  const last = parts[parts.length - 1];
+  return `${parts[0]} ${last[0].toUpperCase()}`;
+}
+
 export default async function CandidateDetailPage({
   params,
 }: {
@@ -79,9 +121,51 @@ export default async function CandidateDetailPage({
   if (!data) notFound();
 
   const c = data as Candidate;
+
+  // Resolve "Added by" name (created_by → users.name; fall back to assigned_to).
+  let addedByName: string | null = null;
+  const lookupId = c.created_by ?? c.assigned_to;
+  if (lookupId) {
+    const { data: u } = await supabase
+      .from('users')
+      .select('name')
+      .eq('id', lookupId)
+      .maybeSingle();
+    addedByName = (u?.name as string | undefined) ?? null;
+  }
+
+  // History feed (newest → oldest). Table may not exist on older deploys.
+  let history: HistoryRow[] = [];
+  let historyTableMissing = false;
+  const { data: histData, error: histError } = await supabase
+    .from('candidate_history')
+    .select('id, user_name, field, new_value, summary, created_at')
+    .eq('candidate_id', id)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (histError) {
+    if (histError.message?.toLowerCase().includes('does not exist')) {
+      historyTableMissing = true;
+    }
+  } else if (histData) {
+    history = histData as HistoryRow[];
+  }
+
   const hasParsedData =
     c.parsed_at || c.summary || (c.skills?.length ?? 0) > 0 ||
     (c.experience?.length ?? 0) > 0 || (c.education?.length ?? 0) > 0;
+
+  // If the most recent email-related event was a failure, surface a Resend
+  // button. We look at email_sent / email_failed rows only and ignore
+  // unrelated history (status, name, etc.).
+  const lastEmailEvent = history.find(h => h.field === 'email_sent' || h.field === 'email_failed') ?? null;
+  const lastFailedEmailContext = lastEmailEvent && lastEmailEvent.field === 'email_failed'
+    ? // For failed events we stored the attempted context in old_value via the
+      // `fireAutoCommunication` helper. The history projection doesn't return
+      // it here, so fall back to a generic "acknowledgment" retry — the n8n
+      // workflow figures out the right template from the candidate's status.
+      (lastEmailEvent.new_value ?? 'acknowledgment')
+    : null;
 
   return (
     <div className="space-y-6">
@@ -113,16 +197,36 @@ export default async function CandidateDetailPage({
                     </p>
                   )}
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
                   <CandidateRating id={c.id} rating={c.rating} />
                   <CandidateStatus id={c.id} status={c.status} />
+                  <CandidateEditForm
+                    id={c.id}
+                    full_name={c.full_name}
+                    email={c.email}
+                    phone={c.phone}
+                    position={c.position}
+                    education={(c.education ?? []).map(e => ({
+                      institution:     e.institution     ?? null,
+                      degree:          e.degree          ?? null,
+                      field:           e.field           ?? null,
+                      graduation_year: e.graduation_year ?? null,
+                    }))}
+                    experience={(c.experience ?? []).map(e => ({
+                      company:     e.company     ?? null,
+                      title:       e.title       ?? null,
+                      start_date:  e.start_date  ?? null,
+                      end_date:    e.end_date    ?? null,
+                      description: e.description ?? null,
+                    }))}
+                  />
                   <CandidateDelete id={c.id} />
                 </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-(--rs-neutral-grey-700)">
                 {c.email    && <ContactPill icon={<Mail     className="w-3.5 h-3.5" />} text={c.email}    href={`mailto:${c.email}`} />}
-                {c.phone    && <ContactPill icon={<Phone    className="w-3.5 h-3.5" />} text={c.phone}    href={`tel:${c.phone}`} />}
+                {c.phone    && <ContactPill icon={<Phone    className="w-3.5 h-3.5" />} text={c.phone}    href={`tel:${c.phone.replace(/\s+/g, '')}`} />}
                 {c.location && <ContactPill icon={<MapPin   className="w-3.5 h-3.5" />} text={c.location} />}
                 {c.linkedin_url && <ContactPill icon={<Link2 className="w-3.5 h-3.5" />} text="LinkedIn" href={c.linkedin_url} />}
                 {c.website  && <ContactPill icon={<Globe    className="w-3.5 h-3.5" />} text="Website"  href={c.website} />}
@@ -132,6 +236,11 @@ export default async function CandidateDetailPage({
                 <span className="inline-flex items-center gap-1.5">
                   <Calendar className="w-3 h-3" /> Added {formatDate(c.created_at)}
                 </span>
+                {addedByName && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <User2 className="w-3 h-3" /> Added by <strong className="text-(--rs-neutral-grey-700)">{addedByName}</strong>
+                  </span>
+                )}
                 {c.source && (
                   <span className="inline-flex items-center gap-1.5">
                     <Tag className="w-3 h-3" /> {SOURCE_LABEL[c.source] ?? c.source}
@@ -266,11 +375,96 @@ export default async function CandidateDetailPage({
 
           <div className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-4 space-y-2.5">
             <h3 className="text-[10px] font-bold uppercase tracking-widest text-(--rs-neutral-grey-500)">Quick facts</h3>
+            {c.application_code && (
+              <KvRow
+                label="Application"
+                value={
+                  <span className="inline-flex items-center gap-1 font-mono text-[11px] tracking-tight text-(--rs-primary-700)">
+                    <Hash className="w-3 h-3" /> {c.application_code}
+                  </span>
+                }
+              />
+            )}
             <KvRow label="Status"   value={<span className="capitalize">{c.status}</span>} />
             <KvRow label="Rating"   value={c.rating ? `${c.rating}/5` : '—'} />
             <KvRow label="Source"   value={c.source ? (SOURCE_LABEL[c.source] ?? c.source) : '—'} />
             <KvRow label="Added"    value={formatDate(c.created_at) ?? '—'} />
+            <KvRow label="Added by" value={addedByName ?? <span className="text-(--rs-neutral-grey-400)">—</span>} />
             <KvRow label="Parsed"   value={c.parsed_at ? formatDate(c.parsed_at) : <span className="text-(--rs-neutral-grey-400)">Not yet</span>} />
+            <KvRow
+              label="Last email"
+              value={
+                c.last_email_template ? (
+                  <span className="inline-flex items-center gap-1 text-(--rs-neutral-grey-800)">
+                    <MailCheck className="w-3 h-3 text-(--rs-primary-600)" />
+                    <span className="font-mono text-[10px]">{c.last_email_template}</span>
+                    <span className="text-(--rs-neutral-grey-400)">·</span>
+                    <span className="text-(--rs-neutral-grey-500)">{formatDate(c.last_email_sent_at) ?? ''}</span>
+                  </span>
+                ) : (
+                  <span className="text-(--rs-neutral-grey-400)">none</span>
+                )
+              }
+            />
+          </div>
+
+          {/* Resume + email controls */}
+          {(c.resume_url || lastFailedEmailContext) && (
+            <div className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-4 space-y-2.5">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-(--rs-neutral-grey-500)">Actions</h3>
+              {c.resume_url && (
+                <a
+                  href={c.resume_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-(--rs-neutral-grey-200) bg-white px-3 py-1.5 text-xs font-semibold text-(--rs-neutral-grey-800) hover:bg-(--rs-neutral-grey-50) transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download resume
+                </a>
+              )}
+              {lastFailedEmailContext && (
+                <div className="space-y-1.5">
+                  <p className="inline-flex items-center gap-1 text-[11px] text-red-700">
+                    <MailWarning className="w-3 h-3" /> Last email failed
+                  </p>
+                  <ResendEmailButton
+                    candidateId={c.id}
+                    template={lastFailedEmailContext}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* History */}
+          <div className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <HistoryIcon className="w-3.5 h-3.5 text-(--rs-primary-600)" />
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-(--rs-neutral-grey-500)">History</h3>
+            </div>
+            {historyTableMissing ? (
+              <p className="text-xs text-(--rs-neutral-grey-500) leading-relaxed">
+                History table not yet created. Apply{' '}
+                <code className="rounded bg-(--rs-neutral-grey-100) px-1 py-0.5">
+                  add-ats-history-and-positions.sql
+                </code>{' '}
+                in Supabase SQL Editor.
+              </p>
+            ) : history.length === 0 ? (
+              <p className="text-xs text-(--rs-neutral-grey-500)">No changes recorded yet.</p>
+            ) : (
+              <ol className="space-y-2 max-h-[28rem] overflow-y-auto pr-1">
+                {history.map(h => (
+                  <li key={h.id} className="text-xs leading-snug">
+                    <span className="text-(--rs-neutral-grey-500)">{formatHistoryTime(h.created_at)}</span>
+                    <span className="text-(--rs-neutral-grey-400)"> — </span>
+                    <span className="font-semibold text-(--rs-neutral-grey-800)">{abbreviateName(h.user_name)}</span>
+                    <span className="text-(--rs-neutral-grey-400)">: </span>
+                    <span className="text-(--rs-neutral-grey-700)">{h.summary}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
           </div>
         </aside>
       </div>

@@ -39,6 +39,12 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   const isLoginPage = pathname === '/login';
+  // Public application form is open to the world — no auth required.
+  const isPublicApply = pathname === '/apply' || pathname.startsWith('/apply/');
+
+  if (isPublicApply) {
+    return supabaseResponse;
+  }
 
   if (isLoginPage) {
     if (user) {
@@ -57,6 +63,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|images|api|auth|onboarding|guide).*)',
+    '/((?!_next/static|_next/image|favicon.ico|images|api|auth|onboarding|guide|apply).*)',
   ],
 };

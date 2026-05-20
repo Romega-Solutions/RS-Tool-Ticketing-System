@@ -1,9 +1,10 @@
-// One-time. Run BEFORE deleting plane.ts: `npx tsx scripts/export-plane-snapshot.ts`
-// Emits plane-snapshot.json next to the repo root.
+// Snapshot of the tickets tables — emits plane-snapshot.json next to the
+// repo root. (Originally read from the live Plane API; now reads from
+// the internal tickets DB, which is the post-migration source of truth.)
 import { writeFileSync } from 'node:fs';
 import {
   getProjects, getProjectStates, getWorkItems, getWorkspaceMembers,
-} from '../src/lib/plane';
+} from '../src/lib/tickets';
 
 async function main() {
   const members = await getWorkspaceMembers();

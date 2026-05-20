@@ -21,24 +21,25 @@ const BACKLOG_GROUPS = new Set(['backlog', 'todo']);
 export default async function MyTasksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; priority?: string; dueSoon?: string }>;
 }) {
-  const { tab = 'active' } = await searchParams;
+  const { tab = 'active', priority = '', dueSoon = '' } = await searchParams;
+  const dueSoonOn = dueSoon === '1';
   const sessionUser = await getSession();
-  const planeMemberId = sessionUser?.planeMemberId ?? null;
 
   let activeTasks:    TaskWithProject[] = [];
   let backlogTasks:   TaskWithProject[] = [];
   let completedTasks: TaskWithProject[] = [];
-  let planeError: string | null = null;
+  let loadError: string | null = null;
 
-  if (planeMemberId) {
+  if (sessionUser) {
     try {
       const projects = await getProjects();
       const byProject = await Promise.all(
         projects.map(async p => {
           const [items, states] = await Promise.all([
-            getWorkItems(p.id, { assignee: planeMemberId }),
+            // Filter by the caller's user_id (the canonical assignee key).
+            getWorkItems(p.id, { assignee: String(sessionUser.id) }),
             getProjectStates(p.id),
           ]);
           const lookup = buildStateLookup(states);
@@ -57,16 +58,26 @@ export default async function MyTasksPage({
 
       const all = byProject.flat();
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const dueSoonCutoff = Date.now() + 7 * 24 * 60 * 60 * 1000;
 
-      activeTasks    = all.filter(i => ACTIVE_GROUPS.has((i.state_detail?.group ?? '').toLowerCase()));
-      backlogTasks   = all.filter(i => BACKLOG_GROUPS.has((i.state_detail?.group ?? '').toLowerCase()));
+      const passesFilters = (i: PlaneWorkItem) => {
+        if (priority && i.priority !== priority) return false;
+        if (dueSoonOn) {
+          if (!i.target_date) return false;
+          if (new Date(i.target_date + 'T00:00:00').getTime() > dueSoonCutoff) return false;
+        }
+        return true;
+      };
+
+      activeTasks    = all.filter(i => ACTIVE_GROUPS.has((i.state_detail?.group ?? '').toLowerCase())).filter(passesFilters);
+      backlogTasks   = all.filter(i => BACKLOG_GROUPS.has((i.state_detail?.group ?? '').toLowerCase())).filter(passesFilters);
       completedTasks = all.filter(i => {
         if ((i.state_detail?.group ?? '').toLowerCase() !== 'completed') return false;
         if (!i.completed_at) return true;
         return new Date(i.completed_at) >= thirtyDaysAgo;
-      });
+      }).filter(passesFilters);
     } catch (err) {
-      planeError = err instanceof Error ? err.message : 'Failed to connect to Plane';
+      loadError = err instanceof Error ? err.message : 'Failed to load tasks';
     }
   }
 
@@ -90,27 +101,68 @@ export default async function MyTasksPage({
         </p>
       </div>
 
-      {!planeMemberId && (
-        <div className="bg-(--rs-primary-50) border border-(--rs-primary-200) text-(--rs-primary-800) px-4 py-3 rounded-lg text-sm">
-          Your member profile isn&apos;t linked yet. Ask an admin to link it in your{' '}
-          <a href="/profile" className="underline font-medium">profile</a>.
-        </div>
-      )}
-
-      {planeError && (
+      {loadError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
           Couldn&apos;t load your tasks. Refresh; if it persists, contact an admin.
         </div>
       )}
 
-      {planeMemberId && !planeError && (
+      {sessionUser && !loadError && (
         <>
+          {/* Filter chips */}
+          <div className="flex flex-wrap items-center gap-2">
+            {['urgent','high','medium','low'].map(p => {
+              const on = priority === p;
+              const qs = new URLSearchParams({ tab });
+              if (!on) qs.set('priority', p);
+              if (dueSoonOn) qs.set('dueSoon', '1');
+              return (
+                <a
+                  key={p}
+                  href={`?${qs.toString()}`}
+                  className={`text-xs px-2.5 py-1 rounded-full border capitalize ${
+                    on
+                      ? 'bg-(--rs-primary-50) border-(--rs-primary-300) text-(--rs-primary-800)'
+                      : 'bg-white border-(--rs-neutral-grey-200) text-(--rs-neutral-grey-600)'
+                  }`}
+                >
+                  {p}
+                </a>
+              );
+            })}
+            {(() => {
+              const qs = new URLSearchParams({ tab });
+              if (priority) qs.set('priority', priority);
+              if (!dueSoonOn) qs.set('dueSoon', '1');
+              return (
+                <a
+                  href={`?${qs.toString()}`}
+                  className={`text-xs px-2.5 py-1 rounded-full border ${
+                    dueSoonOn
+                      ? 'bg-(--rs-primary-50) border-(--rs-primary-300) text-(--rs-primary-800)'
+                      : 'bg-white border-(--rs-neutral-grey-200) text-(--rs-neutral-grey-600)'
+                  }`}
+                >
+                  Due in 7 days
+                </a>
+              );
+            })()}
+            {(priority || dueSoonOn) && (
+              <a
+                href={`?tab=${tab}`}
+                className="text-xs text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-800) underline"
+              >
+                Clear filters
+              </a>
+            )}
+          </div>
+
           {/* Tab bar */}
           <div className="flex gap-0.5 border-b border-(--rs-neutral-grey-200) overflow-x-auto">
             {tabs.map(t => (
               <a
                 key={t.key}
-                href={`?tab=${t.key}`}
+                href={`?tab=${t.key}${priority ? `&priority=${priority}` : ''}${dueSoonOn ? '&dueSoon=1' : ''}`}
                 className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
                   tab === t.key
                     ? 'border-(--rs-primary-500) text-(--rs-primary-600)'

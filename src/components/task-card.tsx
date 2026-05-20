@@ -41,7 +41,7 @@ export function TaskCard({
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/plane/work-items', {
+      const res = await fetch('/api/tickets/work-items', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

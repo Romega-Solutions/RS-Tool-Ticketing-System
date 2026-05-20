@@ -10,7 +10,6 @@ export const users = pgTable('users', {
   role:          text('role').notNull(),
   team:          text('team'),
   jobTitle:      text('job_title'),
-  planeMemberId: text('plane_member_id'),
   hourlyRateUsd: numeric('hourly_rate_usd', { precision: 10, scale: 2 }),
   isActive:               integer('is_active').notNull().default(1),
   reminderEnabled:        integer('reminder_enabled').notNull().default(1),
@@ -142,6 +141,7 @@ export const projects = pgTable('projects', {
   identifier:  text('identifier').notNull().unique(),
   name:        text('name').notNull(),
   description: text('description'),
+  team:        text('team'),
   network:     integer('network').notNull().default(2),
   nextSequence: integer('next_sequence').notNull().default(1),
   archived:    integer('archived').notNull().default(0),
@@ -158,6 +158,16 @@ export const projectStates = pgTable('project_states', {
   sequence:  integer('sequence').notNull().default(0),
 });
 
+export const cycles = pgTable('cycles', {
+  id:        serial('id').primaryKey(),
+  projectId: integer('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  name:      text('name').notNull(),
+  startDate: text('start_date').notNull(),
+  endDate:   text('end_date').notNull(),
+  archived:  integer('archived').notNull().default(0),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const workItems = pgTable('work_items', {
   id:           serial('id').primaryKey(),
   projectId:    integer('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
@@ -166,8 +176,11 @@ export const workItems = pgTable('work_items', {
   description:  text('description'),
   priority:     text('priority').notNull().default('none'),
   stateId:      integer('state_id').references(() => projectStates.id, { onDelete: 'set null' }),
+  cycleId:      integer('cycle_id').references(() => cycles.id, { onDelete: 'set null' }),
+  parentId:     integer('parent_id'),   // self-FK; declared raw to avoid forward-ref dance
   targetDate:   text('target_date'),
   completedAt:  text('completed_at'),
+  archived:     integer('archived').notNull().default(0),
   createdBy:    integer('created_by'),
   createdAt:    text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt:    text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -178,5 +191,60 @@ export const workItems = pgTable('work_items', {
 export const workItemAssignees = pgTable('work_item_assignees', {
   id:         serial('id').primaryKey(),
   workItemId: integer('work_item_id').notNull().references(() => workItems.id, { onDelete: 'cascade' }),
-  memberKey:  text('member_key').notNull(), // == users.plane_member_id (legacy continuity)
+  userId:     integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+});
+
+export const workItemComments = pgTable('work_item_comments', {
+  id:         serial('id').primaryKey(),
+  workItemId: integer('work_item_id').notNull().references(() => workItems.id, { onDelete: 'cascade' }),
+  authorId:   integer('author_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  body:       text('body').notNull(),
+  createdAt:  text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt:  text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const labels = pgTable('labels', {
+  id:        serial('id').primaryKey(),
+  projectId: integer('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  name:      text('name').notNull(),
+  color:     text('color').notNull().default('#6b7280'),
+}, (t) => [
+  unique('labels_project_name_unique').on(t.projectId, t.name),
+]);
+
+export const workItemLabels = pgTable('work_item_labels', {
+  id:         serial('id').primaryKey(),
+  workItemId: integer('work_item_id').notNull().references(() => workItems.id, { onDelete: 'cascade' }),
+  labelId:    integer('label_id').notNull().references(() => labels.id, { onDelete: 'cascade' }),
+}, (t) => [
+  unique('work_item_labels_unique').on(t.workItemId, t.labelId),
+]);
+
+export const projectMembers = pgTable('project_members', {
+  id:        serial('id').primaryKey(),
+  projectId: integer('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  userId:    integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  role:      text('role').notNull().default('member'), // 'lead' | 'member' | 'viewer'
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  unique('project_members_unique').on(t.projectId, t.userId),
+]);
+
+export const workItemActivity = pgTable('work_item_activity', {
+  id:         serial('id').primaryKey(),
+  workItemId: integer('work_item_id').notNull().references(() => workItems.id, { onDelete: 'cascade' }),
+  actorId:    integer('actor_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  action:     text('action').notNull(), // created | edited | state_changed | assigned | unassigned | commented | archived
+  fromValue:  text('from_value'),
+  toValue:    text('to_value'),
+  createdAt:  text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const savedViews = pgTable('saved_views', {
+  id:        serial('id').primaryKey(),
+  userId:    integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  projectId: integer('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+  name:      text('name').notNull(),
+  filters:   jsonb('filters').notNull(),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });

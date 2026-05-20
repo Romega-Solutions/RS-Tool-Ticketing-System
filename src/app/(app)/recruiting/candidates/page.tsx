@@ -11,6 +11,7 @@ import { CandidateForm } from './candidate-form';
 import { CandidateStatus, CandidateRating, CandidateDelete } from './candidate-row';
 import { ResumeUploadButton } from './resume-upload';
 import { deleteAllCandidates } from './actions';
+import { AtsTabs } from '../ats-tabs';
 
 type CandidateRowData = {
   id:           number;
@@ -30,7 +31,33 @@ type CandidateRowData = {
 const SOURCE_LABEL: Record<string, string> = {
   referral: 'Referral', linkedin: 'LinkedIn', job_board: 'Job board', direct: 'Direct', manual: 'Manual',
 };
-const STATUS_OPTIONS = ['all', 'applied', 'screening', 'interview', 'offer', 'hired', 'rejected'] as const;
+const STATUS_OPTIONS = [
+  'all',
+  'pending_response',
+  'interview_romega',
+  'endorsed_client',
+  'final_interview',
+  'offered',
+  'hired',
+  'failed',
+  'no_show',
+  'unresponsive',
+  'consider_other',
+  'withdrew',
+] as const;
+const STATUS_LABEL: Record<string, string> = {
+  pending_response: 'Pending Response',
+  interview_romega: 'Interview - Romega',
+  endorsed_client:  'Endorsed - Client',
+  final_interview:  'Final Interview',
+  offered:          'Offered',
+  hired:            'Hired',
+  failed:           'Failed',
+  no_show:          'No Show',
+  unresponsive:     'Unresponsive (>7d)',
+  consider_other:   'Consider for other positions',
+  withdrew:         'Declined / Withdrew',
+};
 const SOURCE_OPTIONS = ['all', 'manual', 'referral', 'linkedin', 'job_board', 'direct'] as const;
 
 function formatDate(iso: string) {
@@ -83,16 +110,18 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
     return matchesQuery && matchesStatus && matchesSource;
   });
 
-  const openCount      = candidates.filter(c => !['hired', 'rejected'].includes(c.status)).length;
-  const interviewCount = candidates.filter(c => c.status === 'interview' || c.status === 'offer').length;
+  const TERMINAL = new Set(['hired', 'failed', 'no_show', 'withdrew', 'rejected']);
+  const INTERVIEWING = new Set(['interview_romega', 'endorsed_client', 'final_interview', 'offered', 'interview', 'offer']);
+  const openCount      = candidates.filter(c => !TERMINAL.has(c.status)).length;
+  const interviewCount = candidates.filter(c => INTERVIEWING.has(c.status)).length;
   const hiredCount     = candidates.filter(c => c.status === 'hired').length;
-  const appliedCount   = candidates.filter(c => c.status === 'applied').length;
+  const appliedCount   = candidates.filter(c => c.status === 'pending_response' || c.status === 'applied').length;
 
   return (
     <div className="space-y-6">
       <LeadToolHeader
         eyebrow="Recruiting tool"
-        title="Applicant Tracking"
+        title="Applicant Tracking System"
         description="Lightweight ATS for tracking every candidate from application through hire. Upload a resume PDF and the n8n regex parser extracts name, contact, skills, experience, and education automatically."
         action={
           !tableMissing && !unexpectedError ? (
@@ -109,6 +138,8 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
           ) : null
         }
       />
+
+      <AtsTabs />
 
       {tableMissing && (
         <Card>
@@ -169,7 +200,7 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
                     >
                       {STATUS_OPTIONS.map(option => (
                         <option key={option} value={option}>
-                          {option === 'all' ? 'All statuses' : option[0].toUpperCase() + option.slice(1)}
+                          {option === 'all' ? 'All statuses' : (STATUS_LABEL[option] ?? option)}
                         </option>
                       ))}
                     </select>

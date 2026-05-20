@@ -13,18 +13,10 @@ function parseWeekRange(weekStart: string): { start: Date; end: Date } | null {
 }
 
 // GET /api/weekly-report/plane-data?week=YYYY-MM-DD
+// (path kept for backwards compat; data now comes from the internal tickets DB.)
 export async function GET(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  if (!session.planeMemberId) {
-    return NextResponse.json({ planeConfigured: false, pending: [], accomplishments: [] });
-  }
-
-  const planeConfigured = true;
-  if (!planeConfigured) {
-    return NextResponse.json({ planeConfigured: false, pending: [], accomplishments: [] });
-  }
 
   const { searchParams } = new URL(req.url);
   const weekParam = searchParams.get('week') ?? '';
@@ -39,7 +31,7 @@ export async function GET(req: Request) {
     await Promise.all(projects.map(async (proj) => {
       const [states, items] = await Promise.all([
         getProjectStates(proj.id),
-        getWorkItems(proj.id, { assignee: session.planeMemberId! }),
+        getWorkItems(proj.id, { assignee: String(session.id) }),
       ]);
       const lookup = buildStateLookup(states);
       const enriched = enrichWorkItems(items, lookup);
@@ -69,10 +61,10 @@ export async function GET(req: Request) {
       }
     }));
 
-    return NextResponse.json({ planeConfigured: true, pending, accomplishments });
-  } catch (err) {
+    return NextResponse.json({ configured: true, pending, accomplishments });
+  } catch {
     return NextResponse.json(
-      { planeConfigured: true, pending: [], accomplishments: [], error: 'Failed to fetch Plane data' },
+      { configured: true, pending: [], accomplishments: [], error: 'Failed to load tasks' },
       { status: 502 },
     );
   }

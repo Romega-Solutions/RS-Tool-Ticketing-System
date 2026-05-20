@@ -69,6 +69,72 @@ export function getResumeParserUrl(): string {
   return url;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Candidate Communication webhook — drives the n8n "Romega ATS — Candidate
+// Communication" workflow which sends Gmail templates keyed off candidate
+// status. Configured via N8N_COMMUNICATION_WEBHOOK_URL.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type CommunicationEvent =
+  | { kind: 'created';        candidateId: number }
+  | { kind: 'status_changed'; candidateId: number; status: string }
+  | { kind: 'resend';         candidateId: number; template: string };
+
+export type CommunicationResult =
+  | { ok: true;  template?: string }
+  | { ok: false; error: string };
+
+function getCommunicationWebhookUrl(): string | null {
+  return process.env.N8N_COMMUNICATION_WEBHOOK_URL?.trim() || null;
+}
+
+/**
+ * Fire the n8n communication workflow. Caller decides what to do with the
+ * failure result (typically logs an `email_failed` history row).
+ *
+ * Intentionally NOT thrown — the candidate update should succeed even when
+ * the email pipeline is down. The recruiter sees a clear failure trail in
+ * candidate_history and can manually retry.
+ */
+export async function notifyCommunicationWebhook(
+  event: CommunicationEvent,
+): Promise<CommunicationResult> {
+  const url = getCommunicationWebhookUrl();
+  if (!url) {
+    return { ok: false, error: 'N8N_COMMUNICATION_WEBHOOK_URL is not configured' };
+  }
+
+  // 8s ceiling — long enough for n8n's slow first-fire cold start, short
+  // enough that a wedged webhook doesn't stall the recruiter's UI.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+
+  try {
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(event),
+      signal:  controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      return { ok: false, error: `n8n responded ${res.status}` };
+    }
+
+    let payload: unknown = null;
+    try { payload = await res.json(); } catch { /* empty body is OK */ }
+    const template = (payload as { template?: unknown })?.template;
+    return { ok: true, template: typeof template === 'string' ? template : undefined };
+  } catch (err) {
+    clearTimeout(timer);
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'network error',
+    };
+  }
+}
+
 export async function parseResumeWithN8n(
   file: File,
   candidateId?: string | number,

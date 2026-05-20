@@ -4,22 +4,40 @@ import { useTransition } from 'react';
 import { Star, Trash2 } from 'lucide-react';
 import { updateCandidateStatus, updateCandidateRating, deleteCandidate } from './actions';
 
+// SOP's 11 status stages. Keep in sync with ALLOWED_STATUSES in actions.ts.
 const STATUSES = [
-  { value: 'applied',   label: 'Applied' },
-  { value: 'screening', label: 'Screening' },
-  { value: 'interview', label: 'Interview' },
-  { value: 'offer',     label: 'Offer' },
-  { value: 'hired',     label: 'Hired' },
-  { value: 'rejected',  label: 'Rejected' },
+  { value: 'pending_response', label: 'Pending Response' },
+  { value: 'interview_romega', label: 'Interview - Romega' },
+  { value: 'endorsed_client',  label: 'Endorsed - Client' },
+  { value: 'final_interview',  label: 'Final Interview' },
+  { value: 'offered',          label: 'Offered' },
+  { value: 'hired',            label: 'Hired' },
+  { value: 'failed',           label: 'Failed' },
+  { value: 'no_show',          label: 'No Show' },
+  { value: 'unresponsive',     label: 'Unresponsive (>7d)' },
+  { value: 'consider_other',   label: 'Consider for other positions' },
+  { value: 'withdrew',         label: 'Candidate Declined / Withdrew' },
 ];
 
 const STATUS_COLOR: Record<string, string> = {
-  applied:   'bg-slate-100 text-slate-700',
-  screening: 'bg-blue-100 text-blue-700',
-  interview: 'bg-amber-100 text-amber-700',
-  offer:     'bg-purple-100 text-purple-700',
-  hired:     'bg-green-100 text-green-700',
-  rejected:  'bg-red-100 text-red-700',
+  pending_response: 'bg-slate-100 text-slate-700',
+  interview_romega: 'bg-blue-100 text-blue-700',
+  endorsed_client:  'bg-indigo-100 text-indigo-700',
+  final_interview:  'bg-violet-100 text-violet-700',
+  offered:          'bg-purple-100 text-purple-700',
+  hired:            'bg-green-100 text-green-700',
+  failed:           'bg-red-100 text-red-700',
+  no_show:          'bg-rose-100 text-rose-700',
+  unresponsive:     'bg-amber-100 text-amber-700',
+  consider_other:   'bg-cyan-100 text-cyan-700',
+  withdrew:         'bg-stone-100 text-stone-700',
+  // Legacy slugs from before the migration — show as muted so they're visible
+  // but obviously old. The migration in add-recruitment-agent-fields.sql remaps these.
+  applied:    'bg-slate-100 text-slate-500 italic',
+  screening:  'bg-slate-100 text-slate-500 italic',
+  interview:  'bg-slate-100 text-slate-500 italic',
+  offer:      'bg-slate-100 text-slate-500 italic',
+  rejected:   'bg-slate-100 text-slate-500 italic',
 };
 
 export function CandidateStatus({ id, status }: { id: number; status: string }) {

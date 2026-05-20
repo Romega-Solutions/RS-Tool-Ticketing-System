@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -13,7 +13,8 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { Plus, Loader2 } from 'lucide-react';
+import { Plus, Loader2, X } from 'lucide-react';
+import { TaskDetailSheet, type SheetWorkItem } from '@/components/task-detail-sheet';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -32,8 +33,14 @@ export type KanbanItem = {
   priority: string;
   assignees: string[];
   target_date?: string | null;
+  label_ids?: number[];
+  cycle_id?: number | null;
   state_detail?: { id: string; name: string; group: string; color: string };
 };
+
+type KanbanCycle = { id: number; name: string; start_date: string; end_date: string };
+type KanbanLabel = { id: number; name: string; color: string };
+type KanbanMember = { id: number; user_id: number; name: string; email: string; role: string };
 
 // ── Priority dot ───────────────────────────────────────────────────────────────
 
@@ -47,7 +54,7 @@ const PRIORITY_DOT: Record<string, string> = {
 
 // ── Card (used in column + drag overlay) ──────────────────────────────────────
 
-function CardContent({ item, overlay = false }: { item: KanbanItem; overlay?: boolean }) {
+function CardContent({ item, overlay = false, onClick }: { item: KanbanItem; overlay?: boolean; onClick?: () => void }) {
   const isOverdue =
     item.target_date &&
     item.state_detail?.group !== 'completed' &&
@@ -55,6 +62,7 @@ function CardContent({ item, overlay = false }: { item: KanbanItem; overlay?: bo
 
   return (
     <div
+      onClick={onClick}
       className={`bg-white rounded-lg border p-3 space-y-2 select-none ${
         overlay
           ? 'border-(--rs-primary-400) shadow-xl rotate-1 cursor-grabbing w-64'
@@ -102,7 +110,7 @@ function CardContent({ item, overlay = false }: { item: KanbanItem; overlay?: bo
 
 // ── Draggable card wrapper ─────────────────────────────────────────────────────
 
-function DraggableCard({ item, isActive }: { item: KanbanItem; isActive: boolean }) {
+function DraggableCard({ item, isActive, onOpen }: { item: KanbanItem; isActive: boolean; onOpen: (id: string) => void }) {
   const { attributes, listeners, setNodeRef } = useDraggable({ id: item.id });
 
   return (
@@ -112,7 +120,7 @@ function DraggableCard({ item, isActive }: { item: KanbanItem; isActive: boolean
       {...attributes}
       style={{ opacity: isActive ? 0.3 : 1, transition: 'opacity 150ms' }}
     >
-      <CardContent item={item} />
+      <CardContent item={item} onClick={() => onOpen(item.id)} />
     </div>
   );
 }
@@ -147,7 +155,7 @@ function AddTaskForm({
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/plane/work-items', {
+      const res = await fetch('/api/tickets/work-items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ projectId, name: value.trim(), state: stateId, priority: 'none' }),
@@ -220,12 +228,14 @@ function KanbanColumn({
   activeId,
   projectId,
   onAdd,
+  onOpen,
 }: {
   state: KanbanState;
   items: KanbanItem[];
   activeId: string | null;
   projectId: string;
   onAdd: (stateId: string, item: KanbanItem) => void;
+  onOpen: (id: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: state.id });
 
@@ -258,6 +268,7 @@ function KanbanColumn({
               key={item.id}
               item={item}
               isActive={activeId === item.id}
+              onOpen={onOpen}
             />
           ))}
           {items.length === 0 && !isOver && (
@@ -282,10 +293,16 @@ export function KanbanBoard({
   states,
   initialItems,
   projectId,
+  currentUserId,
+  isAdmin,
+  cycles = [],
 }: {
   states: KanbanState[];
   initialItems: KanbanItem[];
   projectId: string;
+  currentUserId: number;
+  isAdmin: boolean;
+  cycles?: KanbanCycle[];
 }) {
   // Build state → items map from initial server data
   const [itemsByState, setItemsByState] = useState<Map<string, KanbanItem[]>>(() => {
@@ -307,6 +324,85 @@ export function KanbanBoard({
 
   const [activeItem, setActiveItem] = useState<KanbanItem | null>(null);
   const [dragError, setDragError] = useState('');
+  const [openItemId, setOpenItemId] = useState<string | null>(null);
+
+  // ── Filter state (URL-synced via window.location, optional for SSR safety) ──
+  const [filters, setFilters] = useState<{
+    assignee: string;
+    label: string;
+    priority: string;
+    cycle: string;
+    dueSoon: boolean;
+    mine: boolean;
+  }>(() => {
+    if (typeof window === 'undefined') return { assignee: '', label: '', priority: '', cycle: '', dueSoon: false, mine: false };
+    const sp = new URLSearchParams(window.location.search);
+    return {
+      assignee: sp.get('assignee') ?? '',
+      label:    sp.get('label')    ?? '',
+      priority: sp.get('priority') ?? '',
+      cycle:    sp.get('cycle')    ?? '',
+      dueSoon:  sp.get('dueSoon')  === '1',
+      mine:     sp.get('mine')     === '1',
+    };
+  });
+
+  // Push filter state back to URL (no full navigation).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const sp = new URLSearchParams();
+    if (filters.assignee) sp.set('assignee', filters.assignee);
+    if (filters.label)    sp.set('label',    filters.label);
+    if (filters.priority) sp.set('priority', filters.priority);
+    if (filters.cycle)    sp.set('cycle',    filters.cycle);
+    if (filters.dueSoon)  sp.set('dueSoon', '1');
+    if (filters.mine)     sp.set('mine',    '1');
+    const qs = sp.toString();
+    const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    window.history.replaceState(null, '', next);
+  }, [filters]);
+
+  const [labels, setLabels]   = useState<KanbanLabel[]>([]);
+  const [members, setMembers] = useState<KanbanMember[]>([]);
+
+  useEffect(() => {
+    fetch(`/api/tickets/projects/${projectId}/labels`)
+      .then(r => r.ok ? r.json() : []).then(setLabels).catch(() => {});
+    fetch(`/api/tickets/projects/${projectId}/members`)
+      .then(r => r.ok ? r.json() : []).then(setMembers).catch(() => {});
+  }, [projectId]);
+
+  // Build the lookup keys for the "Mine only" filter — match against either
+  // the assignee email (assignees[]) or numeric user id (assignee_ids[]).
+  const myKeys = useMemo(() => {
+    const me = members.find(m => m.user_id === currentUserId);
+    return new Set<string>(me ? [me.email, String(me.user_id)] : [String(currentUserId)]);
+  }, [members, currentUserId]);
+
+  const filterMatch = (item: KanbanItem): boolean => {
+    if (filters.assignee && !item.assignees.includes(filters.assignee)) return false;
+    if (filters.label && !item.label_ids?.includes(Number(filters.label))) return false;
+    if (filters.priority && item.priority !== filters.priority) return false;
+    if (filters.cycle && String(item.cycle_id ?? '') !== filters.cycle) return false;
+    if (filters.dueSoon) {
+      if (!item.target_date) return false;
+      const d = new Date(item.target_date + 'T00:00:00').getTime();
+      const now = Date.now();
+      if (d > now + 7 * 24 * 60 * 60 * 1000) return false;
+    }
+    if (filters.mine) {
+      if (!item.assignees.some(a => myKeys.has(a))) return false;
+    }
+    return true;
+  };
+
+  const activeFilterCount =
+    Number(!!filters.assignee) + Number(!!filters.label) +
+    Number(!!filters.priority) + Number(!!filters.cycle) +
+    Number(filters.dueSoon) + Number(filters.mine);
+
+  const clearFilters = () =>
+    setFilters({ assignee: '', label: '', priority: '', cycle: '', dueSoon: false, mine: false });
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -359,7 +455,7 @@ export function KanbanBoard({
     });
 
     // API call
-    const res = await fetch('/api/plane/work-items', {
+    const res = await fetch('/api/tickets/work-items', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ projectId, itemId: draggedId, state: targetStateId }),
@@ -382,6 +478,73 @@ export function KanbanBoard({
 
   return (
     <div>
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <select
+          value={filters.assignee}
+          onChange={e => setFilters(f => ({ ...f, assignee: e.target.value }))}
+          className="text-xs px-2.5 py-1.5 border border-(--rs-neutral-grey-200) rounded-md bg-white"
+        >
+          <option value="">All assignees</option>
+          {members.map(m => (
+            <option key={m.user_id} value={m.email}>{m.name}</option>
+          ))}
+        </select>
+
+        <select
+          value={filters.label}
+          onChange={e => setFilters(f => ({ ...f, label: e.target.value }))}
+          className="text-xs px-2.5 py-1.5 border border-(--rs-neutral-grey-200) rounded-md bg-white"
+        >
+          <option value="">All labels</option>
+          {labels.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+        </select>
+
+        <select
+          value={filters.priority}
+          onChange={e => setFilters(f => ({ ...f, priority: e.target.value }))}
+          className="text-xs px-2.5 py-1.5 border border-(--rs-neutral-grey-200) rounded-md bg-white"
+        >
+          <option value="">Any priority</option>
+          <option value="urgent">Urgent</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+          <option value="none">None</option>
+        </select>
+
+        {cycles.length > 0 && (
+          <select
+            value={filters.cycle}
+            onChange={e => setFilters(f => ({ ...f, cycle: e.target.value }))}
+            className="text-xs px-2.5 py-1.5 border border-(--rs-neutral-grey-200) rounded-md bg-white"
+          >
+            <option value="">All cycles</option>
+            {cycles.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        )}
+
+        <Toggle
+          on={filters.dueSoon}
+          label="Due soon"
+          onChange={v => setFilters(f => ({ ...f, dueSoon: v }))}
+        />
+        <Toggle
+          on={filters.mine}
+          label="Mine only"
+          onChange={v => setFilters(f => ({ ...f, mine: v }))}
+        />
+
+        {activeFilterCount > 0 && (
+          <button
+            onClick={clearFilters}
+            className="ml-1 flex items-center gap-1 text-xs text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-800)"
+          >
+            <X className="w-3 h-3" /> Clear ({activeFilterCount})
+          </button>
+        )}
+      </div>
+
       {dragError && (
         <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg flex items-center justify-between gap-2">
           <span>{dragError}</span>
@@ -401,10 +564,11 @@ export function KanbanBoard({
             <KanbanColumn
               key={state.id}
               state={state}
-              items={itemsByState.get(state.id) ?? []}
+              items={(itemsByState.get(state.id) ?? []).filter(filterMatch)}
               activeId={activeItem?.id ?? null}
               projectId={projectId}
               onAdd={handleTaskAdded}
+              onOpen={setOpenItemId}
             />
           ))}
         </div>
@@ -414,6 +578,72 @@ export function KanbanBoard({
           {activeItem ? <CardContent item={activeItem} overlay /> : null}
         </DragOverlay>
       </DndContext>
+
+      <TaskDetailSheet
+        itemId={openItemId}
+        open={openItemId !== null}
+        onOpenChange={(o) => !o && setOpenItemId(null)}
+        states={states.map(s => ({ id: s.id, name: s.name, color: s.color }))}
+        currentUserId={currentUserId}
+        isAdmin={isAdmin}
+        onSaved={(updated) => applySheetUpdate(updated)}
+        onArchived={(id) => removeItemFromBoard(id)}
+      />
     </div>
+  );
+
+  function applySheetUpdate(updated: SheetWorkItem) {
+    // Re-locate the item, possibly into a new column if the state changed.
+    setItemsByState(prev => {
+      const next = new Map(prev);
+      let sourceStateId = '';
+      for (const [sid, list] of next) {
+        if (list.some(i => i.id === updated.id)) { sourceStateId = sid; break; }
+      }
+      if (sourceStateId) {
+        next.set(sourceStateId, (next.get(sourceStateId) ?? []).filter(i => i.id !== updated.id));
+      }
+      const targetState = states.find(s => s.id === updated.state) ?? states.find(s => s.id === sourceStateId);
+      if (!targetState) return next;
+      const merged: KanbanItem = {
+        id: updated.id,
+        sequence_id: updated.sequence_id,
+        name: updated.name,
+        priority: updated.priority,
+        assignees: updated.assignee_users.map(u => u.email || String(u.id)),
+        target_date: updated.target_date,
+        state_detail: { id: targetState.id, name: targetState.name, group: targetState.group, color: targetState.color },
+      };
+      next.set(targetState.id, [...(next.get(targetState.id) ?? []), merged]);
+      return next;
+    });
+  }
+
+  function removeItemFromBoard(id: string) {
+    setItemsByState(prev => {
+      const next = new Map(prev);
+      for (const [sid, list] of next) {
+        if (list.some(i => i.id === id)) {
+          next.set(sid, list.filter(i => i.id !== id));
+          break;
+        }
+      }
+      return next;
+    });
+  }
+}
+
+function Toggle({ on, label, onChange }: { on: boolean; label: string; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!on)}
+      className={`text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
+        on
+          ? 'bg-(--rs-primary-50) border-(--rs-primary-300) text-(--rs-primary-800)'
+          : 'bg-white border-(--rs-neutral-grey-200) text-(--rs-neutral-grey-600) hover:border-(--rs-neutral-grey-300)'
+      }`}
+    >
+      {label}
+    </button>
   );
 }
