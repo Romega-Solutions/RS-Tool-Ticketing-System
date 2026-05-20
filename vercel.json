@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/auto-clock-out",
-      "schedule": "* * * * *"
+      "schedule": "0 0 * * *"
     }
   ]
 }
