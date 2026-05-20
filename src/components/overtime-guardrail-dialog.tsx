@@ -9,7 +9,16 @@ type Props = {
   busy: boolean;
   onContinue: () => void;
   onClockOut: () => void;
+  /** Seconds left before auto clock-out, or null for exempt users (no auto-out). */
+  autoClockOutInSeconds?: number | null;
 };
+
+function formatMmSs(total: number): string {
+  const t = Math.max(0, total);
+  const m = Math.floor(t / 60);
+  const s = t % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
 
 // Urgent three-tone alert — more insistent than the soft clock-out chime.
 function playOvertimeAlert() {
@@ -37,12 +46,19 @@ function playOvertimeAlert() {
   }
 }
 
-export function OvertimeGuardrailDialog({ elapsedSeconds, busy, onContinue, onClockOut }: Props) {
+export function OvertimeGuardrailDialog({
+  elapsedSeconds,
+  busy,
+  onContinue,
+  onClockOut,
+  autoClockOutInSeconds = null,
+}: Props) {
   useEffect(() => {
     playOvertimeAlert();
   }, []);
 
   const overtimeSeconds = Math.max(0, elapsedSeconds - OVERTIME_THRESHOLD_SECONDS);
+  const showAutoOut = autoClockOutInSeconds != null;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-4">
@@ -76,11 +92,18 @@ export function OvertimeGuardrailDialog({ elapsedSeconds, busy, onContinue, onCl
           </div>
         </div>
 
-        <div className="px-5 py-4">
+        <div className="px-5 py-4 space-y-3">
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             Choosing <span className="font-semibold">clock me out</span> ends your session now.
             Continuing keeps the timer running and flags this session as overtime.
           </div>
+          {showAutoOut && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              You&apos;ll be automatically clocked out in{' '}
+              <span className="font-semibold tabular-nums">{formatMmSs(autoClockOutInSeconds!)}</span>{' '}
+              if you don&apos;t respond.
+            </div>
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-(--rs-neutral-grey-100) px-5 py-4">

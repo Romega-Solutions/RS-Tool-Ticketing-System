@@ -8,6 +8,7 @@ import { OvertimeGuardrailDialog } from '@/components/overtime-guardrail-dialog'
 import { OvertimeStatusBanner } from '@/components/overtime-status-banner';
 
 const OVERTIME_REPROMPT_SECONDS = 3600; // re-prompt every additional hour
+const OVERTIME_RESPONSE_WINDOW_SECONDS = 5 * 60; // auto clock-out if no answer in 5 min
 
 type WidgetState = 'loading' | 'out' | 'in';
 type PendingAction = 'clock-in' | 'clock-out' | null;
@@ -112,7 +113,15 @@ function ClockConfirmDialog({
   );
 }
 
-export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collapsed?: boolean; variant?: 'sidebar' | 'topbar' }) {
+export function ClockWidget({
+  collapsed = false,
+  variant = 'sidebar',
+  isExempt = false,
+}: {
+  collapsed?: boolean;
+  variant?: 'sidebar' | 'topbar';
+  isExempt?: boolean;
+}) {
   const [state, setState] = useState<WidgetState>('loading');
   const [sessionNote, setSessionNote] = useState('');
   const [noteSaved, setNoteSaved] = useState(true);
@@ -126,6 +135,8 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
   const [reminderVisible, setReminderVisible] = useState(false);
   const [overtimeConsented, setOvertimeConsented] = useState(false);
   const [overtimePromptVisible, setOvertimePromptVisible] = useState(false);
+  const [overtimeDeadline, setOvertimeDeadline] = useState<number | null>(null);
+  const [overtimeRemaining, setOvertimeRemaining] = useState(OVERTIME_RESPONSE_WINDOW_SECONDS);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedRef = useRef(0);
   const lastReminderFiredRef = useRef<number>(0);
@@ -210,17 +221,42 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
       const block = overtimeBlock(elapsedRef.current);
       if (block > lastOvertimeBlockRef.current) {
         setOvertimePromptVisible(true);
+        setOvertimeDeadline(isExempt ? null : Date.now() + OVERTIME_RESPONSE_WINDOW_SECONDS * 1000);
+        setOvertimeRemaining(OVERTIME_RESPONSE_WINDOW_SECONDS);
       }
     };
     check();
     const id = setInterval(check, 15_000);
     return () => clearInterval(id);
-  }, [state]);
+  }, [state, isExempt]);
+
+  // 5-min response window: if non-exempt user ignores the overtime prompt, auto clock-out.
+  useEffect(() => {
+    if (!overtimePromptVisible || overtimeDeadline == null) return;
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((overtimeDeadline - Date.now()) / 1000));
+      setOvertimeRemaining(remaining);
+      if (remaining <= 0) {
+        void confirmClockOut();
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+    // confirmClockOut is stable enough — invoked only when remaining hits 0.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overtimePromptVisible, overtimeDeadline]);
 
   function consentOvertime() {
     lastOvertimeBlockRef.current = overtimeBlock(elapsedRef.current);
     setOvertimeConsented(true);
     setOvertimePromptVisible(false);
+    setOvertimeDeadline(null);
+    // Record consent on the server so the auto-clock-out cron skips this
+    // session for the next hour even if the browser is later closed.
+    fetch('/api/presence/overtime-consent', { method: 'POST' }).catch(() => {
+      // Best-effort — the client-side guard still keeps the session running.
+    });
   }
 
   function dismissReminder() {
@@ -287,6 +323,7 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
       lastReminderFiredRef.current = 0;
       setOvertimeConsented(false);
       setOvertimePromptVisible(false);
+      setOvertimeDeadline(null);
       lastOvertimeBlockRef.current = -1;
       setSessionNote('');
       setNoteDraft('');
@@ -323,6 +360,7 @@ export function ClockWidget({ collapsed = false, variant = 'sidebar' }: { collap
           busy={busy}
           onContinue={consentOvertime}
           onClockOut={confirmClockOut}
+          autoClockOutInSeconds={isExempt ? null : overtimeRemaining}
         />
       )}
     </>
