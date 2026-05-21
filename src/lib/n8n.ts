@@ -135,6 +135,51 @@ export async function notifyCommunicationWebhook(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Recruiter notification webhook — pings the assigned recruiter when a new
+// public application lands. Separate from the candidate-comms pipeline so it
+// can be authored as its own n8n workflow (Gmail/Slack/whatever). If
+// N8N_RECRUITER_NOTIFY_URL is unset the call is a no-op.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type RecruiterNotifyPayload = {
+  candidateId:     number;
+  candidateName:   string;
+  candidateEmail:  string;
+  applicationCode: string | null;
+  positionId:      number;
+  positionTitle:   string;
+  recruiterUserId: number | null;
+  recruiterEmail:  string | null;
+  recruiterName:   string | null;
+};
+
+export async function notifyRecruiterOfApplication(
+  payload: RecruiterNotifyPayload,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const url = process.env.N8N_RECRUITER_NOTIFY_URL?.trim();
+  if (!url) {
+    return { ok: false, error: 'N8N_RECRUITER_NOTIFY_URL is not configured' };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+      signal:  controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return { ok: false, error: `n8n responded ${res.status}` };
+    return { ok: true };
+  } catch (err) {
+    clearTimeout(timer);
+    return { ok: false, error: err instanceof Error ? err.message : 'network error' };
+  }
+}
+
 export async function parseResumeWithN8n(
   file: File,
   candidateId?: string | number,

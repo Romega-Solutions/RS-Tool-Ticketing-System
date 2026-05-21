@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { Upload, CheckCircle2, AlertCircle, Send, Loader2 } from 'lucide-react';
 import { submitPublicApplication, type PublicApplicationResult } from './actions';
 
@@ -13,12 +13,16 @@ export function ApplyForm({ positionId, jobTitle }: { positionId: number; jobTit
   const [name, setName] = useState('');
   const [isPending, start] = useTransition();
   const [fileName, setFileName] = useState<string>('');
+  const loadedAtRef = useRef<number>(0);
+
+  useEffect(() => { loadedAtRef.current = Date.now(); }, []);
 
   async function onSubmit(formData: FormData) {
     setStatus('submitting');
     setErrorMsg('');
     const submittedName = String(formData.get('fullName') ?? '');
     setName(submittedName);
+    formData.set('loadedAt', String(loadedAtRef.current));
     start(async () => {
       let result: PublicApplicationResult;
       try {
@@ -65,6 +69,18 @@ export function ApplyForm({ positionId, jobTitle }: { positionId: number; jobTit
 
   return (
     <form action={onSubmit} className="space-y-5">
+      {/* Honeypot — invisible to humans, naive bots fill every input. */}
+      <div aria-hidden="true" className="absolute left-[-9999px] top-[-9999px] w-px h-px overflow-hidden" style={{ position: 'absolute' }}>
+        <label htmlFor="company_website">Company website (leave blank)</label>
+        <input
+          id="company_website"
+          name="company_website"
+          type="text"
+          tabIndex={-1}
+          autoComplete="off"
+        />
+      </div>
+
       <Field label="Full name *" htmlFor="fullName">
         <input
           id="fullName" name="fullName" required autoComplete="name"

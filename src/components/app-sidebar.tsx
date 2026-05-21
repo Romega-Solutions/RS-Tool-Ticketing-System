@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import type { AppRole } from "@/lib/rbac";
@@ -19,6 +19,7 @@ const navItems = [
   { href: "/attendance",        label: "Attendance",           icon: Calendar,        category: "reports"   },
   { href: "/sales/leads",            label: "Sales / Leads",       icon: Users2,        category: "leadTools" },
   { href: "/recruiting/candidates",  label: "Applicant Tracking System", icon: UserPlus2, category: "leadTools" },
+  { href: "/onboarders",             label: "Onboarding",           icon: GraduationCap, category: "leadTools" },
   { href: "/pm/status-drafter",      label: "PM / Status Drafter", icon: ClipboardList, category: "leadTools" },
   { href: "/ceo/briefing",           label: "CEO / Briefing",      icon: Sun,           category: "leadTools" },
   { href: "/marketing/content",      label: "Marketing / Content", icon: Wand2,         category: "leadTools" },
@@ -104,6 +105,7 @@ function NavLinks({ collapsed = false, role, team }: { collapsed?: boolean; role
     if (i.category !== "leadTools") return false;
     if (i.href.startsWith('/sales/')) return canAccessLeadTool('sales', role, team);
     if (i.href.startsWith('/recruiting/')) return canAccessLeadTool('recruiting', role, team);
+    if (i.href.startsWith('/onboarders')) return canAccessLeadTool('onboarding', role, team);
     if (i.href.startsWith('/pm/')) return canAccessLeadTool('pm', role, team);
     if (i.href.startsWith('/ceo/')) return canAccessLeadTool('ceo', role, team);
     if (i.href.startsWith('/marketing/')) return canAccessLeadTool('marketing', role, team);

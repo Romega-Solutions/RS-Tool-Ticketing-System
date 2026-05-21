@@ -6,6 +6,7 @@ import { getSession, type SessionUser } from '@/lib/session';
 import {
   parseResumeWithN8n,
   notifyCommunicationWebhook,
+  notifyRecruiterOfApplication,
   type ParsedResume,
   type ParsedEducation,
   type ParsedExperience,
@@ -703,6 +704,15 @@ export async function createPublicApplication(args: {
   if (args.resume.size > 10 * 1024 * 1024) {
     return { ok: false, code: 'FILE_TOO_LARGE', error: 'Resume must be under 10 MB' };
   }
+  // Verify the file is actually a PDF (browser-provided MIME can be spoofed).
+  // PDFs begin with the 5-byte signature "%PDF-".
+  {
+    const head = new Uint8Array(await args.resume.slice(0, 5).arrayBuffer());
+    const isPdf = head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46 && head[4] === 0x2d;
+    if (!isPdf) {
+      return { ok: false, code: 'INVALID_FILE_TYPE', error: 'Resume must be a valid PDF file' };
+    }
+  }
 
   const supabase = createAdminClient();
 
@@ -807,6 +817,34 @@ export async function createPublicApplication(args: {
     { kind: 'created', candidateId: inserted.id },
     'acknowledgment',
   );
+
+  // Ping the assigned recruiter so they know an application landed.
+  // Non-fatal — the candidate row is the source of truth either way.
+  let recruiterEmail: string | null = null;
+  let recruiterName:  string | null = null;
+  if (position.created_by) {
+    const { data: recruiter } = await supabase
+      .from('users')
+      .select('email, name')
+      .eq('id', position.created_by)
+      .maybeSingle();
+    recruiterEmail = recruiter?.email ?? null;
+    recruiterName  = recruiter?.name  ?? null;
+  }
+  const notifyResult = await notifyRecruiterOfApplication({
+    candidateId:     inserted.id,
+    candidateName:   cleanedName || args.fullName,
+    candidateEmail:  emailNorm,
+    applicationCode,
+    positionId:      position.id,
+    positionTitle:   position.job_title,
+    recruiterUserId: position.created_by ?? null,
+    recruiterEmail,
+    recruiterName,
+  });
+  if (!notifyResult.ok) {
+    console.warn('[ats] recruiter notify failed:', notifyResult.error);
+  }
 
   revalidatePath('/recruiting/candidates');
 

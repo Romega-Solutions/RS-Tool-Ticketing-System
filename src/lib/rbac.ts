@@ -1,5 +1,5 @@
 export type AppRole = 'intern' | 'ic' | 'lead' | 'admin';
-export type LeadToolKey = 'ceo' | 'pm' | 'sales' | 'marketing' | 'recruiting';
+export type LeadToolKey = 'ceo' | 'pm' | 'sales' | 'marketing' | 'recruiting' | 'onboarding';
 
 export function normalizeRole(role: unknown): AppRole {
   const value = String(role || '').trim().toLowerCase();
@@ -43,6 +43,7 @@ export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string
     sales: ['sales', 'sales & account management'],
     marketing: ['marketing', 'marketing & brand content', 'hr/marketing'],
     recruiting: ['recruiting', 'talent acquisition', 'people operations', 'operations', 'hr/marketing', 'marketing & brand content'],
+    onboarding: ['recruiting', 'talent acquisition', 'people operations', 'operations', 'hr/marketing', 'executive', 'executive & admin', 'admin'],
   };
   if (role === 'admin') return true;
   if (role !== 'lead') return false;
@@ -60,6 +61,7 @@ export function canAccessPath(pathname: string, role: AppRole, team: string | nu
   if (pathname.startsWith('/sales/'))     return canAccessLeadTool('sales', role, team);
   if (pathname.startsWith('/marketing/')) return canAccessLeadTool('marketing', role, team);
   if (pathname.startsWith('/recruiting/')) return canAccessLeadTool('recruiting', role, team);
+  if (pathname.startsWith('/onboarders'))  return canAccessLeadTool('onboarding', role, team);
   return true;
 }
 
