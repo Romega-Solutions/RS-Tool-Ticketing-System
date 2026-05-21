@@ -44,9 +44,13 @@ export function CandidateForm() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button className="gap-2" />}>
-        <UserPlus2 className="w-4 h-4" /> Add candidate
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          <Button className="gap-2">
+            <UserPlus2 className="w-4 h-4" /> Add candidate
+          </Button>
+        }
+      />
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <div className="inline-flex items-center gap-2 w-fit px-2.5 py-1 rounded-full bg-(--rs-primary-50) text-(--rs-primary-700) text-[10px] font-bold uppercase tracking-wider mb-1">

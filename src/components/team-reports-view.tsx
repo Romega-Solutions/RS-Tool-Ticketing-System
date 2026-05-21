@@ -1,5 +1,7 @@
 'use client';
 
+/* eslint-disable react-hooks/preserve-manual-memoization, react-hooks/set-state-in-effect */
+
 import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
