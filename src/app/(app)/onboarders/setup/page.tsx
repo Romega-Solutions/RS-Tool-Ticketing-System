@@ -185,23 +185,23 @@ export default async function OnboardingSetupPage() {
             />
             <SetupItem
               n={2}
-              title="Pick the default Onboarding Lead"
-              body={<>Set <code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">DEFAULT_ONBOARDING_LEAD_USER_ID</code> in <code>.env.local</code> and on Vercel.</>}
+              title="Onboarding Lead is set to Erich"
+              body={<>Hardcoded default — every onboarder is created with <strong>Erich</strong> as the Onboarding Lead, and every email is signed by her. Override at runtime by setting <code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">ONBOARDING_LEAD_NAME</code> in env.</>}
             />
             <SetupItem
               n={3}
-              title="Pick the sender Gmail account"
-              body="The four MVP workflows send from a single Gmail account in n8n. Link the Gmail OAuth credential in n8n before importing the workflows."
+              title="Deploy the 4 MVP n8n workflows"
+              body={<>Already pushed via <code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">scripts/deploy-onboarding-workflows.py</code>. Webhook URLs are auto-recorded in <code>.env</code>. Run with <code>--update</code> after editing a workflow JSON.</>}
             />
             <SetupItem
               n={4}
-              title="Import the 4 MVP n8n workflows"
-              body={<>Import the JSON workflows under <code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">n8n/</code> and copy each webhook URL into the matching <code>N8N_*_URL</code> env var (table below).</>}
+              title="Wire up Gmail credentials in n8n"
+              body={<>Each of the 4 workflows has a <strong>Send Gmail</strong> node with a placeholder credential ID. Open each workflow in n8n → click the Gmail node → set its credential to a real Gmail OAuth account (recommended: <code>onboarding@romega-solutions.com</code>) → save. Workflows are already active — they&apos;ll start sending immediately once the credential is set.</>}
             />
             <SetupItem
               n={5}
-              title="Smoke test end-to-end"
-              body="Create a test onboarder → advance to background_check → click Send BG-check email → confirm email arrives + onboarder_history records it."
+              title="Smoke test each workflow"
+              body={<>In the <strong>Workflow registry</strong> below, click <strong>Test</strong> next to each row, enter your inbox, and confirm the email arrives. Test fires a synthetic payload — no onboarder rows are modified.</>}
             />
             <SetupItem
               n={6}

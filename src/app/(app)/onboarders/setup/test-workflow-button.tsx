@@ -108,13 +108,20 @@ export function TestWorkflowButton({
           {result && (
             <div className={
               result.ok
-                ? 'flex items-start gap-2 rounded-lg border border-green-100 bg-green-50 p-3 text-sm text-green-800'
-                : 'flex items-start gap-2 rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-800'
+                ? 'rounded-lg border border-green-100 bg-green-50 p-3 text-sm text-green-800'
+                : 'rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-800'
             }>
-              {result.ok
-                ? <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
-                : <AlertCircle  className="w-4 h-4 mt-0.5 shrink-0" />}
-              <span>{result.ok ? result.message : result.error}</span>
+              <div className="flex items-start gap-2">
+                {result.ok
+                  ? <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+                  : <AlertCircle  className="w-4 h-4 mt-0.5 shrink-0" />}
+                <span>{result.ok ? result.message : result.error}</span>
+              </div>
+              {result.ok && (
+                <p className="mt-2 text-xs text-green-700/80 pl-6">
+                  No email after a minute? The Gmail node on this workflow probably still has the placeholder credential. Open the workflow in n8n → click <strong>Send Gmail</strong> → set the credential → re-test.
+                </p>
+              )}
             </div>
           )}
         </div>
