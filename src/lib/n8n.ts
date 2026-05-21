@@ -180,6 +180,104 @@ export async function notifyRecruiterOfApplication(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Onboarding webhooks — drives the four MVP n8n workflows that send the SOP
+// emails (BG-check ask, reference request, employment verification, welcome).
+// Same fire-and-forget-but-recorded pattern as the candidate communication
+// pipeline above. Each template resolves to its own env var so individual
+// workflows can be deployed independently.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type OnboardingTemplate =
+  | 'bg-check-initiate'
+  | 'reference-request'
+  | 'employment-verification'
+  | 'welcome'
+  // Post-MVP — left in the type so action layer doesn't need to be
+  // re-edited when the workflows ship:
+  | 'gmail-signature-nudge'
+  | 'group-chat-announce'
+  | 'sow-reminder'
+  | '30-day-checkin'
+  | '90-day-review';
+
+export type OnboardingEvent = {
+  onboarderId: number;
+  template:    OnboardingTemplate;
+  event:       'status_changed' | 'manual_send' | 'scheduled_sweep';
+  // Free-form context substituted into the template by n8n. The MVP uses
+  // these keys: onboarder_type, full_name, first_name, role_title, team,
+  // start_date, direct_supervisor, onboarding_lead, chief_of_staff,
+  // referee_id, referee_name, referee_email, verification_id, hr_email.
+  context?:    Record<string, unknown>;
+};
+
+export type OnboardingResult =
+  | { ok: true;  template?: string }
+  | { ok: false; error: string };
+
+const ONBOARDING_TEMPLATE_ENV: Record<OnboardingTemplate, string> = {
+  'bg-check-initiate':       'N8N_BG_CHECK_INITIATE_URL',
+  'reference-request':       'N8N_REFERENCE_REQUEST_URL',
+  'employment-verification': 'N8N_EMPLOYMENT_VERIFICATION_URL',
+  'welcome':                 'N8N_ONBOARDING_WELCOME_URL',
+  // Post-MVP envs — declared so the helper stays exhaustive; resolution
+  // falls back to null and the caller records `email_failed` in history.
+  'gmail-signature-nudge':   'N8N_GMAIL_SIGNATURE_NUDGE_URL',
+  'group-chat-announce':     'N8N_GROUP_CHAT_ANNOUNCE_URL',
+  'sow-reminder':            'N8N_SOW_REMINDER_URL',
+  '30-day-checkin':          'N8N_30DAY_CHECKIN_URL',
+  '90-day-review':           'N8N_90DAY_REVIEW_URL',
+};
+
+export function getOnboardingWebhookUrl(template: OnboardingTemplate): string | null {
+  const key = ONBOARDING_TEMPLATE_ENV[template];
+  return process.env[key]?.trim() || null;
+}
+
+/**
+ * Fire an n8n onboarding workflow. Mirrors notifyCommunicationWebhook above:
+ *   - returns a typed result (never throws)
+ *   - 8s ceiling so a wedged workflow doesn't stall the lead's UI
+ *   - missing env var ⇒ ok:false with a clear error (caller writes to history)
+ */
+export async function notifyOnboardingWebhook(
+  event: OnboardingEvent,
+): Promise<OnboardingResult> {
+  const url = getOnboardingWebhookUrl(event.template);
+  if (!url) {
+    return { ok: false, error: `${ONBOARDING_TEMPLATE_ENV[event.template]} is not configured` };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+
+  try {
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(event),
+      signal:  controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      return { ok: false, error: `n8n responded ${res.status}` };
+    }
+
+    let payload: unknown = null;
+    try { payload = await res.json(); } catch { /* empty body is OK */ }
+    const template = (payload as { template?: unknown })?.template;
+    return { ok: true, template: typeof template === 'string' ? template : event.template };
+  } catch (err) {
+    clearTimeout(timer);
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'network error',
+    };
+  }
+}
+
 export async function parseResumeWithN8n(
   file: File,
   candidateId?: string | number,

@@ -1,10 +1,11 @@
-// Thin wrapper around Supabase Storage for the candidate resume bucket.
-// All callers use the admin client (server-side only) — public URLs are
-// always signed, never exposed directly.
+// Thin wrapper around Supabase Storage for the candidate resume bucket and
+// the onboarder documents bucket. All callers use the admin client
+// (server-side only) — public URLs are always signed, never exposed directly.
 
 import { createAdminClient } from '@/lib/supabase/admin';
 
-const BUCKET = process.env.SUPABASE_RESUMES_BUCKET ?? 'candidate-resumes';
+const BUCKET           = process.env.SUPABASE_RESUMES_BUCKET   ?? 'candidate-resumes';
+const ONBOARDER_BUCKET = process.env.SUPABASE_ONBOARDER_BUCKET ?? 'onboarder-docs';
 
 // 1y — long enough that the signed URL doesn't expire mid-pipeline. Recruiters
 // who want to share externally should re-sign just before sharing.
@@ -66,6 +67,86 @@ export async function refreshResumeSignedUrl(path: string): Promise<string> {
     .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
   if (error || !data) {
     throw new Error(`Resume re-sign failed: ${error?.message ?? 'unknown'}`);
+  }
+  return data.signedUrl;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Onboarder documents — gov IDs, NBI, W-8, contracts, reference responses,
+// employment verifications. Bucket is PRIVATE; we always hand back a signed
+// URL plus the bucket-relative path (persisted to onboarder_documents).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type OnboarderDocumentKind =
+  | 'sow' | 'w8' | 'nda' | 'contract' | 'gov_id' | 'nbi'
+  | 'reference_response' | 'employment_verification' | 'other';
+
+export type OnboarderUpload = {
+  path:      string;
+  signedUrl: string;
+  mimeType:  string;
+  sizeBytes: number;
+};
+
+function extensionFor(name: string, mime: string): string {
+  const dot = name.lastIndexOf('.');
+  if (dot > -1 && dot < name.length - 1) {
+    return name.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
+  }
+  if (mime === 'application/pdf') return 'pdf';
+  if (mime.startsWith('image/'))  return mime.slice(6).replace('jpeg', 'jpg');
+  return 'bin';
+}
+
+/**
+ * Upload an onboarder document and return a long-lived signed URL. Caller is
+ * responsible for inserting the matching onboarder_documents row.
+ */
+export async function uploadOnboarderDocument(args: {
+  onboarderId: number;
+  kind:        OnboarderDocumentKind;
+  file:        File;
+  label?:      string | null;
+}): Promise<OnboarderUpload> {
+  const ext = extensionFor(args.file.name, args.file.type);
+  const slug = slugify(args.label?.trim() || args.file.name.replace(/\.[^.]+$/, '') || args.kind);
+  const stamp = new Date().toISOString().slice(0, 10);
+  const path = `onboarders/${args.onboarderId}/${args.kind}/${slug}-${stamp}.${ext}`;
+
+  const admin = createAdminClient();
+  const bytes = new Uint8Array(await args.file.arrayBuffer());
+
+  const { error: uploadError } = await admin.storage.from(ONBOARDER_BUCKET).upload(path, bytes, {
+    contentType: args.file.type || 'application/octet-stream',
+    upsert: true,
+  });
+  if (uploadError) {
+    throw new Error(`Onboarder document upload failed: ${uploadError.message}`);
+  }
+
+  const { data: signed, error: signError } = await admin.storage
+    .from(ONBOARDER_BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+  if (signError || !signed) {
+    throw new Error(`Onboarder document signing failed: ${signError?.message ?? 'unknown'}`);
+  }
+
+  return {
+    path,
+    signedUrl: signed.signedUrl,
+    mimeType:  args.file.type || 'application/octet-stream',
+    sizeBytes: args.file.size,
+  };
+}
+
+/** Re-sign an onboarder document — used when an old signed URL has expired. */
+export async function refreshOnboarderSignedUrl(path: string): Promise<string> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.storage
+    .from(ONBOARDER_BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+  if (error || !data) {
+    throw new Error(`Onboarder document re-sign failed: ${error?.message ?? 'unknown'}`);
   }
   return data.signedUrl;
 }

@@ -19,7 +19,7 @@ const navItems = [
   { href: "/attendance",        label: "Attendance",           icon: Calendar,        category: "reports"   },
   { href: "/sales/leads",            label: "Sales / Leads",       icon: Users2,        category: "leadTools" },
   { href: "/recruiting/candidates",  label: "Applicant Tracking System", icon: UserPlus2, category: "leadTools" },
-  { href: "/onboarders",             label: "Onboarding",           icon: GraduationCap, category: "leadTools" },
+  { href: "/onboarders",             label: "Internal Onboarding",  icon: GraduationCap, category: "leadTools" },
   { href: "/pm/status-drafter",      label: "PM / Status Drafter", icon: ClipboardList, category: "leadTools" },
   { href: "/ceo/briefing",           label: "CEO / Briefing",      icon: Sun,           category: "leadTools" },
   { href: "/marketing/content",      label: "Marketing / Content", icon: Wand2,         category: "leadTools" },
