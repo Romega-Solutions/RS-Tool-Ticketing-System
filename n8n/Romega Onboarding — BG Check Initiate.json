@@ -1,0 +1,65 @@
+{
+  "name": "Romega Onboarding — BG Check Initiate",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "onb-bg-check-initiate",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 304],
+      "webhookId": "onb-bg-check-initiate"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the SOP §3 background-check request email.\n// Inbound payload (from Next.js fireOnboardingTemplate):\n//   { onboarderId, template:'bg-check-initiate', event, context: {\n//     full_name, first_name, personal_email, role_title, onboarding_lead\n//   } }\n\nconst body = $input.first().json;\nconst ctx  = body.context || {};\nconst firstName     = ctx.first_name      || (ctx.full_name || 'there').split(' ')[0];\nconst toEmail       = ctx.personal_email  || body.to;\nconst onboardingLead = ctx.onboarding_lead || 'Erich';\nconst roleTitle     = ctx.role_title      || '';\n\nif (!toEmail) {\n  throw new Error('No personal_email on context — cannot send BG-check email');\n}\n\nconst subject = 'Employment Verification and Reference Check | Romega Solutions';\nconst body_ = `Hi ${firstName}!\n\nCongratulations on your offer${roleTitle ? ` for the ${roleTitle} role` : ''}! To complete our pre-onboarding process, please send the following information within 48 business hours:\n\n1) PROFESSIONAL CHARACTER REFERENCES (3 required)\nWho to provide:\n  • Former immediate supervisor (preferred)\n  • Work colleague or cross-functional partner\n  • For students or recent graduates: professor or instructor\n\nWhat to include for each referee:\n  • Full name\n  • Role and company or institution\n  • Relationship to you and dates worked or studied together\n  • Email address\n  • Mobile number and best time to contact\n\n2) EMPLOYMENT VERIFICATION CONTACTS\nPlease provide the official HR department contact for each previous employer:\n  • Company\n  • HR contact email\n  • HR contact phone\n  • Best time to contact\n\nPlease ask each referee for permission before sharing their details with Romega. Let them know we may contact them by email or SMS.\n\nOur process:\n  1. After we receive your referee list, we will notify them by email and SMS within 24 business hours.\n  2. Each referee will have 48 business hours to complete the reference form.\n  3. We will keep you updated on progress and any follow-ups needed.\n\nWe will contact HR for factual verification and your references for performance feedback separately. If a referee becomes unavailable, kindly send an alternate so we can stay on track.\n\nCheers,\n${onboardingLead}\nOnboarding Lead, Romega Solutions`;\n\nreturn [{ json: { to: toEmail, subject, body: body_, onboarderId: body.onboarderId, template: 'bg-check-initiate' } }];"
+      },
+      "id": "node-build-email",
+      "name": "Build Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 304]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node-send-gmail",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [720, 304],
+      "credentials": { "gmailOAuth2": { "id": "REPLACE_ME", "name": "Gmail — Onboarding" } }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, template: $('Build Email').first().json.template, onboarderId: $('Build Email').first().json.onboarderId, sentTo: $('Build Email').first().json.to } }}"
+      },
+      "id": "node-respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [960, 304]
+    }
+  ],
+  "connections": {
+    "Webhook":     { "main": [[{ "node": "Build Email", "type": "main", "index": 0 }]] },
+    "Build Email": { "main": [[{ "node": "Send Gmail",  "type": "main", "index": 0 }]] },
+    "Send Gmail":  { "main": [[{ "node": "Respond OK",  "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "onb-bg-check-initiate-v1",
+  "meta": {
+    "description": "SOP §3 — sends the background-check request email (3 character references + employment verification contacts). Triggered by POST /webhook/onb-bg-check-initiate with { onboarderId, template, event, context: { full_name, first_name, personal_email, role_title, onboarding_lead } }. After import, replace `REPLACE_ME` Gmail credential ID with the linked Gmail account (recommended: onboarding@romega-solutions.com), then activate. Env: N8N_BG_CHECK_INITIATE_URL."
+  }
+}

@@ -3,7 +3,21 @@
 import { useState, useTransition } from 'react';
 import {
   GraduationCap, Plus, UserPlus2, Mail, Building2, Upload, ShieldCheck, AlertCircle,
+  ChevronDown,
 } from 'lucide-react';
+
+// Inline style applied to every <option> so colored parent selects (e.g. the
+// status pill) don't bleed background/foreground into the dropdown list.
+const OPTION_STYLE: React.CSSProperties = { backgroundColor: '#ffffff', color: '#0f172a' };
+
+function SelectShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative">
+      {children}
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-(--rs-neutral-grey-400)" />
+    </div>
+  );
+}
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -80,15 +94,17 @@ export function CreateOnboarderForm() {
             <Field id="phone" label="Phone" placeholder="+63 917 555 1234" />
             <div className="space-y-1.5">
               <Label htmlFor="onboarderType" className="text-(--rs-neutral-grey-700) font-medium">Type *</Label>
-              <select
-                id="onboarderType"
-                name="onboarderType"
-                defaultValue="contractor"
-                className="flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100)"
-              >
-                <option value="contractor">Independent contractor</option>
-                <option value="intern">Intern</option>
-              </select>
+              <SelectShell>
+                <select
+                  id="onboarderType"
+                  name="onboarderType"
+                  defaultValue="contractor"
+                  className="appearance-none flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer"
+                >
+                  <option value="contractor" style={OPTION_STYLE}>Independent contractor</option>
+                  <option value="intern"     style={OPTION_STYLE}>Intern</option>
+                </select>
+              </SelectShell>
             </div>
             <Field id="roleTitle" label="Role title" placeholder="Frontend Engineer" />
             <Field id="team" label="Team" placeholder="Engineering" />
@@ -289,16 +305,20 @@ export function UploadDocumentForm({ onboarderId }: { onboarderId: number }) {
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="kind" className="text-(--rs-neutral-grey-700) font-medium">Document type *</Label>
-              <select
-                id="kind"
-                name="kind"
-                required
-                defaultValue=""
-                className="flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100)"
-              >
-                <option value="" disabled>— Select a type —</option>
-                {DOC_KINDS.map(k => <option key={k.value} value={k.value}>{k.label}</option>)}
-              </select>
+              <SelectShell>
+                <select
+                  id="kind"
+                  name="kind"
+                  required
+                  defaultValue=""
+                  className="appearance-none flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer"
+                >
+                  <option value="" disabled style={OPTION_STYLE}>— Select a type —</option>
+                  {DOC_KINDS.map(k => (
+                    <option key={k.value} value={k.value} style={OPTION_STYLE}>{k.label}</option>
+                  ))}
+                </select>
+              </SelectShell>
             </div>
 
             <Field id="label" label="Label (optional)" placeholder="e.g. SSS ID front" />

@@ -19,6 +19,7 @@ import {
 import {
   ALLOWED_STATUSES,
   ALLOWED_TYPES,
+  DEFAULT_ONBOARDING_LEAD,
   type OnboarderStatus,
   type OnboarderType,
 } from './constants';
@@ -155,6 +156,7 @@ export async function createOnboarder(formData: FormData): Promise<void> {
       role_title:        roleTitle,
       team,
       direct_supervisor: directSup,
+      onboarding_lead:   DEFAULT_ONBOARDING_LEAD,
       start_date:        startDate,
       status:            'offer_signed',
       created_by:        session.id,
@@ -169,7 +171,7 @@ export async function createOnboarder(formData: FormData): Promise<void> {
     field:    'created',
     oldValue: null,
     newValue: fullName,
-    summary:  `Created onboarder '${fullName}' (${typeRaw}) at stage 'offer_signed'`,
+    summary:  `Created onboarder '${fullName}' (${typeRaw}) at stage 'offer_signed' — Lead: ${DEFAULT_ONBOARDING_LEAD}`,
   }]);
 
   revalidatePath('/onboarders');
@@ -611,4 +613,82 @@ export async function uploadDocument(
 
 function firstName(full: string): string {
   return (full ?? '').trim().split(/\s+/)[0] ?? '';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test trigger — used by /onboarders/setup to verify each MVP workflow lives.
+// Synthesizes a payload, fires the webhook, and returns the result so the UI
+// can show success or failure. Does NOT write to onboarders / onboarder_history
+// (the onboarderId in the payload is 0 to make this obvious in n8n logs).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const TEST_ELIGIBLE_TEMPLATES: OnboardingTemplate[] = [
+  'bg-check-initiate', 'reference-request', 'employment-verification', 'welcome',
+];
+
+export async function triggerTestWorkflow(args: {
+  template:      string;
+  recipientEmail: string;
+  onboarderType?: 'contractor' | 'intern';
+}): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+  await requireSession();
+
+  const template = args.template as OnboardingTemplate;
+  if (!TEST_ELIGIBLE_TEMPLATES.includes(template)) {
+    return { ok: false, error: `Template '${args.template}' is not test-triggerable from the setup page` };
+  }
+  const recipient = args.recipientEmail?.trim().toLowerCase();
+  if (!recipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
+    return { ok: false, error: 'Provide a valid recipient email' };
+  }
+
+  const type = args.onboarderType === 'intern' ? 'intern' : 'contractor';
+  const fullName = 'Test Onboarder';
+  const sharedContext = {
+    full_name:         fullName,
+    first_name:        'Test',
+    personal_email:    recipient,
+    role_title:        'Frontend Engineer (test)',
+    team:              'Engineering',
+    direct_supervisor: 'Mark Tan',
+    chief_of_staff:    'Chief of Staff',
+    onboarding_lead:   DEFAULT_ONBOARDING_LEAD,
+  };
+
+  let context: Record<string, unknown> = sharedContext;
+  switch (template) {
+    case 'reference-request':
+      context = {
+        ...sharedContext,
+        referee_id:    0,
+        referee_name:  'Test Referee',
+        referee_email: recipient,
+      };
+      break;
+    case 'employment-verification':
+      context = {
+        ...sharedContext,
+        verification_id: 0,
+        company:         'Previous Co (test)',
+        hr_contact_name: 'HR Department',
+        hr_email:        recipient,
+      };
+      break;
+    case 'welcome':
+      context = { ...sharedContext, onboarder_type: type };
+      break;
+    // bg-check-initiate falls through to the sharedContext default.
+  }
+
+  const result = await notifyOnboardingWebhook({
+    onboarderId: 0,
+    template,
+    event:       'manual_send',
+    context,
+  });
+
+  if (result.ok) {
+    return { ok: true, message: `Webhook responded OK. Check ${recipient} for the email.` };
+  }
+  return { ok: false, error: result.error };
 }

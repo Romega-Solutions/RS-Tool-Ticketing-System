@@ -1,0 +1,65 @@
+{
+  "name": "Romega Onboarding — Reference Request",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "onb-reference-request",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 304],
+      "webhookId": "onb-reference-request"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the SOP §4 reference-check email (sent to each referee).\n// Inbound payload (from Next.js fireOnboardingTemplate):\n//   { onboarderId, template:'reference-request', event, context: {\n//     referee_id, referee_name, referee_email,\n//     full_name, role_title, onboarding_lead\n//   } }\n\nconst body = $input.first().json;\nconst ctx  = body.context || {};\nconst refereeName    = ctx.referee_name     || 'there';\nconst refereeEmail   = ctx.referee_email    || body.to;\nconst candidateName  = ctx.full_name        || 'the candidate';\nconst roleTitle      = ctx.role_title       || 'the role';\nconst onboardingLead = ctx.onboarding_lead  || 'Erich';\n\nif (!refereeEmail) {\n  throw new Error('No referee_email on context — cannot send reference request');\n}\n\nconst subject = `Reference Check for ${candidateName} | Romega Solutions`;\nconst body_ = `Hi ${refereeName},\n\n${candidateName} listed you as a reference for the ${roleTitle} role at Romega Solutions and has given permission for us to contact you. We'd be grateful for your feedback.\n\nIf possible, please respond within 48 business hours, as delays may affect the candidate's onboarding application. Your feedback will be kept confidential and used only for hiring purposes.\n\nFile format: please save your responses as a PDF (not Word) and attach it to your reply. PDF helps preserve formatting and reduce accidental edits.\n\nThank you in advance for your help.\n\nCheers,\n${onboardingLead}\nOnboarding Lead, Romega Solutions`;\n\nreturn [{ json: { to: refereeEmail, subject, body: body_, onboarderId: body.onboarderId, refereeId: ctx.referee_id, template: 'reference-request' } }];"
+      },
+      "id": "node-build-email",
+      "name": "Build Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 304]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node-send-gmail",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [720, 304],
+      "credentials": { "gmailOAuth2": { "id": "REPLACE_ME", "name": "Gmail — Onboarding" } }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, template: $('Build Email').first().json.template, onboarderId: $('Build Email').first().json.onboarderId, refereeId: $('Build Email').first().json.refereeId, sentTo: $('Build Email').first().json.to } }}"
+      },
+      "id": "node-respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [960, 304]
+    }
+  ],
+  "connections": {
+    "Webhook":     { "main": [[{ "node": "Build Email", "type": "main", "index": 0 }]] },
+    "Build Email": { "main": [[{ "node": "Send Gmail",  "type": "main", "index": 0 }]] },
+    "Send Gmail":  { "main": [[{ "node": "Respond OK",  "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "onb-reference-request-v1",
+  "meta": {
+    "description": "SOP §4 (character references) — one email per referee asking for confidential PDF feedback. Triggered by POST /webhook/onb-reference-request with { onboarderId, template, event, context: { referee_id, referee_name, referee_email, full_name, role_title, onboarding_lead } }. After import, replace `REPLACE_ME` Gmail credential ID, then activate. Env: N8N_REFERENCE_REQUEST_URL."
+  }
+}

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { ArrowLeft, GraduationCap, UserPlus2, AlertCircle } from 'lucide-react';
+import { ArrowLeft, GraduationCap, UserPlus2, AlertCircle, ChevronDown } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { LeadToolHeader } from '@/components/lead-tool-header';
 import { Button } from '@/components/ui/button';
@@ -41,15 +41,18 @@ export default async function NewOnboarderPage() {
               <Field id="phone"             label="Phone"               placeholder="+63 917 555 1234" />
               <div className="space-y-1.5">
                 <Label htmlFor="onboarderType" className="text-(--rs-neutral-grey-700) font-medium">Type *</Label>
-                <select
-                  id="onboarderType"
-                  name="onboarderType"
-                  defaultValue="contractor"
-                  className="flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100)"
-                >
-                  <option value="contractor">Independent contractor</option>
-                  <option value="intern">Intern</option>
-                </select>
+                <div className="relative">
+                  <select
+                    id="onboarderType"
+                    name="onboarderType"
+                    defaultValue="contractor"
+                    className="appearance-none flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer"
+                  >
+                    <option value="contractor" style={{ backgroundColor: '#fff', color: '#0f172a' }}>Independent contractor</option>
+                    <option value="intern"     style={{ backgroundColor: '#fff', color: '#0f172a' }}>Intern</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-(--rs-neutral-grey-400)" />
+                </div>
               </div>
               <Field id="roleTitle"         label="Role title"          placeholder="Frontend Engineer" />
               <Field id="team"              label="Team"                placeholder="Engineering" />

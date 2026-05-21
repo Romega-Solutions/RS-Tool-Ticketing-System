@@ -17,3 +17,9 @@ export type OnboarderStatus = typeof ALLOWED_STATUSES[number];
 
 export const ALLOWED_TYPES = ['contractor', 'intern'] as const;
 export type OnboarderType = typeof ALLOWED_TYPES[number];
+
+// Onboarding Lead is always Erich until HR confirms otherwise.
+// Override at runtime by setting ONBOARDING_LEAD_NAME in env.
+export const DEFAULT_ONBOARDING_LEAD = (
+  process.env.ONBOARDING_LEAD_NAME?.trim() || 'Erich'
+);

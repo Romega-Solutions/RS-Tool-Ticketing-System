@@ -33,6 +33,11 @@ export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string
   void team;
   // Temporary testing mode: expose all lead tools to any authenticated user.
   // Keep destructive actions behind explicit typed confirmation in the tool UI.
+  //
+  // NOTE on /onboarders: the Onboarding Lead (Erich) MUST keep access when
+  // proper RBAC is restored. The commented allowlist below already covers
+  // her — 'hr', 'human resources', and 'people' are included so any HR-
+  // adjacent team_name on her user row will pass.
   return true;
 
   /*
@@ -43,7 +48,11 @@ export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string
     sales: ['sales', 'sales & account management'],
     marketing: ['marketing', 'marketing & brand content', 'hr/marketing'],
     recruiting: ['recruiting', 'talent acquisition', 'people operations', 'operations', 'hr/marketing', 'marketing & brand content'],
-    onboarding: ['recruiting', 'talent acquisition', 'people operations', 'operations', 'hr/marketing', 'executive', 'executive & admin', 'admin'],
+    onboarding: [
+      'recruiting', 'talent acquisition', 'people operations', 'operations',
+      'hr', 'human resources', 'people', 'hr/marketing',
+      'executive', 'executive & admin', 'admin',
+    ],
   };
   if (role === 'admin') return true;
   if (role !== 'lead') return false;

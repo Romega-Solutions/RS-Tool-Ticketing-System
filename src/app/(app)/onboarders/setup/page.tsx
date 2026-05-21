@@ -8,14 +8,16 @@ import { Card, CardContent } from '@/components/ui/card';
 import { LeadToolHeader } from '@/components/lead-tool-header';
 import { getSession } from '@/lib/session';
 import { canAccessLeadTool } from '@/lib/rbac';
+import { TestWorkflowButton } from './test-workflow-button';
 
 type WorkflowEntry = {
-  envKey:  string;
-  label:   string;
-  purpose: string;
-  stage:   string;
-  icon:    typeof Workflow;
-  phase:   'mvp' | 'post-mvp';
+  envKey:    string;
+  label:     string;
+  purpose:   string;
+  stage:     string;
+  icon:      typeof Workflow;
+  phase:     'mvp' | 'post-mvp';
+  template?: string;   // template name passed to the test-trigger action
 };
 
 function isConfigured(envKey: string): boolean {
@@ -24,36 +26,40 @@ function isConfigured(envKey: string): boolean {
 
 const WORKFLOWS: WorkflowEntry[] = [
   {
-    envKey:  'N8N_BG_CHECK_INITIATE_URL',
-    label:   'Background Check Initiate',
-    purpose: 'SOP §3 — Emails the new hire the request for 3 character references + employment verification contacts.',
-    stage:   'background_check',
-    icon:    IdCard,
-    phase:   'mvp',
+    envKey:   'N8N_BG_CHECK_INITIATE_URL',
+    label:    'Background Check Initiate',
+    purpose:  'SOP §3 — Emails the new hire the request for 3 character references + employment verification contacts.',
+    stage:    'background_check',
+    icon:     IdCard,
+    phase:    'mvp',
+    template: 'bg-check-initiate',
   },
   {
-    envKey:  'N8N_REFERENCE_REQUEST_URL',
-    label:   'Reference Request',
-    purpose: 'SOP §4 — One email per referee asking for a confidential PDF response within 48h.',
-    stage:   'background_check',
-    icon:    Mail,
-    phase:   'mvp',
+    envKey:   'N8N_REFERENCE_REQUEST_URL',
+    label:    'Reference Request',
+    purpose:  'SOP §4 — One email per referee asking for a confidential PDF response within 48h.',
+    stage:    'background_check',
+    icon:     Mail,
+    phase:    'mvp',
+    template: 'reference-request',
   },
   {
-    envKey:  'N8N_EMPLOYMENT_VERIFICATION_URL',
-    label:   'Employment Verification',
-    purpose: 'SOP §4 — One email per prior-HR contact for factual employment verification.',
-    stage:   'background_check',
-    icon:    Mail,
-    phase:   'mvp',
+    envKey:   'N8N_EMPLOYMENT_VERIFICATION_URL',
+    label:    'Employment Verification',
+    purpose:  'SOP §4 — One email per prior-HR contact for factual employment verification.',
+    stage:    'background_check',
+    icon:     Mail,
+    phase:    'mvp',
+    template: 'employment-verification',
   },
   {
-    envKey:  'N8N_ONBOARDING_WELCOME_URL',
-    label:   'Welcome Email (contractor / intern)',
-    purpose: 'SOP §5 — Branches on onboarder_type. Includes Teams + onboarding form + W-8 instructions.',
-    stage:   'pre_onboarding',
-    icon:    FileSignature,
-    phase:   'mvp',
+    envKey:   'N8N_ONBOARDING_WELCOME_URL',
+    label:    'Welcome Email (contractor / intern)',
+    purpose:  'SOP §5 — Branches on onboarder_type. Includes Teams + onboarding form + W-8 instructions.',
+    stage:    'pre_onboarding',
+    icon:     FileSignature,
+    phase:    'mvp',
+    template: 'welcome',
   },
   {
     envKey:  'N8N_GMAIL_SIGNATURE_NUDGE_URL',
@@ -254,6 +260,7 @@ export default async function OnboardingSetupPage() {
                   <th className="px-4 py-3 font-semibold">Phase</th>
                   <th className="px-4 py-3 font-semibold">Env key</th>
                   <th className="px-4 py-3 font-semibold">Status</th>
+                  <th className="px-4 py-3 font-semibold text-right">Test</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-(--rs-neutral-grey-100)">
@@ -300,6 +307,13 @@ export default async function OnboardingSetupPage() {
                           <span className="inline-flex items-center gap-1 rounded-full bg-(--rs-neutral-grey-50) px-2 py-0.5 text-[11px] font-semibold text-(--rs-neutral-grey-600) border border-(--rs-neutral-grey-200)">
                             Not set
                           </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap text-right">
+                        {w.template ? (
+                          <TestWorkflowButton template={w.template} label={w.label} configured={configured} />
+                        ) : (
+                          <span className="text-[10px] text-(--rs-neutral-grey-400)">—</span>
                         )}
                       </td>
                     </tr>

@@ -1,0 +1,65 @@
+{
+  "name": "Romega Onboarding — Welcome",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "onb-welcome",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 304],
+      "webhookId": "onb-welcome"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the SOP §5 welcome email — branches on onboarder_type.\n// Inbound payload (from Next.js fireOnboardingTemplate):\n//   { onboarderId, template:'welcome', event, context: {\n//     onboarder_type ('contractor'|'intern'), full_name, first_name, personal_email,\n//     role_title, onboarding_lead, chief_of_staff, direct_supervisor\n//   } }\n\nconst body = $input.first().json;\nconst ctx  = body.context || {};\nconst type             = ctx.onboarder_type   || 'contractor';\nconst toEmail          = ctx.personal_email   || body.to;\nconst firstName        = ctx.first_name       || (ctx.full_name || 'there').split(' ')[0];\nconst onboardingLead   = ctx.onboarding_lead  || 'Erich';\nconst chiefOfStaff     = ctx.chief_of_staff   || 'the Chief of Staff';\nconst directSupervisor = ctx.direct_supervisor|| 'your Direct Supervisor';\n\nif (!toEmail) {\n  throw new Error('No personal_email on context — cannot send welcome email');\n}\n\nconst subject = 'Welcome to the Team — Onboarding Information';\n\nlet body_;\nif (type === 'intern') {\n  body_ = `Hi ${firstName},\n\nWe're excited to have you on board. Welcome to the team! Here are your next steps to get started:\n\n1. DOWNLOAD MICROSOFT TEAMS\n   Please download the MS Teams app so we can add you to our group chat.\n\n2. ADD US ON TEAMS\n   Once installed, kindly add the following contacts:\n     • ${chiefOfStaff} — Chief of Staff\n     • ${onboardingLead} — Onboarding Lead\n     • ${directSupervisor} — Direct Supervisor\n\n3. Send us a quick message once you're connected so we can initiate your onboarding process.\n\n4. COMPLETE THE INTERN ONBOARDING FORM\n   We'll share the link with you once you message us on Teams.\n\nOnce you've downloaded Teams, we'll move forward with setting up your email account. If you have any questions, feel free to reach out.\n\nLooking forward to working with you!\n\nBest regards,\n${onboardingLead}\nOnboarding Lead, Romega Solutions`;\n} else {\n  body_ = `Hi ${firstName},\n\nWe're thrilled to have you join the team. Welcome aboard! To kick off your onboarding, here are the next steps:\n\n1. DOWNLOAD MICROSOFT TEAMS\n   Please install the Microsoft Teams app (desktop or mobile) so we can add you to our group chat and begin team communications.\n\n2. ADD US ON TEAMS\n   Once installed, kindly add the following contacts:\n     • ${chiefOfStaff} — Chief of Staff\n     • ${onboardingLead} — Onboarding Lead\n     • ${directSupervisor} — Direct Supervisor\n\n   Once you've added us, send a quick message so we can begin your onboarding process.\n\n3. FILL OUT THE ONBOARDING FORM\n   We'll share the link with you once you message us on Teams.\n\n4. W-8 FORM (FOR COMPLIANCE)\n   We'll attach two files when we share the onboarding form: a blank W-8 form and a sample filled form for reference. Please review the sample carefully, fill out the required sections, and upload the completed W-8 through the onboarding form.\n\nIf anything is unclear or you need assistance, feel free to reach out. Looking forward to working with you!\n\nBest regards,\n${onboardingLead}\nOnboarding Lead, Romega Solutions`;\n}\n\nreturn [{ json: { to: toEmail, subject, body: body_, onboarderId: body.onboarderId, template: 'welcome', onboarderType: type } }];"
+      },
+      "id": "node-build-email",
+      "name": "Build Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 304]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node-send-gmail",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [720, 304],
+      "credentials": { "gmailOAuth2": { "id": "REPLACE_ME", "name": "Gmail — Onboarding" } }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, template: $('Build Email').first().json.template, onboarderId: $('Build Email').first().json.onboarderId, onboarderType: $('Build Email').first().json.onboarderType, sentTo: $('Build Email').first().json.to } }}"
+      },
+      "id": "node-respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [960, 304]
+    }
+  ],
+  "connections": {
+    "Webhook":     { "main": [[{ "node": "Build Email", "type": "main", "index": 0 }]] },
+    "Build Email": { "main": [[{ "node": "Send Gmail",  "type": "main", "index": 0 }]] },
+    "Send Gmail":  { "main": [[{ "node": "Respond OK",  "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "onb-welcome-v1",
+  "meta": {
+    "description": "SOP §5 — welcome email, branches on context.onboarder_type ('contractor'|'intern'). Triggered by POST /webhook/onb-welcome with { onboarderId, template, event, context: { onboarder_type, full_name, first_name, personal_email, role_title, onboarding_lead, chief_of_staff, direct_supervisor } }. After import, replace `REPLACE_ME` Gmail credential ID, then activate. Env: N8N_ONBOARDING_WELCOME_URL."
+  }
+}
