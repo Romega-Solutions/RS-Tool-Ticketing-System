@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession, type SessionUser } from '@/lib/session';
 import { canAccessLeadTool } from '@/lib/rbac';
 import { toProperName, formatPhoneNumber } from '@/lib/format';
+import { APP_DEPARTMENTS } from '@/lib/orgchart';
 import {
   uploadOnboarderDocument,
   type OnboarderDocumentKind,
@@ -125,6 +126,8 @@ async function fireOnboardingTemplate(
 // Create / delete onboarder
 // ─────────────────────────────────────────────────────────────────────────────
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export async function createOnboarder(formData: FormData): Promise<void> {
   const session = await requireSession();
 
@@ -133,16 +136,36 @@ export async function createOnboarder(formData: FormData): Promise<void> {
   const phoneRaw      = String(formData.get('phone')            ?? '').trim() || null;
   const typeRaw       = String(formData.get('onboarderType')    ?? 'contractor');
   const roleTitle     = String(formData.get('roleTitle')        ?? '').trim() || null;
-  const team          = String(formData.get('team')             ?? '').trim() || null;
+  const teamRaw       = String(formData.get('team')             ?? '').trim();
   const directSup     = String(formData.get('directSupervisor') ?? '').trim() || null;
   const startDateRaw  = String(formData.get('startDate')        ?? '').trim() || null;
 
-  if (!fullNameRaw)      throw new Error('Full name is required');
-  if (!personalEmail)    throw new Error('Personal email is required');
-  if (!isType(typeRaw))  throw new Error('Invalid onboarder type');
+  // ── Guardrails ─────────────────────────────────────────────────────────
+  if (!fullNameRaw || fullNameRaw.length < 2) {
+    throw new Error('Full name is required (min 2 characters)');
+  }
+  if (!personalEmail) {
+    throw new Error('Personal email is required');
+  }
+  if (!EMAIL_RE.test(personalEmail)) {
+    throw new Error('Enter a valid personal email address');
+  }
+  if (!isType(typeRaw)) {
+    throw new Error('Pick a valid type (contractor or intern)');
+  }
+  if (!teamRaw) {
+    throw new Error('Department is required');
+  }
+  if (!(APP_DEPARTMENTS as readonly string[]).includes(teamRaw)) {
+    throw new Error(`Department '${teamRaw}' is not on the org chart. Pick from the dropdown.`);
+  }
+  if (startDateRaw && !/^\d{4}-\d{2}-\d{2}$/.test(startDateRaw)) {
+    throw new Error('Start date must be a valid YYYY-MM-DD');
+  }
 
-  const fullName = toProperName(fullNameRaw);
-  const phone    = phoneRaw ? formatPhoneNumber(phoneRaw) : null;
+  const fullName  = toProperName(fullNameRaw);
+  const phone     = phoneRaw ? formatPhoneNumber(phoneRaw) : null;
+  const team      = teamRaw;
   const startDate = startDateRaw && /^\d{4}-\d{2}-\d{2}$/.test(startDateRaw) ? startDateRaw : null;
 
   const supabase = createAdminClient();

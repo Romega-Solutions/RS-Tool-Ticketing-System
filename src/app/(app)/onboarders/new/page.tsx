@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getSession } from '@/lib/session';
 import { canAccessLeadTool } from '@/lib/rbac';
+import { APP_DEPARTMENTS } from '@/lib/orgchart';
 import { createOnboarder } from '../actions';
 
 export default async function NewOnboarderPage() {
@@ -36,7 +37,7 @@ export default async function NewOnboarderPage() {
         <CardContent className="p-6">
           <form action={createOnboarder} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
-              <Field id="fullName"          label="Full name *"         required placeholder="Juan Dela Cruz" />
+              <Field id="fullName"          label="Full name *"         required minLength={2} placeholder="Juan Dela Cruz" />
               <Field id="personalEmail"     label="Personal email *"    required type="email" placeholder="juan@example.com" />
               <Field id="phone"             label="Phone"               placeholder="+63 917 555 1234" />
               <div className="space-y-1.5">
@@ -45,6 +46,7 @@ export default async function NewOnboarderPage() {
                   <select
                     id="onboarderType"
                     name="onboarderType"
+                    required
                     defaultValue="contractor"
                     className="appearance-none flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer"
                   >
@@ -55,7 +57,29 @@ export default async function NewOnboarderPage() {
                 </div>
               </div>
               <Field id="roleTitle"         label="Role title"          placeholder="Frontend Engineer" />
-              <Field id="team"              label="Team"                placeholder="Engineering" />
+
+              <div className="space-y-1.5">
+                <Label htmlFor="team" className="text-(--rs-neutral-grey-700) font-medium">Department *</Label>
+                <div className="relative">
+                  <select
+                    id="team"
+                    name="team"
+                    required
+                    defaultValue=""
+                    className="appearance-none flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer"
+                  >
+                    <option value="" disabled style={{ backgroundColor: '#fff', color: '#0f172a' }}>— Select department —</option>
+                    {APP_DEPARTMENTS.map(d => (
+                      <option key={d} value={d} style={{ backgroundColor: '#fff', color: '#0f172a' }}>{d}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-(--rs-neutral-grey-400)" />
+                </div>
+                <p className="text-[11px] text-(--rs-neutral-grey-500)">
+                  Must match a department on the org chart. Required so reports can group by team.
+                </p>
+              </div>
+
               <Field id="directSupervisor"  label="Direct supervisor"   placeholder="Mark Tan" />
               <Field id="startDate"         label="Start date"          type="date" />
             </div>
@@ -91,13 +115,14 @@ export default async function NewOnboarderPage() {
 }
 
 function Field({
-  id, label, type = 'text', required, placeholder,
+  id, label, type = 'text', required, placeholder, minLength,
 }: {
   id: string;
   label: string;
   type?: string;
   required?: boolean;
   placeholder?: string;
+  minLength?: number;
 }) {
   return (
     <div className="space-y-1.5">
@@ -107,6 +132,7 @@ function Field({
         name={id}
         type={type}
         required={required}
+        minLength={minLength}
         placeholder={placeholder}
         className="h-11 rounded-xl border-(--rs-neutral-grey-200) focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100)"
       />

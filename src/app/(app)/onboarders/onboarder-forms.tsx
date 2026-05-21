@@ -10,11 +10,11 @@ import {
 // status pill) don't bleed background/foreground into the dropdown list.
 const OPTION_STYLE: React.CSSProperties = { backgroundColor: '#ffffff', color: '#0f172a' };
 
-function SelectShell({ children }: { children: React.ReactNode }) {
+function SelectShell({ children, error = false }: { children: React.ReactNode; error?: boolean }) {
   return (
     <div className="relative">
       {children}
-      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-(--rs-neutral-grey-400)" />
+      <ChevronDown className={`pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 ${error ? 'text-red-400' : 'text-(--rs-neutral-grey-400)'}`} />
     </div>
   );
 }
@@ -53,13 +53,50 @@ const DOC_KINDS = [
 // Create onboarder (top-bar button on /onboarders list)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function CreateOnboarderForm() {
-  const [open, setOpen]     = useState(false);
-  const [isPending, start]  = useTransition();
-  const [error, setError]   = useState<string | null>(null);
+type FieldErrors = Partial<Record<
+  'fullName' | 'personalEmail' | 'onboarderType' | 'team' | 'startDate', string
+>>;
+
+function validateCreate(fd: FormData): FieldErrors {
+  const errors: FieldErrors = {};
+  const name  = String(fd.get('fullName') ?? '').trim();
+  const email = String(fd.get('personalEmail') ?? '').trim();
+  const type  = String(fd.get('onboarderType') ?? '');
+  const team  = String(fd.get('team') ?? '').trim();
+  const start = String(fd.get('startDate') ?? '').trim();
+
+  if (!name || name.length < 2) {
+    errors.fullName = 'Full name is required (min 2 characters)';
+  }
+  if (!email) {
+    errors.personalEmail = 'Personal email is required';
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errors.personalEmail = 'Enter a valid email address';
+  }
+  if (type !== 'contractor' && type !== 'intern') {
+    errors.onboarderType = 'Pick contractor or intern';
+  }
+  if (!team) {
+    errors.team = 'Department is required';
+  }
+  if (start && !/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+    errors.startDate = 'Use the date picker (YYYY-MM-DD)';
+  }
+  return errors;
+}
+
+export function CreateOnboarderForm({ departments }: { departments: string[] }) {
+  const [open, setOpen]      = useState(false);
+  const [isPending, start]   = useTransition();
+  const [error, setError]    = useState<string | null>(null);
+  const [fieldErrors, setFE] = useState<FieldErrors>({});
 
   async function onSubmit(formData: FormData) {
     setError(null);
+    const errs = validateCreate(formData);
+    setFE(errs);
+    if (Object.keys(errs).length > 0) return;
+
     start(async () => {
       try {
         await createOnboarder(formData);   // redirects to /onboarders/[id]
@@ -71,7 +108,7 @@ export function CreateOnboarderForm() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setFE({}); setError(null); } }}>
       <DialogTrigger render={<Button className="gap-2" />}>
         <UserPlus2 className="w-4 h-4" /> New onboarder
       </DialogTrigger>
@@ -87,29 +124,51 @@ export function CreateOnboarderForm() {
           </DialogDescription>
         </DialogHeader>
 
-        <form action={onSubmit} className="space-y-5">
+        <form action={onSubmit} noValidate className="space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
-            <Field id="fullName" label="Full name *" required placeholder="Juan Dela Cruz" />
-            <Field id="personalEmail" label="Personal email *" type="email" required placeholder="juan@example.com" />
-            <Field id="phone" label="Phone" placeholder="+63 917 555 1234" />
+            <Field id="fullName"      label="Full name *"      required placeholder="Juan Dela Cruz" error={fieldErrors.fullName} />
+            <Field id="personalEmail" label="Personal email *" required type="email" placeholder="juan@example.com" error={fieldErrors.personalEmail} />
+            <Field id="phone"         label="Phone"            placeholder="+63 917 555 1234" />
+
             <div className="space-y-1.5">
               <Label htmlFor="onboarderType" className="text-(--rs-neutral-grey-700) font-medium">Type *</Label>
-              <SelectShell>
+              <SelectShell error={!!fieldErrors.onboarderType}>
                 <select
                   id="onboarderType"
                   name="onboarderType"
                   defaultValue="contractor"
-                  className="appearance-none flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer"
+                  className={`appearance-none flex h-11 w-full rounded-xl border bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer ${fieldErrors.onboarderType ? 'border-red-300 focus:border-red-400' : 'border-(--rs-neutral-grey-200) focus:border-(--rs-primary-300)'}`}
                 >
                   <option value="contractor" style={OPTION_STYLE}>Independent contractor</option>
                   <option value="intern"     style={OPTION_STYLE}>Intern</option>
                 </select>
               </SelectShell>
+              {fieldErrors.onboarderType && <FieldError text={fieldErrors.onboarderType} />}
             </div>
+
             <Field id="roleTitle" label="Role title" placeholder="Frontend Engineer" />
-            <Field id="team" label="Team" placeholder="Engineering" />
+
+            <div className="space-y-1.5">
+              <Label htmlFor="team" className="text-(--rs-neutral-grey-700) font-medium">Department *</Label>
+              <SelectShell error={!!fieldErrors.team}>
+                <select
+                  id="team"
+                  name="team"
+                  required
+                  defaultValue=""
+                  className={`appearance-none flex h-11 w-full rounded-xl border bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer ${fieldErrors.team ? 'border-red-300 focus:border-red-400' : 'border-(--rs-neutral-grey-200) focus:border-(--rs-primary-300)'}`}
+                >
+                  <option value="" disabled style={OPTION_STYLE}>— Select department —</option>
+                  {departments.map(d => (
+                    <option key={d} value={d} style={OPTION_STYLE}>{d}</option>
+                  ))}
+                </select>
+              </SelectShell>
+              {fieldErrors.team && <FieldError text={fieldErrors.team} />}
+            </div>
+
             <Field id="directSupervisor" label="Direct supervisor" placeholder="Mark Tan" />
-            <Field id="startDate" label="Start date" type="date" />
+            <Field id="startDate"        label="Start date"        type="date" error={fieldErrors.startDate} />
           </div>
 
           {error && <ErrorBox text={error} />}
@@ -359,14 +418,16 @@ export function UploadDocumentForm({ onboarderId }: { onboarderId: number }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function Field({
-  id, label, type = 'text', required, placeholder,
+  id, label, type = 'text', required, placeholder, error,
 }: {
   id: string;
   label: string;
   type?: string;
   required?: boolean;
   placeholder?: string;
+  error?: string;
 }) {
+  const errored = !!error;
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id} className="text-(--rs-neutral-grey-700) font-medium">{label}</Label>
@@ -376,9 +437,20 @@ function Field({
         type={type}
         required={required}
         placeholder={placeholder}
-        className="h-11 rounded-xl border-(--rs-neutral-grey-200) focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100)"
+        aria-invalid={errored || undefined}
+        className={`h-11 rounded-xl focus:ring-4 focus:ring-(--rs-primary-100) ${errored ? 'border-red-300 focus:border-red-400' : 'border-(--rs-neutral-grey-200) focus:border-(--rs-primary-300)'}`}
       />
+      {errored && <FieldError text={error!} />}
     </div>
+  );
+}
+
+function FieldError({ text }: { text: string }) {
+  return (
+    <p className="flex items-center gap-1 text-[11px] text-red-600 leading-snug" role="alert">
+      <AlertCircle className="w-3 h-3 shrink-0" />
+      {text}
+    </p>
   );
 }
 

@@ -1,15 +1,15 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import {
-  GraduationCap, ShieldCheck, CalendarCheck, Workflow, AlertCircle, Search, Filter,
-  ArrowRight, UserPlus2, Briefcase, Mail, Clock, Settings2, ChevronDown, Tag,
+  GraduationCap, ShieldCheck, CalendarCheck, Workflow, AlertCircle,
+  ArrowRight, UserPlus2, Briefcase, Mail, Clock, Settings2,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { LeadToolHeader, StatCard } from '@/components/lead-tool-header';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
 import { canAccessLeadTool } from '@/lib/rbac';
+import { APP_DEPARTMENTS } from '@/lib/orgchart';
 import {
   ALLOWED_STATUSES,
   ALLOWED_TYPES,
@@ -18,6 +18,7 @@ import {
 } from './constants';
 import { STATUS_LABEL, STATUS_COLOR } from './onboarder-row';
 import { CreateOnboarderForm } from './onboarder-forms';
+import { OnboarderFilterBar } from './onboarder-filter-bar';
 
 // ─── Stage groupings (3 happy lanes + 1 terminal lane) ──────────────────────
 
@@ -154,7 +155,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
               >
                 <Settings2 className="w-4 h-4" /> Setup & workflows
               </Link>
-              <CreateOnboarderForm />
+              <CreateOnboarderForm departments={[...APP_DEPARTMENTS]} />
             </div>
           ) : null
         }
@@ -185,63 +186,13 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
           {/* Filter bar */}
           <Card>
             <CardContent className="p-0">
-              <form className="border-b border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) p-4">
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_160px_auto]">
-                  <label className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-(--rs-neutral-grey-400)" />
-                    <input
-                      name="q"
-                      defaultValue={q}
-                      placeholder="Search name, email, role, team, supervisor"
-                      className="w-full rounded-lg border border-(--rs-neutral-grey-200) bg-white py-2 pl-9 pr-3 text-sm text-(--rs-neutral-grey-900) outline-none transition-colors focus:border-(--rs-primary-300) focus:ring-3 focus:ring-(--rs-primary-100)"
-                    />
-                  </label>
-                  <label className="relative block">
-                    <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-(--rs-neutral-grey-400)" />
-                    <select
-                      name="status"
-                      defaultValue={statusFilter}
-                      aria-label="Filter by stage"
-                      className="appearance-none w-full rounded-lg border border-(--rs-neutral-grey-200) bg-white py-2 pl-9 pr-9 text-sm text-(--rs-neutral-grey-900) outline-none transition-colors focus:border-(--rs-primary-300) focus:ring-3 focus:ring-(--rs-primary-100) cursor-pointer"
-                    >
-                      <option value="all" style={{ backgroundColor: '#fff', color: '#0f172a' }}>All stages</option>
-                      {ALLOWED_STATUSES.map(s => (
-                        <option key={s} value={s} style={{ backgroundColor: '#fff', color: '#0f172a' }}>{STATUS_LABEL[s]}</option>
-                      ))}
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-(--rs-neutral-grey-400)" />
-                  </label>
-                  <label className="relative block">
-                    <Tag className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-(--rs-neutral-grey-400)" />
-                    <select
-                      name="type"
-                      defaultValue={typeFilter}
-                      aria-label="Filter by type"
-                      className="appearance-none w-full rounded-lg border border-(--rs-neutral-grey-200) bg-white py-2 pl-9 pr-9 text-sm text-(--rs-neutral-grey-900) outline-none transition-colors focus:border-(--rs-primary-300) focus:ring-3 focus:ring-(--rs-primary-100) cursor-pointer"
-                    >
-                      <option value="all" style={{ backgroundColor: '#fff', color: '#0f172a' }}>All types</option>
-                      {ALLOWED_TYPES.map(t => (
-                        <option key={t} value={t} style={{ backgroundColor: '#fff', color: '#0f172a' }}>{TYPE_LABEL[t]}</option>
-                      ))}
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-(--rs-neutral-grey-400)" />
-                  </label>
-                  <div className="flex gap-2">
-                    <Button type="submit" className="rounded-lg bg-(--rs-primary-500) px-4 py-2 text-sm font-semibold text-white hover:bg-(--rs-primary-600)">
-                      Apply
-                    </Button>
-                    <Link
-                      href="/onboarders"
-                      className="rounded-lg border border-(--rs-neutral-grey-200) bg-white px-4 py-2 text-sm font-semibold text-(--rs-neutral-grey-700) hover:bg-(--rs-neutral-grey-100) transition-colors"
-                    >
-                      Reset
-                    </Link>
-                  </div>
-                </div>
-                <p className="mt-3 text-xs text-(--rs-neutral-grey-500)">
-                  Showing {filtered.length} of {rows.length} onboarder{rows.length === 1 ? '' : 's'}.
-                </p>
-              </form>
+              <OnboarderFilterBar
+                q={q}
+                statusFilter={statusFilter}
+                typeFilter={typeFilter}
+                totalShown={filtered.length}
+                totalAll={rows.length}
+              />
 
               {rows.length === 0 ? (
                 <EmptyState />
