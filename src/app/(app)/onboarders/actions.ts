@@ -224,7 +224,7 @@ export async function updateOnboarderStatus(id: number, status: string): Promise
   const supabase = createAdminClient();
   const { data: before } = await supabase
     .from('onboarders')
-    .select('status')
+    .select('status, full_name, personal_email, role_title, team, direct_supervisor, onboarding_lead, onboarder_type')
     .eq('id', id)
     .maybeSingle();
 
@@ -241,6 +241,36 @@ export async function updateOnboarderStatus(id: number, status: string): Promise
       newValue: status,
       summary:  `Stage changed from '${before.status}' to '${status}'`,
     }]);
+
+    // Auto-fire probation milestone emails on transition. Failures are
+    // recorded as 'email_failed' rows but never block the status change.
+    const baseContext = {
+      full_name:         before.full_name,
+      first_name:        firstName(before.full_name),
+      personal_email:    before.personal_email,
+      role_title:        before.role_title ?? '',
+      team:              before.team ?? '',
+      direct_supervisor: before.direct_supervisor ?? '',
+      onboarding_lead:   before.onboarding_lead ?? session.name,
+    };
+    if (status === 'thirty_day') {
+      await fireOnboardingTemplate(
+        supabase, session, id,
+        { onboarderId: id, template: '30-day-checkin', event: 'status_changed', context: baseContext },
+        'auto: 30-day check-in on stage entry',
+      );
+    } else if (status === 'regularized' || status === 'failed_probation') {
+      await fireOnboardingTemplate(
+        supabase, session, id,
+        {
+          onboarderId: id,
+          template:    '90-day-review',
+          event:       'status_changed',
+          context:     { ...baseContext, outcome: status },
+        },
+        `auto: 90-day review (${status})`,
+      );
+    }
   }
 
   revalidatePath('/onboarders');
@@ -547,10 +577,11 @@ export async function resendOnboardingEmail(onboarderId: number, template: strin
   if (!Number.isInteger(onboarderId) || onboarderId <= 0) throw new Error('Invalid id');
   if (!template) throw new Error('template is required');
 
-  // Permit only the 4 MVP templates from the manual resend path. Post-MVP
-  // templates ship their own buttons.
+  // Permit the 4 MVP templates plus the two post-MVP emails (gmail signature
+  // nudge, group-chat announce) so failed sends can be retried from the UI.
   const allowed: OnboardingTemplate[] = [
     'bg-check-initiate', 'welcome', 'reference-request', 'employment-verification',
+    'gmail-signature-nudge', 'group-chat-announce',
   ];
   if (!allowed.includes(template as OnboardingTemplate)) {
     throw new Error('That template cannot be resent from this surface');
@@ -565,6 +596,200 @@ export async function resendOnboardingEmail(onboarderId: number, template: strin
       event:    'manual_send',
     },
     `manual resend of ${template}`,
+  );
+
+  revalidatePath(`/onboarders/${onboarderId}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Day-1 checklist toggles + Notes edit
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DAY1_KEYS = [
+  'teams_installed_at',
+  'gmail_created_at',
+  'signature_set_at',
+  'jibble_invited_at',
+  'wise_setup_at',
+  'group_chats_joined_at',
+  'orientation_done_at',
+] as const;
+export type Day1Key = typeof DAY1_KEYS[number];
+
+const DAY1_LABEL: Record<Day1Key, string> = {
+  teams_installed_at:    'Teams installed',
+  gmail_created_at:      'Romega Gmail created',
+  signature_set_at:      'Email signature set',
+  jibble_invited_at:     'Jibble invited',
+  wise_setup_at:         'Wise account set up',
+  group_chats_joined_at: 'Group chats joined',
+  orientation_done_at:   'Orientation done',
+};
+
+function isDay1Key(v: string): v is Day1Key {
+  return (DAY1_KEYS as readonly string[]).includes(v);
+}
+
+export async function toggleChecklistItem(
+  onboarderId: number,
+  key:         string,
+  on:          boolean,
+): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(onboarderId) || onboarderId <= 0) throw new Error('Invalid id');
+  if (!isDay1Key(key)) throw new Error('Invalid checklist key');
+
+  const now = new Date().toISOString();
+  const supabase = createAdminClient();
+
+  // Read current row so we can detect "all 7 done" and auto-advance.
+  const { data: before } = await supabase
+    .from('onboarders')
+    .select(`id, status, ${DAY1_KEYS.join(', ')}`)
+    .eq('id', onboarderId)
+    .maybeSingle() as unknown as { data: ({ id: number; status: string } & Record<Day1Key, string | null>) | null };
+  if (!before) throw new Error('Onboarder not found');
+
+  const { error } = await supabase
+    .from('onboarders')
+    .update({ [key]: on ? now : null, updated_at: now })
+    .eq('id', onboarderId);
+  if (error) throw new Error(`Failed to toggle ${key}: ${error.message}`);
+
+  await writeHistory(supabase, onboarderId, session, [{
+    field:    key,
+    oldValue: before[key] ?? null,
+    newValue: on ? now : null,
+    summary:  on
+      ? `Day-1 checklist: ${DAY1_LABEL[key]} ✓`
+      : `Day-1 checklist: ${DAY1_LABEL[key]} cleared`,
+  }]);
+
+  // Auto-advance to thirty_day if all 7 checklist items are now set AND the
+  // onboarder is currently in day_one. Skip from any other status (don't
+  // accidentally promote someone in pre_onboarding or ninety_day).
+  if (on && before.status === 'day_one') {
+    const next = { ...before, [key]: now } as Record<Day1Key, string | null>;
+    const allDone = DAY1_KEYS.every(k => next[k]);
+    if (allDone) {
+      await supabase
+        .from('onboarders')
+        .update({ status: 'thirty_day', updated_at: now })
+        .eq('id', onboarderId);
+      await writeHistory(supabase, onboarderId, session, [{
+        field:    'status',
+        oldValue: 'day_one',
+        newValue: 'thirty_day',
+        summary:  `Auto-advanced to thirty_day — all 7 Day-1 checklist items complete`,
+      }]);
+    }
+  }
+
+  revalidatePath(`/onboarders/${onboarderId}`);
+}
+
+export async function updateOnboarderNotes(
+  onboarderId: number,
+  notes:       string,
+): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(onboarderId) || onboarderId <= 0) throw new Error('Invalid id');
+
+  const clean = notes.length > 8000 ? notes.slice(0, 8000) : notes;
+
+  const supabase = createAdminClient();
+  const { data: before } = await supabase
+    .from('onboarders')
+    .select('notes')
+    .eq('id', onboarderId)
+    .maybeSingle();
+
+  const { error } = await supabase
+    .from('onboarders')
+    .update({ notes: clean, updated_at: new Date().toISOString() })
+    .eq('id', onboarderId);
+  if (error) throw new Error(`Failed to save notes: ${error.message}`);
+
+  if ((before?.notes ?? '') !== clean) {
+    await writeHistory(supabase, onboarderId, session, [{
+      field:    'notes',
+      oldValue: before?.notes ?? null,
+      newValue: clean || null,
+      summary:  clean ? 'Updated notes' : 'Cleared notes',
+    }]);
+  }
+
+  revalidatePath(`/onboarders/${onboarderId}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gmail signature nudge + group-chat announcement (post-MVP emails)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function sendGmailSignatureNudge(onboarderId: number): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(onboarderId) || onboarderId <= 0) throw new Error('Invalid id');
+
+  const supabase = createAdminClient();
+  const { data: o } = await supabase
+    .from('onboarders')
+    .select('id, full_name, personal_email, onboarder_type, role_title, onboarding_lead')
+    .eq('id', onboarderId)
+    .maybeSingle();
+  if (!o) throw new Error('Onboarder not found');
+
+  await fireOnboardingTemplate(
+    supabase, session, onboarderId,
+    {
+      onboarderId,
+      template: 'gmail-signature-nudge',
+      event:    'manual_send',
+      context: {
+        onboarder_type:  o.onboarder_type,
+        full_name:       o.full_name,
+        first_name:      firstName(o.full_name),
+        personal_email:  o.personal_email,
+        role_title:      o.role_title ?? '',
+        onboarding_lead: o.onboarding_lead ?? session.name,
+      },
+    },
+    `gmail signature nudge (${o.onboarder_type})`,
+  );
+
+  revalidatePath(`/onboarders/${onboarderId}`);
+}
+
+export async function sendGroupChatAnnouncement(onboarderId: number): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(onboarderId) || onboarderId <= 0) throw new Error('Invalid id');
+
+  const supabase = createAdminClient();
+  const { data: o } = await supabase
+    .from('onboarders')
+    .select('id, full_name, onboarder_type, role_title, team, direct_supervisor, start_date, onboarding_lead')
+    .eq('id', onboarderId)
+    .maybeSingle();
+  if (!o) throw new Error('Onboarder not found');
+
+  await fireOnboardingTemplate(
+    supabase, session, onboarderId,
+    {
+      onboarderId,
+      template: 'group-chat-announce',
+      event:    'manual_send',
+      context: {
+        full_name:            o.full_name,
+        first_name:           firstName(o.full_name),
+        onboarder_type:       o.onboarder_type,
+        onboarder_type_label: o.onboarder_type === 'intern' ? 'intern' : 'contractor',
+        role_title:           o.role_title ?? '',
+        team:                 o.team ?? '',
+        direct_supervisor:    o.direct_supervisor ?? '',
+        start_date:           o.start_date ?? '',
+        onboarding_lead:      o.onboarding_lead ?? session.name,
+      },
+    },
+    'group-chat announcement (SOP §7)',
   );
 
   revalidatePath(`/onboarders/${onboarderId}`);
@@ -647,6 +872,7 @@ function firstName(full: string): string {
 
 const TEST_ELIGIBLE_TEMPLATES: OnboardingTemplate[] = [
   'bg-check-initiate', 'reference-request', 'employment-verification', 'welcome',
+  'gmail-signature-nudge', 'group-chat-announce',
 ];
 
 export async function triggerTestWorkflow(args: {
@@ -699,6 +925,17 @@ export async function triggerTestWorkflow(args: {
       break;
     case 'welcome':
       context = { ...sharedContext, onboarder_type: type };
+      break;
+    case 'gmail-signature-nudge':
+      context = { ...sharedContext, onboarder_type: type };
+      break;
+    case 'group-chat-announce':
+      context = {
+        ...sharedContext,
+        onboarder_type:       type,
+        onboarder_type_label: type === 'intern' ? 'intern' : 'contractor',
+        start_date:           new Date().toISOString().slice(0, 10),
+      };
       break;
     // bg-check-initiate falls through to the sharedContext default.
   }

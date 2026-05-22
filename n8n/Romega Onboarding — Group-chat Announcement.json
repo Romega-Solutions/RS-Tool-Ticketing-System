@@ -1,0 +1,65 @@
+{
+  "name": "Romega Onboarding — Group-chat Announcement",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "onb-group-chat-announce",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 304],
+      "webhookId": "onb-group-chat-announce"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the SOP §7 team-wide welcome announcement. We don't have Teams API\n// access yet — instead we email the generated message to the Onboarding Lead\n// who pastes it into the Teams group chat. Inbound payload from Next.js:\n//   { onboarderId, template:'group-chat-announce', event, context: {\n//     full_name, first_name, onboarder_type ('contractor'|'intern'),\n//     onboarder_type_label, role_title, team, direct_supervisor, start_date,\n//     onboarding_lead\n//   } }\n\nconst body = $input.first().json;\nconst ctx  = body.context || {};\nconst fullName         = ctx.full_name           || 'New Romega Team Member';\nconst firstName        = ctx.first_name          || fullName.split(' ')[0];\nconst typeLabel        = ctx.onboarder_type_label || (ctx.onboarder_type === 'intern' ? 'intern' : 'contractor');\nconst roleTitle        = ctx.role_title          || '';\nconst team             = ctx.team                || '';\nconst directSupervisor = ctx.direct_supervisor   || 'their Direct Supervisor';\nconst startDate        = ctx.start_date          || 'TBD';\nconst onboardingLead   = ctx.onboarding_lead     || 'Erich';\n\nconst roleLine = [roleTitle, team].filter(Boolean).join(' · ');\n\nconst announcement = `👋 Team, please welcome our newest ${typeLabel}, *${fullName}*${roleLine ? ` (${roleLine})` : ''}. They're starting on ${startDate}. ${directSupervisor} will be their direct supervisor. Welcome to Romega, ${firstName}! 🎉`;\n\nconst subject = `Paste-ready: announce ${fullName} in the team chat`;\nconst body_ = `Hi ${onboardingLead},\n\nHere's the team-wide welcome message for ${fullName} — copy & paste into the Teams group chat when ready:\n\n----- BEGIN MESSAGE -----\n${announcement}\n----- END MESSAGE -----\n\nThis was auto-generated from the onboarder record. If the role title or start date needs tweaking, edit the onboarder and regenerate.\n\n— Onboarding bot`;\n\n// Send to the Onboarding Lead. We pull their email from a future field on\n// onboarders; for now we fall back to the lead-name based mailbox.\nconst toEmail = ctx.onboarding_lead_email || 'erich@romega-solutions.com';\n\nreturn [{ json: { to: toEmail, subject, body: body_, announcement, onboarderId: body.onboarderId, template: 'group-chat-announce' } }];"
+      },
+      "id": "node-build-email",
+      "name": "Build Announcement",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 304]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node-send-gmail",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [720, 304],
+      "credentials": { "gmailOAuth2": { "id": "REPLACE_ME", "name": "Gmail — Onboarding" } }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, template: $('Build Announcement').first().json.template, onboarderId: $('Build Announcement').first().json.onboarderId, sentTo: $('Build Announcement').first().json.to, announcement: $('Build Announcement').first().json.announcement } }}"
+      },
+      "id": "node-respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [960, 304]
+    }
+  ],
+  "connections": {
+    "Webhook":             { "main": [[{ "node": "Build Announcement", "type": "main", "index": 0 }]] },
+    "Build Announcement":  { "main": [[{ "node": "Send Gmail",         "type": "main", "index": 0 }]] },
+    "Send Gmail":          { "main": [[{ "node": "Respond OK",         "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "onb-group-chat-announce-v1",
+  "meta": {
+    "description": "SOP §7 — generates the team-wide welcome announcement and emails it to the Onboarding Lead to paste into Teams. Until Teams API access exists, this is paste-friendly text. Triggered by POST /webhook/onb-group-chat-announce. After import, replace `REPLACE_ME` Gmail credential ID, then activate. Env: N8N_GROUP_CHAT_ANNOUNCE_URL."
+  }
+}

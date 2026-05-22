@@ -2,6 +2,7 @@ import { getSession } from '@/lib/session';
 import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems, PlaneWorkItem, PlaneState } from '@/lib/tickets';
 import { Card, CardContent } from "@/components/ui/card";
 import { TaskCard } from '@/components/task-card';
+import { OnboardingBanner } from './onboarding-banner';
 
 export type TaskWithProject = PlaneWorkItem & {
   _projectName: string;
@@ -100,6 +101,8 @@ export default async function MyTasksPage({
           All tasks assigned to you across every project.
         </p>
       </div>
+
+      {sessionUser && <OnboardingBanner session={sessionUser} />}
 
       {loadError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">

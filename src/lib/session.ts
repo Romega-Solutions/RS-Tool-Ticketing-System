@@ -10,6 +10,7 @@ export type SessionUser = {
   role: AppRole;
   team: string | null;
   jobTitle: string | null;
+  isOnboarding: boolean;
 };
 
 export async function getSession(): Promise<SessionUser | null> {
@@ -21,7 +22,7 @@ export async function getSession(): Promise<SessionUser | null> {
     const admin = createAdminClient();
     const { data: dbUser } = await admin
       .from('users')
-      .select('id, email, name, username, role, team, job_title, is_active')
+      .select('id, email, name, username, role, team, job_title, is_active, is_onboarding')
       .eq('email', user.email)
       .maybeSingle();
 
@@ -35,6 +36,7 @@ export async function getSession(): Promise<SessionUser | null> {
       role: normalizeRole(dbUser.role),
       team: dbUser.team ?? null,
       jobTitle: dbUser.job_title ?? null,
+      isOnboarding: Boolean(dbUser.is_onboarding),
     };
   } catch {
     return null;

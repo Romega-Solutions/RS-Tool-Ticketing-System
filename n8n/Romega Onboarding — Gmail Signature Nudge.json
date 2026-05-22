@@ -1,0 +1,65 @@
+{
+  "name": "Romega Onboarding — Gmail Signature Nudge",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "onb-gmail-signature-nudge",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 304],
+      "webhookId": "onb-gmail-signature-nudge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the SOP §6 Gmail + signature nudge — branches on onboarder_type.\n// Inbound payload (from Next.js fireOnboardingTemplate):\n//   { onboarderId, template:'gmail-signature-nudge', event, context: {\n//     onboarder_type ('contractor'|'intern'), full_name, first_name, personal_email,\n//     role_title, onboarding_lead\n//   } }\n\nconst body = $input.first().json;\nconst ctx  = body.context || {};\nconst type            = ctx.onboarder_type   || 'contractor';\nconst toEmail         = ctx.personal_email   || body.to;\nconst firstName       = ctx.first_name       || (ctx.full_name || 'there').split(' ')[0];\nconst onboardingLead  = ctx.onboarding_lead  || 'Erich';\n\nif (!toEmail) {\n  throw new Error('No personal_email on context — cannot send Gmail nudge');\n}\n\nconst subject = 'Set up your Romega email | Next step';\n\nlet body_;\nif (type === 'intern') {\n  body_ = `Hi ${firstName},\n\nFor the next step, please create a Gmail account to serve as your official Romega work email. Make sure the account is fully set up and functioning properly.\n\nUse the following format: [FirstInitial][FullLastName].romegasolutions@gmail.com\nExample: John Smith → jsmith.romegasolutions@gmail.com\n\nOnce it's done, just shoot me a message with the email address!\n\nOnce complete, please create your personal Romega email signature here:\nhttps://romega-email-signature.vercel.app/\n\nCheers,\n${onboardingLead}\nOnboarding Lead, Romega Solutions`;\n} else {\n  body_ = `Hi ${firstName},\n\nFor the next step of your onboarding, please create a Gmail account to serve as your official Romega work email. Make sure the account is fully set up and functioning properly.\n\nUse the following format: [FirstName]@romega-solutions.com\nExample: john@romega-solutions.com\n\nOnce done, just shoot me a message with the email address.\n\nWe'll handle the signature setup with you on Teams once your Romega Gmail is live.\n\nCheers,\n${onboardingLead}\nOnboarding Lead, Romega Solutions`;\n}\n\nreturn [{ json: { to: toEmail, subject, body: body_, onboarderId: body.onboarderId, template: 'gmail-signature-nudge', onboarderType: type } }];"
+      },
+      "id": "node-build-email",
+      "name": "Build Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 304]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node-send-gmail",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [720, 304],
+      "credentials": { "gmailOAuth2": { "id": "REPLACE_ME", "name": "Gmail — Onboarding" } }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, template: $('Build Email').first().json.template, onboarderId: $('Build Email').first().json.onboarderId, onboarderType: $('Build Email').first().json.onboarderType, sentTo: $('Build Email').first().json.to } }}"
+      },
+      "id": "node-respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [960, 304]
+    }
+  ],
+  "connections": {
+    "Webhook":     { "main": [[{ "node": "Build Email", "type": "main", "index": 0 }]] },
+    "Build Email": { "main": [[{ "node": "Send Gmail",  "type": "main", "index": 0 }]] },
+    "Send Gmail":  { "main": [[{ "node": "Respond OK",  "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "onb-gmail-signature-nudge-v1",
+  "meta": {
+    "description": "SOP §6 — Gmail + signature creation nudge, branches on context.onboarder_type ('contractor'|'intern'). Triggered by POST /webhook/onb-gmail-signature-nudge with { onboarderId, template, event, context: { onboarder_type, full_name, first_name, personal_email, role_title, onboarding_lead } }. After import, replace `REPLACE_ME` Gmail credential ID, then activate. Env: N8N_GMAIL_SIGNATURE_NUDGE_URL."
+  }
+}

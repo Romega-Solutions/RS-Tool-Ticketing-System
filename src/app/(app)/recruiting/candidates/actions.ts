@@ -16,6 +16,7 @@ import {
 import { canAccessLeadTool } from '@/lib/rbac';
 import { toProperName, formatPhoneNumber } from '@/lib/format';
 import { uploadResumeToStorage } from '@/lib/storage';
+import { createOnboarderFromCandidate } from '@/lib/onboarders';
 
 // SOP's 11 status stages. See docs/RECRUITMENT_AI_AGENT_BUILD_PLAN.md §2.
 const ALLOWED_STATUSES = [
@@ -390,10 +391,63 @@ export async function updateCandidateStatus(id: number, status: string) {
         `status:${status}`,
       );
     }
+
+    // Bridge into Internal Onboarding when the candidate is hired. Idempotent
+    // — re-flipping to 'hired' won't create duplicates. Failures are logged
+    // to candidate_history but do NOT block the status update.
+    if (status === 'hired') {
+      const promo = await createOnboarderFromCandidate(id, {
+        actorUserId: session.id,
+        actorName:   session.name,
+      });
+      if (promo.ok) {
+        await writeHistory(supabase, id, session, [{
+          field:    'onboarder_created',
+          oldValue: null,
+          newValue: String(promo.onboarderId),
+          summary:  promo.created
+            ? `Created onboarder #${promo.onboarderId} from this hire`
+            : `Onboarder #${promo.onboarderId} already exists for this hire`,
+        }]);
+      } else {
+        await writeHistory(supabase, id, session, [{
+          field:    'onboarder_create_failed',
+          oldValue: null,
+          newValue: null,
+          summary:  `Auto-create onboarder FAILED — ${promo.error}`,
+        }]);
+      }
+    }
   }
 
   revalidatePath('/recruiting/candidates');
   revalidatePath(`/recruiting/candidates/${id}`);
+}
+
+// Manual backfill for candidates hired before this bridge shipped, or where
+// the auto-create failed. Wired to a button on the candidate detail page.
+export async function backfillOnboarderFromCandidate(id: number) {
+  const session = await requireSession();
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Invalid id');
+
+  const supabase = createAdminClient();
+  const result = await createOnboarderFromCandidate(id, {
+    actorUserId: session.id,
+    actorName:   session.name,
+  });
+  if (!result.ok) throw new Error(result.error);
+
+  await writeHistory(supabase, id, session, [{
+    field:    'onboarder_created',
+    oldValue: null,
+    newValue: String(result.onboarderId),
+    summary:  result.created
+      ? `Backfilled onboarder #${result.onboarderId}`
+      : `Onboarder #${result.onboarderId} already exists`,
+  }]);
+
+  revalidatePath(`/recruiting/candidates/${id}`);
+  return { onboarderId: result.onboarderId, created: result.created };
 }
 
 // Flips the per-candidate "Publish to Talent Pool" toggle that powers the
@@ -830,6 +884,7 @@ export async function createPublicApplication(args: {
     role:     'admin',
     team:     null,
     jobTitle: null,
+    isOnboarding: false,
   };
 
   await writeHistory(supabase, inserted.id, systemSession, [{

@@ -33,10 +33,17 @@ ENV_FILE = ROOT / ".env"
 N8N_DIR  = ROOT / "n8n"
 
 WORKFLOWS = [
-    ("Romega Onboarding — BG Check Initiate.json",       "N8N_BG_CHECK_INITIATE_URL"),
-    ("Romega Onboarding — Reference Request.json",       "N8N_REFERENCE_REQUEST_URL"),
-    ("Romega Onboarding — Employment Verification.json", "N8N_EMPLOYMENT_VERIFICATION_URL"),
-    ("Romega Onboarding — Welcome.json",                 "N8N_ONBOARDING_WELCOME_URL"),
+    ("Romega Onboarding — BG Check Initiate.json",          "N8N_BG_CHECK_INITIATE_URL"),
+    ("Romega Onboarding — Reference Request.json",          "N8N_REFERENCE_REQUEST_URL"),
+    ("Romega Onboarding — Employment Verification.json",    "N8N_EMPLOYMENT_VERIFICATION_URL"),
+    ("Romega Onboarding — Welcome.json",                    "N8N_ONBOARDING_WELCOME_URL"),
+    # Post-MVP — Phase C (extra emails)
+    ("Romega Onboarding — Gmail Signature Nudge.json",      "N8N_GMAIL_SIGNATURE_NUDGE_URL"),
+    ("Romega Onboarding — Group-chat Announcement.json",    "N8N_GROUP_CHAT_ANNOUNCE_URL"),
+    # Post-MVP — Phase E (30/90-day review) + Phase F (sweeps cron)
+    ("Romega Onboarding — 30-day Check-in.json",            "N8N_30DAY_CHECKIN_URL"),
+    ("Romega Onboarding — 90-day Review.json",              "N8N_90DAY_REVIEW_URL"),
+    ("Romega Onboarding — Sweeps.json",                     "N8N_SOW_REMINDER_URL"),
 ]
 
 # Fields n8n's POST/PUT endpoint rejects on create (read-only or computed

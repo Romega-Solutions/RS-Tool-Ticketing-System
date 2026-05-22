@@ -28,6 +28,10 @@ import {
   SendReferenceRequestButton,
   SendVerificationButton,
   ResendLastEmailButton,
+  SendGmailNudgeButton,
+  SendGroupChatButton,
+  ChecklistToggle,
+  NotesEditor,
 } from '../onboarder-actions';
 import type { OnboarderStatus } from '../constants';
 
@@ -56,6 +60,14 @@ type Onboarder = {
   last_email_sent_at:  string | null;
   created_at:        string;
   created_by:        number | null;
+  // Day-1 checklist (7 timestamps; nullable until done)
+  teams_installed_at:     string | null;
+  gmail_created_at:       string | null;
+  signature_set_at:       string | null;
+  jibble_invited_at:      string | null;
+  wise_setup_at:          string | null;
+  group_chats_joined_at:  string | null;
+  orientation_done_at:    string | null;
 };
 
 type ReferenceRow = {
@@ -324,8 +336,8 @@ export default async function OnboarderDetailPage({
           {tab === 'documents' && (
             <DocumentsTab onboarderId={id} documents={documentsSigned} />
           )}
-          {tab === 'day-one' && <ComingSoonTab title="Day-1 checklist" letter="B" />}
-          {tab === 'notes'    && <ComingSoonTab title="Notes"             letter="—" />}
+          {tab === 'day-one' && <Day1Tab o={o} />}
+          {tab === 'notes'    && <NotesTab o={o} />}
         </div>
 
         {/* Right rail */}
@@ -346,8 +358,8 @@ function TabBar({ id, active }: { id: number; active: Tab }) {
     { id: 'overview',  label: 'Overview',         icon: User2 },
     { id: 'bg-check',  label: 'Background check', icon: ShieldCheck },
     { id: 'documents', label: 'Documents',        icon: FileText },
-    { id: 'day-one',   label: 'Day-1 checklist',  icon: ListChecks, badge: 'Post-MVP' },
-    { id: 'notes',     label: 'Notes',            icon: StickyNote, badge: 'Post-MVP' },
+    { id: 'day-one',   label: 'Day-1 checklist',  icon: ListChecks },
+    { id: 'notes',     label: 'Notes',            icon: StickyNote },
   ];
   return (
     <div className="overflow-x-auto">
@@ -440,6 +452,32 @@ function OverviewTab({ o, onLastFailedTemplate }: { o: Onboarder; onLastFailedTe
               </p>
             </div>
             <SendWelcomeButton id={o.id} type={o.onboarder_type} />
+          </div>
+        </div>
+
+        {/* Gmail + signature nudge (SOP §6) */}
+        <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-white p-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-(--rs-neutral-grey-500)">Gmail + signature nudge (SOP §6)</p>
+              <p className="mt-1 text-sm text-(--rs-neutral-grey-700)">
+                Tells the new hire what format their Romega Gmail should follow{o.onboarder_type === 'intern' ? ' and links to the signature builder' : ''}.
+              </p>
+            </div>
+            <SendGmailNudgeButton id={o.id} type={o.onboarder_type} />
+          </div>
+        </div>
+
+        {/* Group-chat announcement (SOP §7) */}
+        <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-white p-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-(--rs-neutral-grey-500)">Group-chat announcement (SOP §7)</p>
+              <p className="mt-1 text-sm text-(--rs-neutral-grey-700)">
+                Generates the team-wide welcome message for Teams. The Lead can paste it manually if needed.
+              </p>
+            </div>
+            <SendGroupChatButton id={o.id} />
           </div>
         </div>
 
@@ -652,27 +690,66 @@ function DocumentsTab({
   );
 }
 
-// ─── Coming-soon placeholder ────────────────────────────────────────────────
+// ─── Day-1 checklist tab ────────────────────────────────────────────────────
 
-function ComingSoonTab({ title, letter }: { title: string; letter: string }) {
+const DAY1_ITEMS: { key: keyof Onboarder; label: string; hint: string }[] = [
+  { key: 'teams_installed_at',    label: 'Teams installed',       hint: 'Microsoft Teams app on desktop or mobile' },
+  { key: 'gmail_created_at',      label: 'Romega Gmail created',  hint: 'firstName@romega-solutions.com (contractor) or jsmith.romegasolutions@gmail.com (intern)' },
+  { key: 'signature_set_at',      label: 'Email signature set',   hint: 'Generated at romega-email-signature.vercel.app' },
+  { key: 'jibble_invited_at',     label: 'Jibble invited',        hint: 'Time-tracking onboarded' },
+  { key: 'wise_setup_at',         label: 'Wise account set up',   hint: 'Banking details captured + verified' },
+  { key: 'group_chats_joined_at', label: 'Group chats joined',    hint: 'Team + company-wide Teams chats' },
+  { key: 'orientation_done_at',   label: 'Orientation done',      hint: 'Welcome call + tooling tour complete' },
+];
+
+function Day1Tab({ o }: { o: Onboarder }) {
+  const done = DAY1_ITEMS.filter(i => o[i.key]).length;
+  const pct  = Math.round((done / DAY1_ITEMS.length) * 100);
   return (
-    <Card>
-      <CardContent className="p-8 text-center">
-        <div className="mx-auto inline-flex items-center gap-2 rounded-full bg-(--rs-accent-50) px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-(--rs-accent-700)">
-          <span className="inline-flex h-2 w-2 rounded-full bg-(--rs-accent-500) animate-pulse" />
-          Post-MVP {letter !== '—' && <>· phase {letter}</>}
+    <Section title={`Day-1 checklist · ${done}/${DAY1_ITEMS.length}`} icon={<ListChecks className="w-4 h-4" />}>
+      <div className="space-y-4">
+        <div className="rounded-lg border border-(--rs-primary-100) bg-(--rs-primary-50)/40 p-3">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <p className="text-xs font-semibold text-(--rs-primary-800)">{pct}% complete</p>
+            {o.status === 'day_one' && done === DAY1_ITEMS.length && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-800">
+                <CheckCircle2 className="w-3 h-3" /> Will auto-advance to 30-day
+              </span>
+            )}
+          </div>
+          <div className="h-1.5 rounded-full bg-(--rs-primary-100) overflow-hidden">
+            <div className="h-full bg-(--rs-primary-600) transition-all" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="mt-2 text-[11px] text-(--rs-neutral-grey-600) leading-relaxed">
+            Toggle each item as you complete it. When all 7 are checked AND the onboarder is in <code className="rounded bg-white/60 px-1 text-[10px]">day_one</code>, the status auto-advances to <code className="rounded bg-white/60 px-1 text-[10px]">thirty_day</code>.
+          </p>
         </div>
-        <h3 className="mt-3 font-serif text-lg font-bold text-(--rs-neutral-grey-900)">{title}</h3>
-        <p className="mt-2 mx-auto max-w-sm text-sm text-(--rs-neutral-grey-600) leading-relaxed">
-          This tab is reserved for a future phase. The underlying columns already exist in the <code className="rounded bg-(--rs-neutral-grey-100) px-1 py-0.5 text-xs">onboarders</code> table — only the UI is pending.
-        </p>
-        <p className="mt-3 text-xs">
-          <Link href="/onboarders/setup" className="text-(--rs-primary-700) hover:underline font-semibold">
-            See post-MVP roadmap →
-          </Link>
-        </p>
-      </CardContent>
-    </Card>
+
+        <div className="space-y-2">
+          {DAY1_ITEMS.map(item => (
+            <div key={String(item.key)}>
+              <ChecklistToggle
+                id={o.id}
+                fieldKey={String(item.key)}
+                label={item.label}
+                value={o[item.key] as string | null}
+              />
+              <p className="mt-0.5 ml-8 text-[11px] text-(--rs-neutral-grey-500)">{item.hint}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+// ─── Notes tab ──────────────────────────────────────────────────────────────
+
+function NotesTab({ o }: { o: Onboarder }) {
+  return (
+    <Section title="Notes" icon={<StickyNote className="w-4 h-4" />}>
+      <NotesEditor id={o.id} initial={o.notes} />
+    </Section>
   );
 }
 

@@ -1,0 +1,196 @@
+{
+  "name": "Romega Onboarding — Sweeps",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 0 8 * * *" }
+          ]
+        }
+      },
+      "id": "node-cron",
+      "name": "Daily 08:00 PHT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 304],
+      "notes": "Cron in n8n container TZ — set TZ=Asia/Manila on the container."
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "onboarders",
+        "returnAll": true,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            { "keyName": "sow_sent_at",         "condition": "lt", "keyValue": "={{ $now.minus({ hours: 48 }).toISO() }}" },
+            { "keyName": "sow_signed_at",       "condition": "is", "keyValue": "null" },
+            { "keyName": "sow_reminder_sent_at","condition": "is", "keyValue": "null" }
+          ]
+        }
+      },
+      "id": "node-find-stale-sow",
+      "name": "Find unsigned SOWs",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [480, 200],
+      "credentials": { "supabaseApi": { "id": "REPLACE_ME", "name": "Supabase — Romega" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fan out per onboarder for downstream nodes.\nreturn $input.all().map(item => ({ json: item.json }));"
+      },
+      "id": "node-fanout-sow",
+      "name": "Fan-out (SOW)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 200]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "onboarders",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            { "keyName": "id", "condition": "eq", "keyValue": "={{ $json.id }}" }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "sow_reminder_sent_at", "fieldValue": "={{ $now.toISO() }}" },
+            { "fieldId": "updated_at",            "fieldValue": "={{ $now.toISO() }}" }
+          ]
+        }
+      },
+      "id": "node-mark-sow-reminded",
+      "name": "Mark SOW reminded",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [960, 200],
+      "credentials": { "supabaseApi": { "id": "REPLACE_ME", "name": "Supabase — Romega" } }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "tableId": "onboarder_history",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "onboarder_id", "fieldValue": "={{ $('Fan-out (SOW)').item.json.id }}" },
+            { "fieldId": "user_id",     "fieldValue": "" },
+            { "fieldId": "user_name",   "fieldValue": "Onboarding Bot" },
+            { "fieldId": "field",       "fieldValue": "sow_reminder_sent" },
+            { "fieldId": "new_value",   "fieldValue": "={{ $now.toISO() }}" },
+            { "fieldId": "summary",     "fieldValue": "Auto-reminder: SOW unsigned >48h — emailed HRBP" }
+          ]
+        }
+      },
+      "id": "node-log-sow",
+      "name": "Log SOW history",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1200, 200],
+      "credentials": { "supabaseApi": { "id": "REPLACE_ME", "name": "Supabase — Romega" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the SOW reminder email to the HRBP. We don't have an HRBP table\n// yet — pull from onboarders.hrbp (a free-text name); the lead's mailbox is\n// the default fallback.\nconst o = $('Fan-out (SOW)').item.json;\nconst lead = o.onboarding_lead || 'Erich';\nconst hrbp = o.hrbp || lead;\nconst toEmail = o.hrbp_email || 'erich@romega-solutions.com';\n\nreturn [{\n  json: {\n    to:      toEmail,\n    subject: `SOW unsigned >48h — ${o.full_name} | Romega Onboarding`,\n    body:    `Hi ${hrbp},\\n\\nThe SOW for ${o.full_name} (${o.role_title || 'role TBD'}) was sent on ${o.sow_sent_at?.slice(0,10) || '?'} and is still unsigned. Could you chase the signature today?\\n\\n— Onboarding bot`,\n  }\n}];"
+      },
+      "id": "node-build-sow-email",
+      "name": "Build SOW Reminder",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 200]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node-send-sow-email",
+      "name": "Send SOW Reminder",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1680, 200],
+      "credentials": { "gmailOAuth2": { "id": "REPLACE_ME", "name": "Gmail — Onboarding" } }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "onboarder_references",
+        "returnAll": true,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            { "keyName": "request_sent_at", "condition": "lt", "keyValue": "={{ $now.minus({ hours: 48 }).toISO() }}" },
+            { "keyName": "responded_at",    "condition": "is", "keyValue": "null" }
+          ]
+        }
+      },
+      "id": "node-find-stale-refs",
+      "name": "Find stale references",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [480, 420],
+      "credentials": { "supabaseApi": { "id": "REPLACE_ME", "name": "Supabase — Romega" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => ({ json: item.json }));"
+      },
+      "id": "node-fanout-refs",
+      "name": "Fan-out (refs)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the polite referee nudge.\nconst r = $('Fan-out (refs)').item.json;\nreturn [{\n  json: {\n    to:      r.email,\n    subject: `Friendly nudge — reference for Romega Solutions`,\n    body:    `Hi ${r.referee_name},\\n\\nJust following up on our earlier email asking for your character reference. If you've already replied, please ignore this. Otherwise, we'd love to receive your PDF response when you have a few minutes.\\n\\nThank you!\\n\\n— Onboarding bot, Romega Solutions`,\n  }\n}];"
+      },
+      "id": "node-build-ref-nudge",
+      "name": "Build Ref Nudge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 420]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node-send-ref-nudge",
+      "name": "Send Ref Nudge",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1200, 420],
+      "credentials": { "gmailOAuth2": { "id": "REPLACE_ME", "name": "Gmail — Onboarding" } }
+    }
+  ],
+  "connections": {
+    "Daily 08:00 PHT":      { "main": [[{ "node": "Find unsigned SOWs",   "type": "main", "index": 0 }, { "node": "Find stale references", "type": "main", "index": 0 }]] },
+    "Find unsigned SOWs":   { "main": [[{ "node": "Fan-out (SOW)",         "type": "main", "index": 0 }]] },
+    "Fan-out (SOW)":        { "main": [[{ "node": "Mark SOW reminded",     "type": "main", "index": 0 }]] },
+    "Mark SOW reminded":    { "main": [[{ "node": "Log SOW history",       "type": "main", "index": 0 }]] },
+    "Log SOW history":      { "main": [[{ "node": "Build SOW Reminder",    "type": "main", "index": 0 }]] },
+    "Build SOW Reminder":   { "main": [[{ "node": "Send SOW Reminder",     "type": "main", "index": 0 }]] },
+    "Find stale references":{ "main": [[{ "node": "Fan-out (refs)",        "type": "main", "index": 0 }]] },
+    "Fan-out (refs)":       { "main": [[{ "node": "Build Ref Nudge",       "type": "main", "index": 0 }]] },
+    "Build Ref Nudge":      { "main": [[{ "node": "Send Ref Nudge",        "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "onb-sweeps-v1",
+  "meta": {
+    "description": "Daily 08:00 PHT sweeps: (1) onboarders with sow_sent_at >48h ago and sow_signed_at null — emails HRBP and marks sow_reminder_sent_at to dedup. (2) onboarder_references with request_sent_at >48h ago and responded_at null — sends one polite nudge per referee. After import, replace `REPLACE_ME` Supabase + Gmail credential IDs, then activate. Env: N8N_SOW_REMINDER_URL (also used as the heartbeat — workflow itself has no inbound webhook)."
+  }
+}

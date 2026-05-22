@@ -1,0 +1,65 @@
+{
+  "name": "Romega Onboarding — 30-day Check-in",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "onb-30day-checkin",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 304],
+      "webhookId": "onb-30day-checkin"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the 30-day check-in email — sent to the new hire's personal email\n// when the onboarder transitions to `thirty_day`. Inbound payload:\n//   { onboarderId, template:'30-day-checkin', event, context: {\n//     full_name, first_name, personal_email, role_title, team,\n//     direct_supervisor, onboarding_lead\n//   } }\n\nconst body = $input.first().json;\nconst ctx  = body.context || {};\nconst firstName        = ctx.first_name        || (ctx.full_name || 'there').split(' ')[0];\nconst toEmail          = ctx.personal_email    || body.to;\nconst onboardingLead   = ctx.onboarding_lead   || 'Erich';\nconst directSupervisor = ctx.direct_supervisor || 'your supervisor';\nconst roleTitle        = ctx.role_title        || '';\n\nif (!toEmail) {\n  throw new Error('No personal_email on context — cannot send 30-day check-in');\n}\n\nconst subject = '30-day check-in | Romega Solutions';\nconst body_ = `Hi ${firstName},\n\nYou've been with Romega for about a month — congrats on making it through the first stretch! This is your 30-day check-in.\n\nWE'D LOVE TO HEAR FROM YOU:\n  • How is your first month going? Anything we should know?\n  • Any blockers, missing tools, or training gaps?\n  • Anything ${directSupervisor} or I can do to make week 5+ smoother?\n\nWHAT TO EXPECT NEXT:\n  • ${directSupervisor} will schedule a 30-day 1:1 with you this week.\n  • Your 90-day probation review will follow at the 3-month mark.\n\nReply to this email with any thoughts, or bring them to your 1:1 — whichever feels easier.\n\nWelcome aboard${roleTitle ? ` as ${roleTitle}` : ''} 🎉\n\nCheers,\n${onboardingLead}\nOnboarding Lead, Romega Solutions`;\n\nreturn [{ json: { to: toEmail, subject, body: body_, onboarderId: body.onboarderId, template: '30-day-checkin' } }];"
+      },
+      "id": "node-build-email",
+      "name": "Build Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 304]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "node-send-gmail",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [720, 304],
+      "credentials": { "gmailOAuth2": { "id": "REPLACE_ME", "name": "Gmail — Onboarding" } }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, template: '30-day-checkin', onboarderId: $('Build Email').first().json.onboarderId, sentTo: $('Build Email').first().json.to } }}"
+      },
+      "id": "node-respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [960, 304]
+    }
+  ],
+  "connections": {
+    "Webhook":     { "main": [[{ "node": "Build Email", "type": "main", "index": 0 }]] },
+    "Build Email": { "main": [[{ "node": "Send Gmail",  "type": "main", "index": 0 }]] },
+    "Send Gmail":  { "main": [[{ "node": "Respond OK",  "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "onb-30day-checkin-v1",
+  "meta": {
+    "description": "30-day probation check-in email sent to the new hire when status flips to thirty_day. Triggered by POST /webhook/onb-30day-checkin. Env: N8N_30DAY_CHECKIN_URL."
+  }
+}

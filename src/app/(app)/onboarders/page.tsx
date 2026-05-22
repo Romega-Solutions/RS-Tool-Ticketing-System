@@ -137,6 +137,8 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
     'N8N_REFERENCE_REQUEST_URL',
     'N8N_EMPLOYMENT_VERIFICATION_URL',
     'N8N_ONBOARDING_WELCOME_URL',
+    'N8N_GMAIL_SIGNATURE_NUDGE_URL',
+    'N8N_GROUP_CHAT_ANNOUNCE_URL',
   ];
   const configuredCount = workflowEnvKeys.filter(k => process.env[k]?.trim()).length;
 
