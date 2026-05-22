@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import Image from 'next/image';
@@ -63,10 +63,10 @@ export default function OnboardingPage() {
     defaultValues: { name: '', role: 'ic', team: '', jobTitle: '' },
   });
 
-  const { watch, setValue, register, handleSubmit, formState: { errors, isSubmitting } } = form;
-  const nameValue = watch('name');
-  const roleValue = watch('role');
-  const teamValue = watch('team');
+  const { control, setValue, register, handleSubmit, formState: { errors, isSubmitting } } = form;
+  const nameValue = useWatch({ control, name: 'name' }) ?? '';
+  const roleValue = useWatch({ control, name: 'role' }) ?? 'ic';
+  const teamValue = useWatch({ control, name: 'team' }) ?? '';
 
   const step = nameValue.trim().length >= 2 ? (teamValue ? 3 : 2) : 1;
 

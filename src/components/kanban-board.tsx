@@ -387,7 +387,7 @@ export function KanbanBoard({
     if (filters.dueSoon) {
       if (!item.target_date) return false;
       const d = new Date(item.target_date + 'T00:00:00').getTime();
-      const now = Date.now();
+      const now = new Date().getTime();
       if (d > now + 7 * 24 * 60 * 60 * 1000) return false;
     }
     if (filters.mine) {

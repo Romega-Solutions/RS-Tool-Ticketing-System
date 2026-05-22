@@ -81,7 +81,7 @@ export function defaultLandingPath(role: AppRole): string {
 
 export function roleLabel(role: AppRole): string {
   if (role === 'admin')  return 'Admin';
-  if (role === 'lead')   return 'IC Lead';
+  if (role === 'lead')   return 'Lead';
   if (role === 'intern') return 'Intern';
   return 'IC';
 }

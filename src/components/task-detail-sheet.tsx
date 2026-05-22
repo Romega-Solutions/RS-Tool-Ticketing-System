@@ -152,9 +152,13 @@ export function TaskDetailSheet({
   }, []);
 
   useEffect(() => {
-    if (open && itemId) {
+    if (!open || !itemId) return;
+
+    const timeoutId = window.setTimeout(() => {
       void refresh(itemId);
-    }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [open, itemId, refresh]);
 
   const handleSave = async () => {

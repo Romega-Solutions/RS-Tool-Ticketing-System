@@ -29,7 +29,6 @@ export function TaskCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const group        = (task.state_detail?.group ?? '').toLowerCase();
   const isOverdue    = task.target_date && !isDone && new Date(task.target_date + 'T00:00:00') < new Date();
   const canMarkDone  = !isDone && task._completedStateId;
   const canReopen    = isDone && task._startedStateId;
