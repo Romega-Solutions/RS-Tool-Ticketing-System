@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, serial, jsonb, numeric, unique } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id:            serial('id').primaryKey(),
@@ -66,6 +66,10 @@ export const candidates = pgTable('candidates', {
   languages:      jsonb('languages'),
   parsedAt:       text('parsed_at'),
   assignedTo:     integer('assigned_to'),
+  // When TRUE, this candidate is shown on the public Talent showcase at
+  // romega-solutions.com/talent. Default FALSE — requires explicit
+  // recruiter publishing.
+  isPublicTalent: boolean('is_public_talent').notNull().default(false),
   createdAt:      text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt:      text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });

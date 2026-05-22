@@ -8,7 +8,7 @@ import {
   Sparkles, FileText, AlertCircle, User2, History as HistoryIcon,
   Hash, MailCheck, MailWarning, Download,
 } from 'lucide-react';
-import { CandidateStatus, CandidateRating, CandidateDelete } from '../candidate-row';
+import { CandidateStatus, CandidateRating, CandidateDelete, CandidatePublicTalentToggle } from '../candidate-row';
 import { ResumeUploadCard } from '../resume-upload';
 import { CandidateEditForm } from '../candidate-edit-form';
 import { ResendEmailButton } from './resend-email-button';
@@ -40,6 +40,7 @@ type Candidate = {
   application_code:    string | null;
   last_email_template: string | null;
   last_email_sent_at:  string | null;
+  is_public_talent:    boolean | null;
 };
 
 type HistoryRow = {
@@ -198,6 +199,7 @@ export default async function CandidateDetailPage({
                   )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  <CandidatePublicTalentToggle id={c.id} isPublic={!!c.is_public_talent} />
                   <CandidateRating id={c.id} rating={c.rating} />
                   <CandidateStatus id={c.id} status={c.status} />
                   <CandidateEditForm

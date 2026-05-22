@@ -1,8 +1,13 @@
 'use client';
 
 import { useTransition } from 'react';
-import { Star, Trash2 } from 'lucide-react';
-import { updateCandidateStatus, updateCandidateRating, deleteCandidate } from './actions';
+import { Star, Trash2, Eye, EyeOff } from 'lucide-react';
+import {
+  updateCandidateStatus,
+  updateCandidateRating,
+  deleteCandidate,
+  updateCandidatePublicTalent,
+} from './actions';
 
 // SOP's 11 status stages. Keep in sync with ALLOWED_STATUSES in actions.ts.
 const STATUSES = [
@@ -90,6 +95,56 @@ export function CandidateRating({ id, rating }: { id: number; rating: number | n
         );
       })}
     </div>
+  );
+}
+
+// Publishes the candidate to the public Talent Pool at
+// romega-solutions.com/talent. Default OFF; flipping ON requires
+// explicit recruiter action (matches the careers privacy promise).
+// The card on the marketing site shows first-name + last-initial only
+// and uses an "Inquire" CTA — no email/phone/LinkedIn is exposed.
+export function CandidatePublicTalentToggle({
+  id,
+  isPublic,
+}: {
+  id: number;
+  isPublic: boolean;
+}) {
+  const [isPending, start] = useTransition();
+  const next = !isPublic;
+  const label = isPublic
+    ? 'Published on the public Talent Pool — click to unpublish'
+    : 'Publish to the public Talent Pool (romega-solutions.com/talent)';
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={isPending}
+      onClick={() => {
+        const confirmMsg = next
+          ? 'Publish this candidate to the public Talent Pool? Their first name + last initial, role, skills, and location will appear on romega-solutions.com/talent.'
+          : 'Remove this candidate from the public Talent Pool?';
+        if (!confirm(confirmMsg)) return;
+        start(async () => {
+          try {
+            await updateCandidatePublicTalent(id, next);
+          } catch (err) {
+            console.error(err);
+            alert(err instanceof Error ? err.message : 'Publish toggle failed');
+          }
+        });
+      }}
+      className={
+        'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50 ' +
+        (isPublic
+          ? 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100'
+          : 'border-(--rs-neutral-grey-200) bg-white text-(--rs-neutral-grey-700) hover:bg-(--rs-neutral-grey-50)')
+      }
+    >
+      {isPublic ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+      {isPublic ? 'Public' : 'Publish'}
+    </button>
   );
 }
 

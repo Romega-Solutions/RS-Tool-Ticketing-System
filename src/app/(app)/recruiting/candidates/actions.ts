@@ -396,6 +396,43 @@ export async function updateCandidateStatus(id: number, status: string) {
   revalidatePath(`/recruiting/candidates/${id}`);
 }
 
+// Flips the per-candidate "Publish to Talent Pool" toggle that powers the
+// public showcase at romega-solutions.com/talent. Default is false; the
+// recruiter is the only one who can publish, matching the existing
+// "no profile sharing without approval" privacy promise.
+export async function updateCandidatePublicTalent(id: number, isPublic: boolean) {
+  const session = await requireSession();
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Invalid id');
+
+  const supabase = createAdminClient();
+  const { data: before } = await supabase
+    .from('candidates')
+    .select('full_name, is_public_talent')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (!before) throw new Error('Candidate not found');
+  if (before.is_public_talent === isPublic) return; // no-op
+
+  const { error } = await supabase
+    .from('candidates')
+    .update({ is_public_talent: isPublic, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw new Error(`Failed to update publish status: ${error.message}`);
+
+  await writeHistory(supabase, id, session, [{
+    field:    'is_public_talent',
+    oldValue: String(before.is_public_talent),
+    newValue: String(isPublic),
+    summary:  isPublic
+      ? `Published to public Talent Pool (romega-solutions.com/talent)`
+      : `Removed from public Talent Pool`,
+  }]);
+
+  revalidatePath('/recruiting/candidates');
+  revalidatePath(`/recruiting/candidates/${id}`);
+}
+
 // Manual retry — re-fires the last attempted email template via the webhook.
 // Used by the "Resend" button on the candidate detail page when the latest
 // history entry is an `email_failed`.
