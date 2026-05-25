@@ -2,11 +2,20 @@ import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
+const REQUIRED_VARS = [
+  'NEXT_PUBLIC_SUPABASE_URL',
+  'NEXT_PUBLIC_SUPABASE_ANON_KEY',
+  'SUPABASE_SERVICE_ROLE_KEY',
+  'DATABASE_URL',
+  'CRON_SECRET',
+] as const;
+
 export async function GET() {
   const checks: Record<string, string> = {};
 
-  checks.jwt_secret   = process.env.JWT_SECRET   ? 'SET' : 'MISSING — set in Vercel env vars';
-  checks.database_url = process.env.DATABASE_URL  ? 'SET' : 'MISSING — set in Vercel env vars';
+  for (const key of REQUIRED_VARS) {
+    checks[key.toLowerCase()] = process.env[key] ? 'SET' : 'MISSING — set in Vercel env vars';
+  }
 
   try {
     const { createAdminClient } = await import('@/lib/supabase/admin');

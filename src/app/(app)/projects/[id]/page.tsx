@@ -21,7 +21,7 @@ export default async function ProjectBoardPage({
   let states: Awaited<ReturnType<typeof getProjectStates>> = [];
   let items: Awaited<ReturnType<typeof getWorkItems>> = [];
   let cycles: Awaited<ReturnType<typeof getCycles>> = [];
-  let planeError: string | null = null;
+  let loadError: string | null = null;
 
   try {
     const [projects, rawStates, rawItems, cycleRows] = await Promise.all([
@@ -41,7 +41,7 @@ export default async function ProjectBoardPage({
     cycles = cycleRows;
   } catch (err) {
     if ((err as { digest?: string })?.digest === 'NEXT_NOT_FOUND') throw err;
-    planeError = err instanceof Error ? err.message : 'Failed to load board';
+    loadError = err instanceof Error ? err.message : 'Failed to load board';
   }
 
   return (
@@ -53,7 +53,7 @@ export default async function ProjectBoardPage({
           </h1>
           <p className="text-(--rs-neutral-grey-500) text-sm mt-1">
             {items.length} work item{items.length !== 1 ? 's' : ''}
-            {!planeError && ' · Drag cards to move between states · Click + to add a task'}
+            {!loadError && ' · Drag cards to move between states · Click + to add a task'}
           </p>
         </div>
         {canManageProject(session) && (
@@ -66,14 +66,14 @@ export default async function ProjectBoardPage({
         )}
       </div>
 
-      {planeError && (
+      {loadError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-center gap-2">
           <AlertCircle className="w-4 h-4 shrink-0" />
-          <span><strong>Couldn&apos;t load this board.</strong> {planeError}</span>
+          <span><strong>Couldn&apos;t load this board.</strong> {loadError}</span>
         </div>
       )}
 
-      {!planeError && states.length === 0 && (
+      {!loadError && states.length === 0 && (
         <p className="text-(--rs-neutral-grey-500) italic text-sm">
           No workflow states configured for this project.
         </p>

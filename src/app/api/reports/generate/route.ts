@@ -189,7 +189,7 @@ function buildSheet(
   row++;
 
   // Section 4 — Pending Projects (auto)
-  row = writeSectionHeader(ws, row, 'SECTION 4 — PENDING PROJECTS  (auto-populated from Plane)');
+  row = writeSectionHeader(ws, row, 'SECTION 4 — PENDING PROJECTS  (auto-populated)');
   row = writeColHeaders(ws, row, ['Project Name', 'Task Title', 'TAT Estimate', 'Status', 'Remarks']);
 
   if (pendingTasks.length > 0) {
@@ -230,7 +230,7 @@ function buildSheet(
   row++;
 
   // Section 5 — Key Accomplishments (auto)
-  row = writeSectionHeader(ws, row, 'SECTION 5 — KEY ACCOMPLISHMENTS  (auto-populated from Plane)');
+  row = writeSectionHeader(ws, row, 'SECTION 5 — KEY ACCOMPLISHMENTS  (auto-populated)');
   row = writeColHeaders(ws, row, ['Description', 'Completion Date', 'Remarks', '', '']);
 
   if (completedTasks.length > 0) {
@@ -305,7 +305,7 @@ export async function POST(req: Request) {
     projects = await getProjects();
   } catch (err) {
     return Response.json(
-      { error: `Failed to fetch projects from Plane: ${err instanceof Error ? err.message : String(err)}` },
+      { error: `Failed to fetch projects: ${err instanceof Error ? err.message : String(err)}` },
       { status: 502 },
     );
   }

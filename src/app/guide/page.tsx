@@ -86,7 +86,7 @@ const FEATURES = [
   {
     icon: CheckSquare,
     title: 'Task Management',
-    desc: 'Track your work items and project progress synced from Plane.',
+    desc: 'Track your work items and project progress across teams.',
     color: 'text-(--rs-primary-500)',
     bg: 'bg-(--rs-primary-50)',
   },

@@ -63,7 +63,7 @@ export default async function DashboardPage() {
   let projects: Awaited<ReturnType<typeof getProjects>> = [];
   let members: Awaited<ReturnType<typeof getWorkspaceMembers>> = [];
   let allItems: ItemMeta[] = [];
-  let planeError: string | null = null;
+  let loadError: string | null = null;
 
   try {
     [projects, members] = await Promise.all([getProjects(), getWorkspaceMembers()]);
@@ -84,7 +84,7 @@ export default async function DashboardPage() {
     );
     allItems = byProject.flat();
   } catch (err) {
-    planeError = err instanceof Error ? err.message : 'Failed to connect to Plane';
+    loadError = err instanceof Error ? err.message : 'Failed to load workspace data';
   }
 
   const openGroups = new Set(['backlog', 'unstarted', 'started', 'in_progress', 'inprogress', 'todo', 'in progress']);
@@ -229,7 +229,7 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {planeError && (
+      {loadError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
           Could not load project data. Try refreshing; if it persists, contact an admin.
         </div>
@@ -311,7 +311,7 @@ export default async function DashboardPage() {
 
       {/* Project Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {projectStats.length === 0 && !planeError && (
+        {projectStats.length === 0 && !loadError && (
           <p className="text-(--rs-neutral-grey-500) col-span-4 text-sm italic">No projects found in workspace.</p>
         )}
         {projectStats.map(({ project, total, open, done, blocked }) => (

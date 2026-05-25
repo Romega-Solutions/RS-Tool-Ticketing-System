@@ -10,6 +10,7 @@ export const users = pgTable('users', {
   role:          text('role').notNull(),
   team:          text('team'),
   jobTitle:      text('job_title'),
+  memberCode:    text('member_code'),
   hourlyRateUsd: numeric('hourly_rate_usd', { precision: 10, scale: 2 }),
   isActive:               integer('is_active').notNull().default(1),
   reminderEnabled:        integer('reminder_enabled').notNull().default(1),

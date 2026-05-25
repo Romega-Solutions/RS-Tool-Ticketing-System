@@ -29,7 +29,7 @@ export default async function ProjectsPage({
 
   let projects: Awaited<ReturnType<typeof getProjects>> = [];
   let stats: Record<string, { total: number; open: number; done: number }> = {};
-  let planeError: string | null = null;
+  let loadError: string | null = null;
 
   try {
     projects = await getProjects({ team: effectiveTeam });
@@ -50,7 +50,7 @@ export default async function ProjectsPage({
     );
     stats = Object.fromEntries(results.map(r => [r.id, r]));
   } catch (err) {
-    planeError = err instanceof Error ? err.message : 'Failed to connect to Plane';
+    loadError = err instanceof Error ? err.message : 'Failed to load projects';
   }
 
   return (
@@ -90,13 +90,13 @@ export default async function ProjectsPage({
         </div>
       </div>
 
-      {planeError && (
+      {loadError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
           Couldn&apos;t load projects. Refresh; if it persists, contact an admin.
         </div>
       )}
 
-      {projects.length === 0 && !planeError && (
+      {projects.length === 0 && !loadError && (
         <p className="text-(--rs-neutral-grey-500) italic text-sm">No projects found in workspace.</p>
       )}
 
@@ -146,7 +146,7 @@ export default async function ProjectsPage({
         })}
       </div>
 
-      {projects.length === 0 && planeError && (
+      {projects.length === 0 && loadError && (
         <div className="flex flex-col items-center justify-center py-16 text-(--rs-neutral-grey-400)">
           <Briefcase className="w-12 h-12 mb-4 opacity-30" />
           <p className="text-sm">No projects yet.</p>

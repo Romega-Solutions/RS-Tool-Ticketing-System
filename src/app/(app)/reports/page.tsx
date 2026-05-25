@@ -1,7 +1,6 @@
 import { getSession } from '@/lib/session';
 import { canAccessReports } from '@/lib/rbac';
 import { GenerateReportButton } from '@/components/generate-report-button';
-import { ReportsManagementPanel } from '@/components/reports-management-panel';
 import { MyReportButton } from '@/components/my-report-button';
 
 export default async function ReportsPage() {
@@ -16,18 +15,14 @@ export default async function ReportsPage() {
           <h1 className="text-2xl font-serif font-bold text-(--rs-neutral-grey-900)">Weekly Reports</h1>
           <p className="text-sm text-(--rs-neutral-grey-500)">
             {isLeadOrAdmin
-              ? 'Generate reports, download existing files, and inspect workspace members.'
-              : 'Download your weekly activity report from Plane.'}
+              ? 'Generate weekly activity reports for the team. Files download immediately — no past-reports archive yet.'
+              : 'Download your weekly activity report.'}
           </p>
         </div>
         {isLeadOrAdmin && <GenerateReportButton />}
       </div>
 
-      {isLeadOrAdmin ? (
-        <ReportsManagementPanel />
-      ) : (
-        <MyReportButton memberName={sessionUser?.name ?? 'Unknown'} />
-      )}
+      {!isLeadOrAdmin && <MyReportButton memberName={sessionUser?.name ?? 'Unknown'} />}
     </div>
   );
 }

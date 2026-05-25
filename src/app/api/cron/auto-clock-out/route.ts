@@ -18,17 +18,19 @@ type OpenRow = {
 };
 
 // GET /api/cron/auto-clock-out
-// Vercel cron hits this every minute. Closes open sessions that have:
+// Hit on a schedule (Vercel cron daily on Hobby plan, plus an n8n trigger
+// every minute for tight enforcement). Closes open sessions that have:
 //   * been clocked in > 3h + 5min
 //   * no live consent extension (or the extension expired > 5min ago)
 //   * a non-admin role (admin/ceo are exempt — they normalize to "admin")
 export async function GET(req: Request) {
   const expected = process.env.CRON_SECRET;
-  if (expected) {
-    const auth = req.headers.get('authorization') ?? '';
-    if (auth !== `Bearer ${expected}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+  if (!expected) {
+    return NextResponse.json({ error: 'CRON_SECRET is not configured' }, { status: 500 });
+  }
+  const auth = req.headers.get('authorization') ?? '';
+  if (auth !== `Bearer ${expected}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const admin = createAdminClient();
