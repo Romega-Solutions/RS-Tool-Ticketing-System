@@ -1,7 +1,6 @@
 import { ReactNode } from "react";
 import { AppSidebar, MobileNav } from "@/components/app-sidebar";
 import { getSession } from "@/lib/session";
-import { createClient } from "@/lib/supabase/server";
 import { canAccessPath, defaultLandingPath } from "@/lib/rbac";
 import { ClockWidget } from "@/components/clock-widget";
 import { LiveClock } from "@/components/live-clock";
@@ -34,12 +33,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
 
   if (!session) {
-    // They may have a valid Supabase auth session but no public.users row yet
-    // (e.g. email confirmed but callback failed to write DB row)
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) redirect('/onboarding');
-    else redirect('/login');
+    // No usable users row — could be a stale Supabase cookie, an inactive
+    // account, or a row that never got written. Always send to /login; the
+    // proxy clears the stale sb-* cookies when it sees ?stale=1 so we don't
+    // loop back into the app. Genuine new sign-ups never hit this branch —
+    // auth/callback redirects them to /onboarding directly.
+    redirect('/login?stale=1');
   }
 
   const headersList = await headers();

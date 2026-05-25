@@ -47,6 +47,13 @@ export async function proxy(request: NextRequest) {
   }
 
   if (isLoginPage) {
+    // ?stale=1 is set by (app)/layout when getSession() is null but a
+    // Supabase auth cookie still exists — clear the dead cookies and render
+    // /login, otherwise we'd bounce the user straight back into the app.
+    const isStale = request.nextUrl.searchParams.get('stale') === '1';
+    if (isStale) {
+      return clearAuthCookies(supabaseResponse);
+    }
     if (user) {
       return NextResponse.redirect(new URL('/dashboard', request.url));
     }
