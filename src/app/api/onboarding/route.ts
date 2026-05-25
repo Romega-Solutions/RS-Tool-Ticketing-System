@@ -25,9 +25,11 @@ export async function POST(req: Request) {
 
   const email = user.email;
 
-  // Trusted domains can self-assign roles; all others are forced to IC
+  // Only the Romega org domain can self-assign roles. Public domains like
+  // gmail.com are forced to IC — an admin can promote them afterwards.
+  // Without this, any random gmail signup could pick "ceo" and gain admin.
   const domain = email.split('@')[1] ?? '';
-  const isTrusted = ['romega-solutions.com', 'gmail.com'].includes(domain);
+  const isTrusted = domain === 'romega-solutions.com';
   const selfAssignableRole = isTrusted && ['intern', 'ic', 'lead', 'ceo'].includes(role) ? role : 'ic';
 
   const now = new Date().toISOString();

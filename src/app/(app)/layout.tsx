@@ -1,6 +1,8 @@
 import { ReactNode } from "react";
 import { AppSidebar, MobileNav } from "@/components/app-sidebar";
 import { getSession } from "@/lib/session";
+import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { canAccessPath, defaultLandingPath } from "@/lib/rbac";
 import { ClockWidget } from "@/components/clock-widget";
 import { LiveClock } from "@/components/live-clock";
@@ -33,12 +35,24 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
 
   if (!session) {
-    // No usable users row — could be a stale Supabase cookie, an inactive
-    // account, or a row that never got written. Always send to /login; the
-    // proxy clears the stale sb-* cookies when it sees ?stale=1 so we don't
-    // loop back into the app. Genuine new sign-ups never hit this branch —
-    // auth/callback redirects them to /onboarding directly.
-    redirect('/login?stale=1');
+    // Disambiguate: stale cookie vs. missing DB row vs. deactivated account.
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user?.email) {
+      redirect('/login');
+    }
+    const admin = createAdminClient();
+    const { data: dbUser } = await admin
+      .from('users')
+      .select('is_active')
+      .eq('email', user.email)
+      .maybeSingle();
+    if (!dbUser) {
+      // Supabase auth OK but no public.users row — recovery via onboarding.
+      redirect('/onboarding');
+    }
+    // Row exists but is_active=0 → deactivated. Clear cookies on /login.
+    redirect('/login?stale=1&reason=inactive');
   }
 
   const headersList = await headers();

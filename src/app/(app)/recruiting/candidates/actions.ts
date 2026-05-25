@@ -838,9 +838,16 @@ export async function createPublicApplication(args: {
   const cleanedPhone = formatPhoneNumber(args.phone);
 
   // Parse resume via the existing n8n extractor. Failure is non-fatal —
-  // we still create the candidate so the application isn't lost.
-  const parseResult = await parseResumeWithN8n(args.resume);
-  const parsed = parseResult.success ? parseResult.data : null;
+  // we still create the candidate so the application isn't lost. The helper
+  // already returns {success:false} on HTTP errors, but a network throw
+  // (n8n down, DNS failure) would crash the request without this guard.
+  let parsed: ParsedResume | null = null;
+  try {
+    const parseResult = await parseResumeWithN8n(args.resume);
+    if (parseResult.success) parsed = parseResult.data;
+  } catch (err) {
+    console.error('[createPublicApplication] parseResumeWithN8n threw:', err);
+  }
 
   const applicationCode = await mintApplicationCode(supabase);
 
@@ -876,39 +883,53 @@ export async function createPublicApplication(args: {
   }
 
   // Synthetic "system" session for history rows on public applications.
+  // Role is 'ic' (least privilege) — this session is only used for audit
+  // attribution, never for authorization.
   const systemSession: SessionUser = {
     id: 0,
     email:    'system@romega',
     name:     'Public Application',
     username: 'system',
-    role:     'admin',
+    role:     'ic',
     team:     null,
     jobTitle: null,
     isOnboarding: false,
   };
 
-  await writeHistory(supabase, inserted.id, systemSession, [{
-    field:    'created',
-    oldValue: null,
-    newValue: cleanedName,
-    summary:  applicationCode
-      ? `Public application received (${applicationCode}) for ${position.job_title}`
-      : `Public application received for ${position.job_title}`,
-  }]);
+  try {
+    await writeHistory(supabase, inserted.id, systemSession, [{
+      field:    'created',
+      oldValue: null,
+      newValue: cleanedName,
+      summary:  applicationCode
+        ? `Public application received (${applicationCode}) for ${position.job_title}`
+        : `Public application received for ${position.job_title}`,
+    }]);
+  } catch (err) {
+    console.error('[createPublicApplication] writeHistory failed:', err);
+  }
 
-  await tryUploadResume({
-    supabase,
-    candidateId: inserted.id,
-    position:    position.job_title,
-    fullName:    cleanedName,
-    file:        args.resume,
-  });
+  try {
+    await tryUploadResume({
+      supabase,
+      candidateId: inserted.id,
+      position:    position.job_title,
+      fullName:    cleanedName,
+      file:        args.resume,
+    });
+  } catch (err) {
+    console.error('[createPublicApplication] tryUploadResume threw:', err);
+  }
 
-  await fireAutoCommunication(
-    supabase, systemSession, inserted.id,
-    { kind: 'created', candidateId: inserted.id },
-    'acknowledgment',
-  );
+  try {
+    await fireAutoCommunication(
+      supabase, systemSession, inserted.id,
+      { kind: 'created', candidateId: inserted.id },
+      'acknowledgment',
+    );
+  } catch (err) {
+    console.error('[createPublicApplication] fireAutoCommunication threw:', err);
+  }
 
   // Ping the assigned recruiter so they know an application landed.
   // Non-fatal — the candidate row is the source of truth either way.

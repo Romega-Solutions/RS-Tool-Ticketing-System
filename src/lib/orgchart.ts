@@ -141,14 +141,17 @@ export async function lookupPerson(opts: { email?: string; name?: string }): Pro
   if (!people.length) return null;
 
   const active = people.filter(p => p.isActive !== false && p.isActive !== 0);
-  console.log(`[orgchart] ${active.length} active people; email="${email ?? ''}" name="${name ?? ''}"`);
+  // Logs never include the actual email or name — those would leak PII into
+  // Vercel/server logs that any teammate with log access could read.
+  const haveEmail = Boolean(email);
+  const haveName  = Boolean(name && name.trim().length >= 2);
 
   // 1. Email — exact, case-insensitive (works only if API returns email field)
   if (email) {
     const normEmail = email.toLowerCase().trim();
     const byEmail   = active.find(p => p.email?.toLowerCase().trim() === normEmail);
     if (byEmail) {
-      console.log(`[orgchart] matched by email → ${byEmail.name}`);
+      console.log(`[orgchart] matched by email (active=${active.length})`);
       return buildOrgPerson(byEmail, active);
     }
   }
@@ -158,21 +161,19 @@ export async function lookupPerson(opts: { email?: string; name?: string }): Pro
     const normName = normalizeStr(name);
     const byExact  = active.find(p => normalizeStr(p.name) === normName);
     if (byExact) {
-      console.log(`[orgchart] matched by exact name → ${byExact.name}`);
+      console.log(`[orgchart] matched by exact name (active=${active.length})`);
       return buildOrgPerson(byExact, active);
     }
 
     // 3. Name — first + last token (handles middle names, accents, suffixes)
     const byTokens = active.find(p => firstLastMatch(p.name, name));
     if (byTokens) {
-      console.log(`[orgchart] matched by first+last tokens → ${byTokens.name}`);
+      console.log(`[orgchart] matched by first+last tokens (active=${active.length})`);
       return buildOrgPerson(byTokens, active);
     }
-
-    const sample = active.slice(0, 5).map(p => p.name).join(', ');
-    console.log(`[orgchart] no match for "${name}". Sample: ${sample}`);
   }
 
+  console.log(`[orgchart] no match (active=${active.length} haveEmail=${haveEmail} haveName=${haveName})`);
   return null;
 }
 

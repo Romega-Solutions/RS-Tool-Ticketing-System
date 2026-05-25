@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
       (authUser.user_metadata?.name as string | undefined)
     )?.trim() || emailPrefix;
     const now = new Date().toISOString();
-    await admin.from('users').upsert({
+    const { error: insertError } = await admin.from('users').upsert({
       username:      emailPrefix,
       password_hash: '',
       name,
@@ -72,6 +72,21 @@ export async function GET(request: NextRequest) {
       created_at:    now,
       updated_at:    now,
     }, { onConflict: 'email', ignoreDuplicates: true });
+    if (insertError) {
+      console.error('[auth/callback] users insert failed:', insertError);
+      return NextResponse.redirect(new URL('/login?error=signup_failed', request.url));
+    }
+    // ignoreDuplicates silently no-ops on username clashes etc., so re-fetch
+    // and hard-fail rather than redirecting to /onboarding with no DB row.
+    const { data: verify } = await admin
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .maybeSingle();
+    if (!verify) {
+      console.error('[auth/callback] users row missing after upsert for', email);
+      return NextResponse.redirect(new URL('/login?error=signup_failed', request.url));
+    }
     isNewUser = true;
 
     // Enrich new user from org chart (silent fail — never blocks auth)

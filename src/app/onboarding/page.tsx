@@ -10,7 +10,7 @@ import { Loader2, ArrowRight, Lock, CheckCircle2, User, Users2, Briefcase, Gradu
 import type { OrgPerson } from '@/lib/orgchart';
 import { createClient } from '@/lib/supabase/client';
 
-const TRUSTED_DOMAINS = ['romega-solutions.com', 'gmail.com'];
+const TRUSTED_DOMAINS = ['romega-solutions.com'];
 
 const DEPARTMENTS = [
   'AI & Technology',

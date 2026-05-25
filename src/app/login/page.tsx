@@ -9,7 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, Loader2, LogIn, UserPlus, MailCheck, CheckSquare, Clock, FileText, BarChart2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
-const TRUSTED_DOMAINS_LABEL = '@romega-solutions.com or @gmail.com';
+const TRUSTED_DOMAINS_LABEL = '@romega-solutions.com';
 const SHOW_DEMO = process.env.NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS === 'true';
 
 const demoUsers = [
@@ -45,14 +45,22 @@ function LoginContent() {
   const router       = useRouter();
   const searchParams = useSearchParams();
   const authError    = searchParams.get('error');
+  const staleReason  = searchParams.get('reason');
+  const isStale      = searchParams.get('stale') === '1';
 
   const [tab, setTab]               = useState<'signin' | 'signup'>('signin');
   const [showPassword, setShowPass]  = useState(false);
   const [signUpDone, setSignUpDone]  = useState(false);
   const [signUpEmail, setSignUpEmail] = useState('');
-  const [serverError, setServerError] = useState(
-    authError === 'auth_failed' ? 'Email confirmation failed. Please try again.' : ''
-  );
+  const [serverError, setServerError] = useState(() => {
+    if (authError === 'auth_failed')   return 'Email confirmation failed. Please try again.';
+    if (authError === 'signup_failed') return 'Account setup failed. Please contact your admin.';
+    if (isStale && staleReason === 'inactive') {
+      return 'Your account is inactive. Please contact your admin to re-activate it.';
+    }
+    if (isStale) return 'Your session expired. Please sign in again.';
+    return '';
+  });
   const [errorKey, setErrorKey] = useState(0);
   const [navigating, setNavigating] = useState(false);
 
