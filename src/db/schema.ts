@@ -13,6 +13,7 @@ export const users = pgTable('users', {
   memberCode:    text('member_code'),
   hourlyRateUsd: numeric('hourly_rate_usd', { precision: 10, scale: 2 }),
   isActive:               integer('is_active').notNull().default(1),
+  isOnboarding:           integer('is_onboarding').notNull().default(0),
   reminderEnabled:        integer('reminder_enabled').notNull().default(1),
   reminderIntervalMinutes: integer('reminder_interval_minutes').notNull().default(120),
   createdAt:              text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
