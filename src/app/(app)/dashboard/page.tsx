@@ -1,7 +1,9 @@
+import { Suspense } from 'react';
 import { getSession } from '@/lib/session';
 import { getProjects, getProjectStates, getWorkspaceMembers, getWorkItems, buildStateLookup, enrichWorkItems } from '@/lib/tickets';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { AlertCircle, Clock, Users, FileText } from "lucide-react";
 import Link from 'next/link';
 import { HoursChart } from '@/components/hours-chart';
@@ -14,7 +16,6 @@ function stateGroup(item: { state_detail?: { group?: string } }) {
 const PRIORITY_ICON: Record<string, string> = {
   urgent: '🔴', high: '🔴', medium: '🟡', low: '🟢', none: '⚪',
 };
-
 
 function getWeekStart(): string {
   const d = new Date();
@@ -38,28 +39,257 @@ type AttStatusRow = {
   sunday_status: string | null;
 };
 
+const OPEN_GROUPS = new Set(['backlog', 'unstarted', 'started', 'in_progress', 'inprogress', 'todo', 'in progress']);
+
 export default async function DashboardPage() {
   const sessionUser = await getSession();
-  // "My tasks" matches against either the user's id (assignee_ids) or email
-  // (assignees) — getWorkItems populates both.
-  const myUserId = sessionUser ? String(sessionUser.id) : null;
-  const myEmail  = sessionUser?.email ?? null;
   const isFriday = new Date().getDay() === 5;
 
-  type ItemMeta = {
-    id: string;
-    name: string;
-    priority: string;
-    assignees: string[];
-    assignee_ids?: string[];
-    target_date?: string | null;
-    state_detail?: { id: string; name: string; group: string; color: string };
-    label_detail?: Array<{ id: string; name: string; color: string }>;
-    _projectId: string;
-    _projectName: string;
-    _projectIdentifier: string;
-  };
+  return (
+    <div className="space-y-6">
+      {isFriday && (
+        <div className="bg-(--rs-accent-100) border border-(--rs-accent-300) text-(--rs-accent-800) px-4 py-3 rounded-lg flex items-center gap-3 font-medium text-sm">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          Weekly report due today at 11:59 PM — don&apos;t forget to submit.
+        </div>
+      )}
 
+      <FxRateWidget />
+
+      <Suspense fallback={<SummarySkeleton />}>
+        <SummarySection />
+      </Suspense>
+
+      <Suspense fallback={<HoursSkeleton />}>
+        <HoursSection userId={sessionUser?.id ?? null} />
+      </Suspense>
+
+      <Suspense fallback={<TicketsSkeleton />}>
+        <TicketsSection
+          userId={sessionUser ? String(sessionUser.id) : null}
+          userEmail={sessionUser?.email ?? null}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Summary cards (attendance today + weekly reports submitted)
+   ────────────────────────────────────────────────────────────────── */
+async function SummarySection() {
+  let attendanceToday = { present: 0, total: 0 };
+  let reportsSummary  = { submitted: 0, total: 0 };
+  const weekStart = getWeekStart();
+
+  try {
+    const admin = createAdminClient();
+    const dayCol = `${getTodayDayName()}_status` as keyof AttStatusRow;
+
+    const [usersRes, attendRes, reportsRes] = await Promise.all([
+      admin.from('users').select('id', { count: 'exact', head: true }).eq('is_active', 1),
+      admin.from('attendance')
+        .select('monday_status,tuesday_status,wednesday_status,thursday_status,friday_status,saturday_status,sunday_status')
+        .eq('week_start', weekStart),
+      admin.from('weekly_reports').select('submitted_at').eq('week_start', weekStart),
+    ]);
+
+    const total = usersRes.count ?? 0;
+    const present = ((attendRes.data ?? []) as AttStatusRow[]).filter(r => {
+      const val = r[dayCol];
+      return val === 'present' || val === 'wfh';
+    }).length;
+
+    attendanceToday = { present, total };
+    reportsSummary = {
+      submitted: ((reportsRes.data ?? []) as { submitted_at: string | null }[]).filter(r => r.submitted_at).length,
+      total,
+    };
+  } catch { /* best-effort */ }
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <Link href="/attendance">
+        <Card className="hover:shadow-md hover:border-(--rs-primary-300) transition-all cursor-pointer h-full">
+          <CardContent className="flex items-center justify-between px-5 py-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-(--rs-neutral-grey-500)">
+                Attendance Today
+              </p>
+              <p className="mt-1 text-2xl font-bold tabular-nums text-(--rs-neutral-grey-900)">
+                {attendanceToday.present}
+                <span className="text-sm font-normal text-(--rs-neutral-grey-400)">
+                  /{attendanceToday.total}
+                </span>
+              </p>
+              <p className="text-xs text-(--rs-neutral-grey-400) mt-0.5">
+                {attendanceToday.total > 0
+                  ? `${Math.round((attendanceToday.present / attendanceToday.total) * 100)}% present or WFH`
+                  : 'No records yet today'}
+              </p>
+            </div>
+            <div className="w-10 h-10 rounded-full bg-(--rs-primary-50) flex items-center justify-center shrink-0">
+              <Users className="w-5 h-5 text-(--rs-primary-500)" />
+            </div>
+          </CardContent>
+        </Card>
+      </Link>
+
+      <Link href="/reports">
+        <Card className="hover:shadow-md hover:border-(--rs-accent-300) transition-all cursor-pointer h-full">
+          <CardContent className="flex items-center justify-between px-5 py-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-(--rs-neutral-grey-500)">
+                Weekly Reports
+              </p>
+              <p className="mt-1 text-2xl font-bold tabular-nums text-(--rs-neutral-grey-900)">
+                {reportsSummary.submitted}
+                <span className="text-sm font-normal text-(--rs-neutral-grey-400)">
+                  /{reportsSummary.total}
+                </span>
+              </p>
+              <p className="text-xs text-(--rs-neutral-grey-400) mt-0.5">
+                {reportsSummary.total - reportsSummary.submitted > 0
+                  ? `${reportsSummary.total - reportsSummary.submitted} pending this week`
+                  : 'All submitted this week'}
+              </p>
+            </div>
+            <div className="w-10 h-10 rounded-full bg-(--rs-accent-50) flex items-center justify-center shrink-0">
+              <FileText className="w-5 h-5 text-(--rs-accent-500)" />
+            </div>
+          </CardContent>
+        </Card>
+      </Link>
+    </div>
+  );
+}
+
+function SummarySkeleton() {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {Array.from({ length: 2 }).map((_, i) => (
+        <Card key={i}>
+          <CardContent className="flex items-center justify-between px-5 py-4">
+            <div className="space-y-2 w-full">
+              <Skeleton className="h-3 w-32" />
+              <Skeleton className="h-8 w-20" />
+              <Skeleton className="h-3 w-40" />
+            </div>
+            <Skeleton className="w-10 h-10 rounded-full" />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Hours chart (timesheets for the signed-in user)
+   ────────────────────────────────────────────────────────────────── */
+async function HoursSection({ userId }: { userId: number | null }) {
+  const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  let weeklyData:  { day: string;  hours: number }[] = DAY_NAMES.map(d => ({ day: d, hours: 0 }));
+  let monthlyData: { week: string; hours: number }[] = Array.from({ length: 4 }, (_, i) => ({ week: `Wk ${i + 1}`, hours: 0 }));
+  let totalWeekHours  = 0;
+  let totalMonthHours = 0;
+
+  if (userId) {
+    try {
+      const admin    = createAdminClient();
+      const weekStart = getWeekStart();
+      const today    = new Date().toISOString().split('T')[0];
+      const monthAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      const { data: tsRows } = await admin
+        .from('timesheets')
+        .select('date, duration_seconds')
+        .eq('user_id', userId)
+        .gte('date', monthAgo)
+        .lte('date', today)
+        .not('duration_seconds', 'is', null);
+
+      const rows = (tsRows ?? []) as { date: string; duration_seconds: number }[];
+
+      const wkDates = DAY_NAMES.map((_, i) => {
+        const d = new Date(weekStart);
+        d.setDate(d.getDate() + i);
+        return d.toISOString().split('T')[0];
+      });
+      weeklyData = DAY_NAMES.map((day, i) => {
+        const secs = rows.filter(r => r.date === wkDates[i]).reduce((s, r) => s + (r.duration_seconds ?? 0), 0);
+        return { day, hours: Math.round((secs / 3600) * 10) / 10 };
+      });
+      totalWeekHours = Math.round(weeklyData.reduce((s, d) => s + d.hours, 0) * 10) / 10;
+
+      const wkStarts = Array.from({ length: 4 }, (_, i) => {
+        const ms = new Date(weekStart);
+        ms.setDate(ms.getDate() - (3 - i) * 7);
+        return ms.toISOString().split('T')[0];
+      });
+      monthlyData = wkStarts.map((ws, i) => {
+        const we = new Date(ws);
+        we.setDate(we.getDate() + 7);
+        const weStr = we.toISOString().split('T')[0];
+        const secs = rows.filter(r => r.date >= ws && r.date < weStr).reduce((s, r) => s + (r.duration_seconds ?? 0), 0);
+        return { week: `Wk ${i + 1}`, hours: Math.round((secs / 3600) * 10) / 10 };
+      });
+      totalMonthHours = Math.round(monthlyData.reduce((s, d) => s + d.hours, 0) * 10) / 10;
+    } catch { /* best-effort */ }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg font-serif flex items-center gap-2">
+          <Clock className="w-5 h-5 text-(--rs-primary-500)" /> My Hours
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <HoursChart
+          weeklyData={weeklyData}
+          monthlyData={monthlyData}
+          totalWeekHours={totalWeekHours}
+          totalMonthHours={totalMonthHours}
+        />
+      </CardContent>
+    </Card>
+  );
+}
+
+function HoursSkeleton() {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-lg font-serif flex items-center gap-2">
+          <Clock className="w-5 h-5 text-(--rs-primary-500)" /> My Hours
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Skeleton className="h-48 w-full" />
+      </CardContent>
+    </Card>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Tickets section (projects + my tasks + deadlines + workload + blockers)
+   This is the slowest part of the page — N+1 over projects.
+   ────────────────────────────────────────────────────────────────── */
+type ItemMeta = {
+  id: string;
+  name: string;
+  priority: string;
+  assignees: string[];
+  assignee_ids?: string[];
+  target_date?: string | null;
+  state_detail?: { id: string; name: string; group: string; color: string };
+  label_detail?: Array<{ id: string; name: string; color: string }>;
+  _projectId: string;
+  _projectName: string;
+  _projectIdentifier: string;
+};
+
+async function TicketsSection({ userId, userEmail }: { userId: string | null; userEmail: string | null }) {
   let projects: Awaited<ReturnType<typeof getProjects>> = [];
   let members: Awaited<ReturnType<typeof getWorkspaceMembers>> = [];
   let allItems: ItemMeta[] = [];
@@ -87,11 +317,9 @@ export default async function DashboardPage() {
     loadError = err instanceof Error ? err.message : 'Failed to load workspace data';
   }
 
-  const openGroups = new Set(['backlog', 'unstarted', 'started', 'in_progress', 'inprogress', 'todo', 'in progress']);
-
   const projectStats = projects.map(p => {
     const items = allItems.filter(i => i._projectId === p.id);
-    const open = items.filter(i => openGroups.has(stateGroup(i))).length;
+    const open = items.filter(i => OPEN_GROUPS.has(stateGroup(i))).length;
     const done = items.filter(i => stateGroup(i) === 'completed').length;
     const blocked = items.filter(i =>
       i.label_detail?.some(l => l.name.toLowerCase().includes('blocker'))
@@ -100,12 +328,11 @@ export default async function DashboardPage() {
   });
 
   const assignedToMe = (item: ItemMeta) =>
-    !!sessionUser &&
-    ((myUserId !== null && item.assignee_ids?.includes(myUserId)) ||
-     (myEmail  !== null && item.assignees?.includes(myEmail)));
+    (userId  !== null && item.assignee_ids?.includes(userId)) ||
+    (userEmail !== null && item.assignees?.includes(userEmail));
 
-  const myTasks = sessionUser
-    ? allItems.filter(i => openGroups.has(stateGroup(i)) && assignedToMe(i)).slice(0, 3)
+  const myTasks = userId
+    ? allItems.filter(i => OPEN_GROUPS.has(stateGroup(i)) && assignedToMe(i)).slice(0, 3)
     : [];
 
   const now = new Date();
@@ -123,7 +350,7 @@ export default async function DashboardPage() {
     .map(m => ({
       member: m,
       count: allItems.filter(i =>
-        openGroups.has(stateGroup(i)) &&
+        OPEN_GROUPS.has(stateGroup(i)) &&
         (i.assignees?.includes(m.id) || i.assignee_ids?.includes(m.id))
       ).length,
     }))
@@ -133,181 +360,18 @@ export default async function DashboardPage() {
 
   const blockers = allItems
     .filter(i =>
-      openGroups.has(stateGroup(i)) &&
+      OPEN_GROUPS.has(stateGroup(i)) &&
       i.label_detail?.some(l => l.name.toLowerCase().includes('blocker'))
     )
     .slice(0, 4);
 
-  // Summary widgets — best-effort, don't break the page if DB is slow
-  let attendanceToday = { present: 0, total: 0 };
-  let reportsSummary = { submitted: 0, total: 0 };
-  const weekStart = getWeekStart();
-  try {
-    const admin = createAdminClient();
-    const dayCol = `${getTodayDayName()}_status` as keyof AttStatusRow;
-
-    const [usersRes, attendRes, reportsRes] = await Promise.all([
-      admin.from('users').select('id', { count: 'exact', head: true }).eq('is_active', 1),
-      admin.from('attendance')
-        .select('monday_status,tuesday_status,wednesday_status,thursday_status,friday_status,saturday_status,sunday_status')
-        .eq('week_start', weekStart),
-      admin.from('weekly_reports').select('submitted_at').eq('week_start', weekStart),
-    ]);
-
-    const total = usersRes.count ?? 0;
-    const present = ((attendRes.data ?? []) as AttStatusRow[]).filter(r => {
-      const val = r[dayCol];
-      return val === 'present' || val === 'wfh';
-    }).length;
-
-    attendanceToday = { present, total };
-    reportsSummary = {
-      submitted: ((reportsRes.data ?? []) as { submitted_at: string | null }[])
-        .filter(r => r.submitted_at).length,
-      total,
-    };
-  } catch { /* best-effort */ }
-
-  // Hours chart data — best-effort
-  const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  let weeklyData:  { day: string;  hours: number }[] = DAY_NAMES.map(d => ({ day: d, hours: 0 }));
-  let monthlyData: { week: string; hours: number }[] = Array.from({ length: 4 }, (_, i) => ({ week: `Wk ${i + 1}`, hours: 0 }));
-  let totalWeekHours  = 0;
-  let totalMonthHours = 0;
-
-  try {
-    if (sessionUser) {
-      const admin    = createAdminClient();
-      const today    = new Date().toISOString().split('T')[0];
-      const monthAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-
-      const { data: tsRows } = await admin
-        .from('timesheets')
-        .select('date, duration_seconds')
-        .eq('user_id', sessionUser.id)
-        .gte('date', monthAgo)
-        .lte('date', today)
-        .not('duration_seconds', 'is', null);
-
-      const rows = (tsRows ?? []) as { date: string; duration_seconds: number }[];
-
-      // Weekly: map each Mon–Sun date
-      const wkDates = DAY_NAMES.map((_, i) => {
-        const d = new Date(weekStart);
-        d.setDate(d.getDate() + i);
-        return d.toISOString().split('T')[0];
-      });
-      weeklyData = DAY_NAMES.map((day, i) => {
-        const secs = rows.filter(r => r.date === wkDates[i]).reduce((s, r) => s + (r.duration_seconds ?? 0), 0);
-        return { day, hours: Math.round((secs / 3600) * 10) / 10 };
-      });
-      totalWeekHours = Math.round(weeklyData.reduce((s, d) => s + d.hours, 0) * 10) / 10;
-
-      // Monthly: last 4 Mon-based weeks
-      const wkStarts = Array.from({ length: 4 }, (_, i) => {
-        const ms = new Date(weekStart);
-        ms.setDate(ms.getDate() - (3 - i) * 7);
-        return ms.toISOString().split('T')[0];
-      });
-      monthlyData = wkStarts.map((ws, i) => {
-        const we = new Date(ws);
-        we.setDate(we.getDate() + 7);
-        const weStr = we.toISOString().split('T')[0];
-        const secs = rows.filter(r => r.date >= ws && r.date < weStr).reduce((s, r) => s + (r.duration_seconds ?? 0), 0);
-        return { week: `Wk ${i + 1}`, hours: Math.round((secs / 3600) * 10) / 10 };
-      });
-      totalMonthHours = Math.round(monthlyData.reduce((s, d) => s + d.hours, 0) * 10) / 10;
-    }
-  } catch { /* best-effort */ }
-
   return (
     <div className="space-y-6">
-      {isFriday && (
-        <div className="bg-(--rs-accent-100) border border-(--rs-accent-300) text-(--rs-accent-800) px-4 py-3 rounded-lg flex items-center gap-3 font-medium text-sm">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          Weekly report due today at 11:59 PM — don&apos;t forget to submit.
-        </div>
-      )}
-
       {loadError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
           Could not load project data. Try refreshing; if it persists, contact an admin.
         </div>
       )}
-
-      <FxRateWidget />
-
-      {/* Quick Summary Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Link href="/attendance">
-          <Card className="hover:shadow-md hover:border-(--rs-primary-300) transition-all cursor-pointer h-full">
-            <CardContent className="flex items-center justify-between px-5 py-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-(--rs-neutral-grey-500)">
-                  Attendance Today
-                </p>
-                <p className="mt-1 text-2xl font-bold tabular-nums text-(--rs-neutral-grey-900)">
-                  {attendanceToday.present}
-                  <span className="text-sm font-normal text-(--rs-neutral-grey-400)">
-                    /{attendanceToday.total}
-                  </span>
-                </p>
-                <p className="text-xs text-(--rs-neutral-grey-400) mt-0.5">
-                  {attendanceToday.total > 0
-                    ? `${Math.round((attendanceToday.present / attendanceToday.total) * 100)}% present or WFH`
-                    : 'No records yet today'}
-                </p>
-              </div>
-              <div className="w-10 h-10 rounded-full bg-(--rs-primary-50) flex items-center justify-center shrink-0">
-                <Users className="w-5 h-5 text-(--rs-primary-500)" />
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link href="/reports">
-          <Card className="hover:shadow-md hover:border-(--rs-accent-300) transition-all cursor-pointer h-full">
-            <CardContent className="flex items-center justify-between px-5 py-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-(--rs-neutral-grey-500)">
-                  Weekly Reports
-                </p>
-                <p className="mt-1 text-2xl font-bold tabular-nums text-(--rs-neutral-grey-900)">
-                  {reportsSummary.submitted}
-                  <span className="text-sm font-normal text-(--rs-neutral-grey-400)">
-                    /{reportsSummary.total}
-                  </span>
-                </p>
-                <p className="text-xs text-(--rs-neutral-grey-400) mt-0.5">
-                  {reportsSummary.total - reportsSummary.submitted > 0
-                    ? `${reportsSummary.total - reportsSummary.submitted} pending this week`
-                    : 'All submitted this week'}
-                </p>
-              </div>
-              <div className="w-10 h-10 rounded-full bg-(--rs-accent-50) flex items-center justify-center shrink-0">
-                <FileText className="w-5 h-5 text-(--rs-accent-500)" />
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
-      </div>
-
-      {/* My Hours Chart */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg font-serif flex items-center gap-2">
-            <Clock className="w-5 h-5 text-(--rs-primary-500)" /> My Hours
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <HoursChart
-            weeklyData={weeklyData}
-            monthlyData={monthlyData}
-            totalWeekHours={totalWeekHours}
-            totalMonthHours={totalMonthHours}
-          />
-        </CardContent>
-      </Card>
 
       {/* Project Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -363,7 +427,7 @@ export default async function DashboardPage() {
             </Link>
           </CardHeader>
           <CardContent>
-            {!sessionUser ? (
+            {!userId ? (
               <p className="text-sm text-(--rs-neutral-grey-500) py-5 text-center">
                 Sign in to see your tasks.
               </p>
@@ -503,7 +567,39 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+    </div>
+  );
+}
 
+function TicketsSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Card key={i}>
+            <CardHeader className="pb-2">
+              <Skeleton className="h-3 w-12 mb-2" />
+              <Skeleton className="h-4 w-32" />
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="h-8 w-16" />
+              <Skeleton className="mt-3 h-1.5 w-full rounded-full" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {Array.from({ length: 2 }).map((_, i) => (
+          <Card key={i}>
+            <CardHeader className="pb-2"><Skeleton className="h-5 w-32" /></CardHeader>
+            <CardContent className="space-y-3">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-5/6" />
+              <Skeleton className="h-4 w-4/6" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
@@ -28,6 +28,16 @@ const navItems = [
   { href: "/wise-guide",        label: "Wise Integration",     icon: BookOpen,          category: "admin"     },
 ];
 
+function NavPendingDot({ collapsed }: { collapsed: boolean }) {
+  const { pending } = useLinkStatus();
+  return (
+    <span
+      aria-hidden
+      className={`nav-pending-dot ${pending ? "is-pending" : ""} ${collapsed ? "is-collapsed" : ""}`}
+    />
+  );
+}
+
 function NavLink({
   href,
   label,
@@ -44,7 +54,8 @@ function NavLink({
   return (
     <Link
       href={href}
-      className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors font-medium text-sm ${
+      prefetch
+      className={`relative flex items-center gap-3 px-3 py-2 rounded-md transition-colors font-medium text-sm ${
         collapsed ? "justify-center" : ""
       } ${
         active
@@ -56,6 +67,7 @@ function NavLink({
     >
       <Icon className={`w-4 h-4 shrink-0 ${active ? "text-(--rs-accent-400)" : ""}`} aria-hidden="true" />
       {!collapsed && <span className="truncate">{label}</span>}
+      <NavPendingDot collapsed={collapsed} />
     </Link>
   );
 }
@@ -322,13 +334,15 @@ export function AppSidebar({ role, userName, team }: { role: AppRole; userName: 
         )}
         <Link
           href="/profile"
-          className={`flex items-center gap-3 px-3 py-2 hover:bg-white/8 rounded-xl text-white/70 hover:text-white transition-colors text-sm font-medium ${
+          prefetch
+          className={`relative flex items-center gap-3 px-3 py-2 hover:bg-white/8 rounded-xl text-white/70 hover:text-white transition-colors text-sm font-medium ${
             collapsed ? "justify-center" : ""
           }`}
           title={collapsed ? "Profile" : undefined}
         >
           <User className="w-4 h-4 shrink-0" />
           {!collapsed && "My Profile"}
+          <NavPendingDot collapsed={collapsed} />
         </Link>
         <LogoutButton collapsed={collapsed} />
       </div>
@@ -366,9 +380,11 @@ export function MobileNav({ role, team }: { role: AppRole; team: string | null }
             <div className="mt-auto pt-4 border-t border-white/10 space-y-0.5">
               <Link
                 href="/profile"
-                className="flex items-center gap-3 px-3 py-2 hover:bg-white/6 rounded-md text-white/60 hover:text-white/90 transition-colors text-sm font-medium"
+                prefetch
+                className="relative flex items-center gap-3 px-3 py-2 hover:bg-white/6 rounded-md text-white/60 hover:text-white/90 transition-colors text-sm font-medium"
               >
                 <User className="w-4 h-4 shrink-0" /> Profile
+                <NavPendingDot collapsed={false} />
               </Link>
               <LogoutButton />
             </div>

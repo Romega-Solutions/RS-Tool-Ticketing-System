@@ -548,3 +548,53 @@ select,
 @utility animate-card-select {
   animation: card-select 0.35s ease-out both;
 }
+
+/* ── Sidebar nav pending indicator (useLinkStatus) ───────────────── */
+/* A subtle pulsing dot that appears only when navigation takes
+   long enough to be noticed (>100ms). Reserves layout space so it
+   never causes a shift. */
+.nav-pending-dot {
+  position: absolute;
+  right: 0.65rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--rs-accent-400);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.nav-pending-dot.is-collapsed {
+  right: 0.35rem;
+  top: 0.35rem;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes nav-pending-fade-in {
+    to { opacity: 1; }
+  }
+  @keyframes nav-pending-pulse {
+    0%, 100% { transform: translateY(-50%) scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--rs-accent-400) 45%, transparent); }
+    50%      { transform: translateY(-50%) scale(1.15); box-shadow: 0 0 0 4px color-mix(in srgb, var(--rs-accent-400) 0%, transparent); }
+  }
+  @keyframes nav-pending-pulse-collapsed {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--rs-accent-400) 45%, transparent); }
+    50%      { transform: scale(1.15); box-shadow: 0 0 0 4px color-mix(in srgb, var(--rs-accent-400) 0%, transparent); }
+  }
+
+  .nav-pending-dot.is-pending {
+    visibility: visible;
+    animation:
+      nav-pending-fade-in 180ms ease-out 100ms forwards,
+      nav-pending-pulse 1s ease-in-out 100ms infinite;
+  }
+  .nav-pending-dot.is-pending.is-collapsed {
+    animation:
+      nav-pending-fade-in 180ms ease-out 100ms forwards,
+      nav-pending-pulse-collapsed 1s ease-in-out 100ms infinite;
+  }
+}
