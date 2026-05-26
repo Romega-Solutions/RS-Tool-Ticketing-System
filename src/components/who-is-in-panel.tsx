@@ -234,14 +234,10 @@ export function WhoIsInPanel({ isAdmin = false }: { isAdmin?: boolean }) {
         }`}
         aria-label="Who's in"
       >
-        {/* Pulsing dot — green when someone is in, grey otherwise */}
+        {/* Status dot — green when someone is in, grey otherwise */}
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
           count > 0 && connected ? 'bg-green-500' : 'bg-(--rs-neutral-grey-300)'
-        }`}>
-          {count > 0 && connected && (
-            <span className="absolute inset-0 rounded-full bg-green-400 animate-ping opacity-60" />
-          )}
-        </span>
+        }`} />
         <span className="hidden sm:inline">Who&apos;s In</span>
         {count > 0 && (
           <span className="bg-green-100 text-green-700 font-bold px-1 rounded-full text-[10px] leading-none py-0.5">
