@@ -41,6 +41,9 @@ function playOvertimeAlert() {
     beep(880, 0, 0.25);
     beep(880, 0.3, 0.25);
     beep(1175, 0.6, 0.45);
+    // Last oscillator ends at ~1.05s — close the context shortly after so it
+    // doesn't linger until garbage collection on repeat OT prompts.
+    setTimeout(() => { ctx.close().catch(() => {}); }, 1200);
   } catch {
     // AudioContext blocked by browser policy — fail silently
   }

@@ -1,14 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clockOut } from '@/lib/presence';
-import { computeOvertime, OVERTIME_THRESHOLD_SECONDS } from '@/lib/utils';
-import { normalizeRole } from '@/lib/rbac';
+import { computeOvertime } from '@/lib/utils';
+import { decideAutoClockOut } from '@/lib/auto-clock-out';
 
 export const runtime = 'nodejs';
-
-// Grace window after the overtime prompt before we close the session.
-// Mirrors OVERTIME_RESPONSE_WINDOW_SECONDS in the browser widget.
-const RESPONSE_WINDOW_SECONDS = 5 * 60;
 
 type OpenRow = {
   id:                      number;
@@ -67,31 +63,19 @@ export async function GET(req: Request) {
   const skipped: Array<{ userId: number; reason: string }> = [];
 
   for (const row of rows) {
-    const clockedInMs = new Date(row.clocked_in_at).getTime();
-    if (!Number.isFinite(clockedInMs)) {
-      skipped.push({ userId: row.user_id, reason: 'invalid clocked_in_at' });
+    const decision = decideAutoClockOut({
+      clockedInAt:          row.clocked_in_at,
+      role:                 roleByUserId.get(row.user_id),
+      overtimeConsentUntil: row.overtime_consent_until,
+      now,
+    });
+
+    if (decision.action === 'skip') {
+      skipped.push({ userId: row.user_id, reason: decision.reason });
       continue;
     }
 
-    const elapsedSec = Math.round((now.getTime() - clockedInMs) / 1000);
-    if (elapsedSec < OVERTIME_THRESHOLD_SECONDS + RESPONSE_WINDOW_SECONDS) {
-      skipped.push({ userId: row.user_id, reason: 'within response window' });
-      continue;
-    }
-
-    if (normalizeRole(roleByUserId.get(row.user_id) ?? '') === 'admin') {
-      skipped.push({ userId: row.user_id, reason: 'admin/ceo exempt' });
-      continue;
-    }
-
-    if (row.overtime_consent_until) {
-      const consentMs = new Date(row.overtime_consent_until).getTime();
-      if (Number.isFinite(consentMs) && now.getTime() < consentMs + RESPONSE_WINDOW_SECONDS * 1000) {
-        skipped.push({ userId: row.user_id, reason: 'consent active' });
-        continue;
-      }
-    }
-
+    const elapsedSec = decision.elapsedSec;
     const outIso = now.toISOString();
     const { isOvertime, overtimeSeconds } = computeOvertime(elapsedSec);
     const { error: upErr } = await admin
