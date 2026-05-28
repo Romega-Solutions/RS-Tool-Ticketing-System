@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import Image from "next/image";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap, BookMarked } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import type { AppRole } from "@/lib/rbac";
@@ -14,6 +14,7 @@ const navItems = [
   { href: "/dashboard",         label: "Dashboard",           icon: LayoutDashboard, category: "main"      },
   { href: "/my-tasks",          label: "My Tasks",             icon: CheckSquare,     category: "main"      },
   { href: "/projects",          label: "Projects",             icon: Briefcase,       category: "main"      },
+  { href: "/learning",          label: "My Learning",          icon: BookMarked,      category: "main"      },
   { href: "/reports",           label: "Weekly Reports",       icon: FileText,        category: "main"      },
   { href: "/weekly-report",     label: "Status Report",        icon: ClipboardList,   category: "main"      },
   { href: "/attendance",        label: "Attendance",           icon: Calendar,        category: "reports"   },
@@ -24,6 +25,7 @@ const navItems = [
   { href: "/ceo/briefing",           label: "CEO / Briefing",      icon: Sun,           category: "leadTools" },
   { href: "/marketing/content",      label: "Marketing / Content", icon: Wand2,         category: "leadTools" },
   { href: "/admin/users",       label: "User Management",      icon: Shield,            category: "admin"     },
+  { href: "/admin/learning",    label: "Manage Learning",      icon: BookOpen,          category: "admin"     },
   { href: "/rates",             label: "Rates & Currency",     icon: CircleDollarSign,  category: "admin"     },
   { href: "/wise-guide",        label: "Wise Integration",     icon: BookOpen,          category: "admin"     },
 ];

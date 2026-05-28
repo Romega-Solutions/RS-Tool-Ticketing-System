@@ -61,6 +61,8 @@ export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string
 }
 
 export function canAccessPath(pathname: string, role: AppRole, team: string | null = null): boolean {
+  // /admin/* (including /admin/learning) is admin-only. /learning and
+  // /learning/certificates are open to all signed-in users.
   if (pathname.startsWith('/admin'))      return canAccessAdmin(role);
   if (pathname.startsWith('/rates'))      return canAccessAdmin(role);
   if (pathname.startsWith('/wise-guide')) return canAccessAdmin(role);

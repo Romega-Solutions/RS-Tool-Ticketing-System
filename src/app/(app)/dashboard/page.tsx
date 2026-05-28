@@ -8,6 +8,7 @@ import { AlertCircle, Clock, Users, FileText } from "lucide-react";
 import Link from 'next/link';
 import { HoursChart } from '@/components/hours-chart';
 import { FxRateWidget } from '@/components/fx-rate-widget';
+import { LearningBanner } from '@/components/lms/learning-banner';
 
 function stateGroup(item: { state_detail?: { group?: string } }) {
   return (item.state_detail?.group ?? '').toLowerCase();
@@ -55,6 +56,10 @@ export default async function DashboardPage() {
       )}
 
       <FxRateWidget />
+
+      <Suspense fallback={null}>
+        <LearningBanner />
+      </Suspense>
 
       <Suspense fallback={<SummarySkeleton />}>
         <SummarySection />

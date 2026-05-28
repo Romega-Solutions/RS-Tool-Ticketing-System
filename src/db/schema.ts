@@ -254,3 +254,118 @@ export const savedViews = pgTable('saved_views', {
   filters:   jsonb('filters').notNull(),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+// ─── LMS ──────────────────────────────────────────────────────────────────
+// Learning Management System — see docs/LMS_BUILD_PLAN.md.
+// Three audiences: Foundation (everyone), Department (matched by users.team),
+// Intern (matched by normalized role). Auto-assigned by selectors in
+// src/lib/lms.ts; lms_course_assignments only stores per-user overrides
+// (mainly due dates). Phase 1 ships the first three tables and the
+// soft-enforcement path; Phases 2 and 3 fill in quizzes, certificates,
+// assignments, comments, and the hard-enforcement gate.
+
+export const lmsCourses = pgTable('lms_courses', {
+  id:             serial('id').primaryKey(),
+  title:          text('title').notNull(),
+  description:    text('description'),
+  scope:          text('scope').notNull(),                    // 'foundation' | 'department' | 'intern'
+  department:     text('department'),                          // required when scope='department'
+  coverImageUrl:  text('cover_image_url'),
+  isPublished:    integer('is_published').notNull().default(0),
+  enforcement:    text('enforcement').notNull().default('soft'), // 'soft' | 'hard'
+  sortOrder:      integer('sort_order').notNull().default(0),
+  createdBy:      integer('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:      text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt:      text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const lmsLessons = pgTable('lms_lessons', {
+  id:                   serial('id').primaryKey(),
+  courseId:             integer('course_id').notNull().references(() => lmsCourses.id, { onDelete: 'cascade' }),
+  title:                text('title').notNull(),
+  lessonType:           text('lesson_type').notNull().default('text'), // 'text' | 'video' | 'mixed'
+  bodyMd:               text('body_md'),
+  videoSource:          text('video_source'),                          // 'youtube' | 'upload' | null
+  videoUrl:             text('video_url'),                             // YouTube URL or storage path
+  videoDurationSeconds: integer('video_duration_seconds'),
+  sortOrder:            integer('sort_order').notNull().default(0),
+  createdAt:            text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt:            text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const lmsLessonCompletions = pgTable('lms_lesson_completions', {
+  id:          serial('id').primaryKey(),
+  userId:      integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  lessonId:    integer('lesson_id').notNull().references(() => lmsLessons.id, { onDelete: 'cascade' }),
+  completedAt: text('completed_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  unique('lms_lesson_completions_user_lesson_unique').on(t.userId, t.lessonId),
+]);
+
+// Phase 2 — quizzes & certificates (schema ready; UI lands in a follow-up commit on this branch)
+
+export const lmsQuizzes = pgTable('lms_quizzes', {
+  id:          serial('id').primaryKey(),
+  lessonId:    integer('lesson_id').notNull().unique().references(() => lmsLessons.id, { onDelete: 'cascade' }),
+  passScore:   integer('pass_score').notNull().default(70),
+  maxAttempts: integer('max_attempts'),
+  createdAt:   text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt:   text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const lmsQuizQuestions = pgTable('lms_quiz_questions', {
+  id:           serial('id').primaryKey(),
+  quizId:       integer('quiz_id').notNull().references(() => lmsQuizzes.id, { onDelete: 'cascade' }),
+  prompt:       text('prompt').notNull(),
+  questionType: text('question_type').notNull(),     // 'multiple_choice' | 'true_false'
+  choices:      jsonb('choices').notNull(),          // [{key:'a', text:'…'}, …]
+  correctKeys:  jsonb('correct_keys').notNull(),     // ['a', 'b']
+  sortOrder:    integer('sort_order').notNull().default(0),
+});
+
+export const lmsQuizAttempts = pgTable('lms_quiz_attempts', {
+  id:          serial('id').primaryKey(),
+  userId:      integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  quizId:      integer('quiz_id').notNull().references(() => lmsQuizzes.id, { onDelete: 'cascade' }),
+  answers:     jsonb('answers').notNull(),           // { [questionId]: [chosenKeys] }
+  score:       integer('score').notNull(),
+  passed:      integer('passed').notNull(),
+  startedAt:   text('started_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  submittedAt: text('submitted_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const lmsCertificates = pgTable('lms_certificates', {
+  id:        serial('id').primaryKey(),
+  userId:    integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  courseId:  integer('course_id').notNull().references(() => lmsCourses.id, { onDelete: 'cascade' }),
+  issuedAt:  text('issued_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  pdfPath:   text('pdf_path'),
+  serial:    text('serial').notNull().unique(),
+}, (t) => [
+  unique('lms_certificates_user_course_unique').on(t.userId, t.courseId),
+]);
+
+// Phase 3 — assignments & discussion (schema ready; UI lands in a follow-up commit on this branch)
+
+export const lmsCourseAssignments = pgTable('lms_course_assignments', {
+  id:             serial('id').primaryKey(),
+  userId:         integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  courseId:       integer('course_id').notNull().references(() => lmsCourses.id, { onDelete: 'cascade' }),
+  dueAt:          text('due_at'),
+  assignedBy:     integer('assigned_by').references(() => users.id, { onDelete: 'set null' }),
+  assignedAt:     text('assigned_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  lastRemindedAt: text('last_reminded_at'),
+}, (t) => [
+  unique('lms_course_assignments_user_course_unique').on(t.userId, t.courseId),
+]);
+
+export const lmsLessonComments = pgTable('lms_lesson_comments', {
+  id:        serial('id').primaryKey(),
+  lessonId:  integer('lesson_id').notNull().references(() => lmsLessons.id, { onDelete: 'cascade' }),
+  userId:    integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  body:      text('body').notNull(),
+  parentId:  integer('parent_id'),                            // self-FK; raw to avoid forward-ref
+  pinned:    integer('pinned').notNull().default(0),
+  deletedAt: text('deleted_at'),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+});

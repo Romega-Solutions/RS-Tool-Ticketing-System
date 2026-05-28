@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 
 const BUCKET           = process.env.SUPABASE_RESUMES_BUCKET   ?? 'candidate-resumes';
 const ONBOARDER_BUCKET = process.env.SUPABASE_ONBOARDER_BUCKET ?? 'onboarder-docs';
+const LEARNING_BUCKET  = process.env.SUPABASE_LEARNING_BUCKET  ?? 'learning-content';
 
 // 1y — long enough that the signed URL doesn't expire mid-pipeline. Recruiters
 // who want to share externally should re-sign just before sharing.
@@ -147,6 +148,55 @@ export async function refreshOnboarderSignedUrl(path: string): Promise<string> {
     .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
   if (error || !data) {
     throw new Error(`Onboarder document re-sign failed: ${error?.message ?? 'unknown'}`);
+  }
+  return data.signedUrl;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LMS — lesson videos and (Phase 2) certificate PDFs. Private bucket. Paths:
+//   videos:       lessons/{lessonId}/video.{ext}
+//   certificates: certificates/{userId}/{courseId}.pdf
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type LessonVideoUpload = { path: string; signedUrl: string; mimeType: string };
+
+/** Upload a lesson .mp4 (or other video) and return a long-lived signed URL. */
+export async function uploadLessonVideo(args: {
+  lessonId: number;
+  file:     File;
+}): Promise<LessonVideoUpload> {
+  const ext = extensionFor(args.file.name, args.file.type) || 'mp4';
+  const path = `lessons/${args.lessonId}/video.${ext}`;
+
+  const admin = createAdminClient();
+  const bytes = new Uint8Array(await args.file.arrayBuffer());
+
+  const { error: uploadError } = await admin.storage.from(LEARNING_BUCKET).upload(path, bytes, {
+    contentType: args.file.type || 'video/mp4',
+    upsert: true,
+  });
+  if (uploadError) {
+    throw new Error(`Lesson video upload failed: ${uploadError.message}`);
+  }
+
+  const { data: signed, error: signError } = await admin.storage
+    .from(LEARNING_BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+  if (signError || !signed) {
+    throw new Error(`Lesson video signing failed: ${signError?.message ?? 'unknown'}`);
+  }
+
+  return { path, signedUrl: signed.signedUrl, mimeType: args.file.type || 'video/mp4' };
+}
+
+/** Re-sign a lesson video signed URL — used when the original has expired. */
+export async function refreshLessonVideoSignedUrl(path: string): Promise<string> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.storage
+    .from(LEARNING_BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+  if (error || !data) {
+    throw new Error(`Lesson video re-sign failed: ${error?.message ?? 'unknown'}`);
   }
   return data.signedUrl;
 }
