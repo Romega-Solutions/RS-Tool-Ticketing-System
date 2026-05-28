@@ -76,9 +76,19 @@ export default async function AdminCourseEditPage({
         <Link href="/admin/learning" className="text-xs text-(--rs-primary-600) hover:underline">
           ← Manage Learning
         </Link>
-        <h1 className="font-serif text-2xl font-semibold text-(--rs-neutral-grey-900)">
-          {course.title}
-        </h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="font-serif text-2xl font-semibold text-(--rs-neutral-grey-900)">
+            {course.title}
+          </h1>
+          <nav className="flex items-center gap-3 text-sm">
+            <Link href={`/admin/learning/${id}/assign`} className="text-(--rs-primary-600) hover:underline">
+              Assign
+            </Link>
+            <Link href={`/admin/learning/${id}/roster`} className="text-(--rs-primary-600) hover:underline">
+              Roster
+            </Link>
+          </nav>
+        </div>
       </header>
 
       <section className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-6 space-y-4">

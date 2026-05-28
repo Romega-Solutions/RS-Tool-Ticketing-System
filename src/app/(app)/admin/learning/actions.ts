@@ -178,6 +178,156 @@ export async function deleteLesson(courseId: number, lessonId: number): Promise<
   revalidatePath(`/learning/${courseId}`);
 }
 
+// ── Quiz CRUD (Phase 2) ───────────────────────────────────────────────────
+
+const quizUpsertInput = z.object({
+  lessonId:    z.number().int().positive(),
+  passScore:   z.number().int().min(0).max(100),
+  maxAttempts: z.number().int().positive().nullable().optional(),
+});
+
+export async function upsertQuiz(input: unknown): Promise<{ id: number }> {
+  await requireAdmin();
+  const v = quizUpsertInput.parse(input);
+  const admin = createAdminClient();
+
+  const { data: existing } = await admin
+    .from('lms_quizzes').select('id').eq('lesson_id', v.lessonId).maybeSingle();
+
+  if (existing) {
+    const { error } = await admin
+      .from('lms_quizzes')
+      .update({
+        pass_score:   v.passScore,
+        max_attempts: v.maxAttempts ?? null,
+        updated_at:   new Date().toISOString(),
+      })
+      .eq('id', existing.id);
+    if (error) throw new Error(`Quiz update failed: ${error.message}`);
+    return { id: existing.id };
+  }
+
+  const { data, error } = await admin
+    .from('lms_quizzes')
+    .insert({
+      lesson_id:    v.lessonId,
+      pass_score:   v.passScore,
+      max_attempts: v.maxAttempts ?? null,
+    })
+    .select('id').single();
+  if (error || !data) throw new Error(`Quiz create failed: ${error?.message ?? 'no row'}`);
+  return { id: data.id };
+}
+
+export async function deleteQuiz(lessonId: number): Promise<void> {
+  await requireAdmin();
+  const admin = createAdminClient();
+  await admin.from('lms_quizzes').delete().eq('lesson_id', lessonId);
+}
+
+const questionInput = z.object({
+  quizId:       z.number().int().positive(),
+  prompt:       z.string().trim().min(1).max(2000),
+  questionType: z.enum(['multiple_choice', 'true_false']),
+  choices:      z.array(z.object({ key: z.string().min(1).max(20), text: z.string().min(1).max(500) })).min(2).max(10),
+  correctKeys:  z.array(z.string()).min(1),
+});
+
+export async function createQuestion(input: unknown): Promise<{ id: number }> {
+  await requireAdmin();
+  const v = questionInput.parse(input);
+  const admin = createAdminClient();
+  const { data: existing } = await admin
+    .from('lms_quiz_questions')
+    .select('sort_order')
+    .eq('quiz_id', v.quizId)
+    .order('sort_order', { ascending: false })
+    .limit(1);
+  const nextOrder = ((existing?.[0]?.sort_order ?? -1) as number) + 1;
+  const { data, error } = await admin
+    .from('lms_quiz_questions')
+    .insert({
+      quiz_id:       v.quizId,
+      prompt:        v.prompt,
+      question_type: v.questionType,
+      choices:       v.choices,
+      correct_keys:  v.correctKeys,
+      sort_order:    nextOrder,
+    }).select('id').single();
+  if (error || !data) throw new Error(`Question create failed: ${error?.message ?? 'no row'}`);
+  return { id: data.id };
+}
+
+export async function deleteQuestion(id: number): Promise<void> {
+  await requireAdmin();
+  const admin = createAdminClient();
+  await admin.from('lms_quiz_questions').delete().eq('id', id);
+}
+
+// ── Assignments + comments moderation (Phase 3) ───────────────────────────
+
+const assignInput = z.object({
+  courseId: z.number().int().positive(),
+  userIds:  z.array(z.number().int().positive()).min(1),
+  dueAt:    z.string().nullable().optional(),
+});
+
+export async function assignCourse(input: unknown): Promise<{ inserted: number }> {
+  const session = await requireAdmin();
+  const v = assignInput.parse(input);
+  const admin = createAdminClient();
+  const rows = v.userIds.map(uid => ({
+    user_id:     uid,
+    course_id:   v.courseId,
+    due_at:      v.dueAt ?? null,
+    assigned_by: session.id,
+  }));
+  const { error, count } = await admin
+    .from('lms_course_assignments')
+    .upsert(rows, { onConflict: 'user_id,course_id', count: 'exact' });
+  if (error) throw new Error(`assignCourse failed: ${error.message}`);
+  revalidatePath(`/admin/learning/${v.courseId}/assign`);
+  revalidatePath(`/admin/learning/${v.courseId}/roster`);
+  return { inserted: count ?? rows.length };
+}
+
+export async function unassignCourse(courseId: number, userId: number): Promise<void> {
+  await requireAdmin();
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from('lms_course_assignments')
+    .delete()
+    .eq('course_id', courseId)
+    .eq('user_id',   userId);
+  if (error) throw new Error(`unassignCourse failed: ${error.message}`);
+  revalidatePath(`/admin/learning/${courseId}/assign`);
+  revalidatePath(`/admin/learning/${courseId}/roster`);
+}
+
+export async function pinComment(commentId: number, pinned: boolean): Promise<void> {
+  await requireAdmin();
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from('lms_lesson_comments')
+    .update({ pinned: pinned ? 1 : 0 })
+    .eq('id', commentId);
+  if (error) throw new Error(`pinComment failed: ${error.message}`);
+  revalidatePath('/learning', 'layout');
+}
+
+export async function adminDeleteComment(commentId: number): Promise<void> {
+  await requireAdmin();
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from('lms_lesson_comments')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', commentId);
+  if (error) throw new Error(`adminDeleteComment failed: ${error.message}`);
+  revalidatePath('/learning', 'layout');
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+
 export async function uploadLessonVideoFile(formData: FormData): Promise<{ path: string; signedUrl: string }> {
   await requireAdmin();
   const courseId = Number(formData.get('courseId'));

@@ -15,6 +15,7 @@ const navItems = [
   { href: "/my-tasks",          label: "My Tasks",             icon: CheckSquare,     category: "main"      },
   { href: "/projects",          label: "Projects",             icon: Briefcase,       category: "main"      },
   { href: "/learning",          label: "My Learning",          icon: BookMarked,      category: "main"      },
+  { href: "/learning/certificates", label: "My Certificates",  icon: GraduationCap,   category: "main"      },
   { href: "/reports",           label: "Weekly Reports",       icon: FileText,        category: "main"      },
   { href: "/weekly-report",     label: "Status Report",        icon: ClipboardList,   category: "main"      },
   { href: "/attendance",        label: "Attendance",           icon: Calendar,        category: "reports"   },

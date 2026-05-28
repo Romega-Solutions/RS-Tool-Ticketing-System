@@ -94,6 +94,15 @@ CREATE TABLE IF NOT EXISTS "lms_certificates" (
 
 CREATE SEQUENCE IF NOT EXISTS lms_certificate_serial START 1;
 
+-- Wrap nextval() in a SECURITY DEFINER RPC so the service-role client can
+-- call it via supabase.rpc() — supabase-js can't invoke nextval() directly.
+CREATE OR REPLACE FUNCTION nextval_lms_certificate_serial()
+RETURNS bigint
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$ SELECT nextval('lms_certificate_serial') $$;
+
 CREATE TABLE IF NOT EXISTS "lms_course_assignments" (
   "id"               serial PRIMARY KEY,
   "user_id"          integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,

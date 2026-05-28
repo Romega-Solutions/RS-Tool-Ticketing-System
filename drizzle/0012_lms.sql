@@ -96,6 +96,13 @@ CREATE TABLE IF NOT EXISTS "lms_certificates" (
 
 CREATE SEQUENCE IF NOT EXISTS lms_certificate_serial START 1;
 
+CREATE OR REPLACE FUNCTION nextval_lms_certificate_serial()
+RETURNS bigint
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$ SELECT nextval('lms_certificate_serial') $$;
+
 -- ── Phase 3 stub tables ────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS "lms_course_assignments" (

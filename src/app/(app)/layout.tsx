@@ -4,6 +4,7 @@ import { getSession } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { canAccessPath, defaultLandingPath } from "@/lib/rbac";
+import { hasIncompleteHardCourse, isPathExemptFromHardEnforcement } from "@/lib/lms-enforcement";
 import { ClockWidget } from "@/components/clock-widget";
 import { LiveClock } from "@/components/live-clock";
 import { WhoIsInPanel } from "@/components/who-is-in-panel";
@@ -59,6 +60,22 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const pathname = headersList.get('x-invoke-path') ?? '';
   if (pathname && !canAccessPath(pathname, session.role)) {
     redirect(defaultLandingPath(session.role));
+  }
+
+  // Hard enforcement: an onboarding user with an incomplete hard course gets
+  // redirected to that course's page until done. Admins and regularized
+  // staff (is_onboarding=0) are unaffected. /learning, /login, /logout,
+  // /profile, and /api/* are always allowed.
+  if (!isPathExemptFromHardEnforcement(pathname)) {
+    const block = await hasIncompleteHardCourse({
+      userId:       session.id,
+      role:         session.role,
+      team:         session.team,
+      isOnboarding: session.isOnboarding,
+    });
+    if (block) {
+      redirect(`/learning/${block.courseId}`);
+    }
   }
 
   const firstName = session.name.trim().split(" ")[0] ?? "User";
