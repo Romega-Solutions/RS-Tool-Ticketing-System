@@ -45,68 +45,31 @@ describe('decideAutoClockOut — response window', () => {
   });
 });
 
-describe('decideAutoClockOut — role exemption', () => {
-  it('skips admin', () => {
-    const result = decideAutoClockOut({
-      clockedInAt:          clockedInAgo(BOUNDARY + 60),
-      role:                 'admin',
-      overtimeConsentUntil: null,
-      now:                  NOW,
-    });
-    expect(result).toEqual({ action: 'skip', reason: 'admin/ceo exempt' });
-  });
+describe('decideAutoClockOut — no role exemption', () => {
+  // Admins and CEOs used to be exempt; that let them rack up unbounded
+  // ghost OT (e.g. a 25h open session left behind on tab close). Sweep
+  // now applies to every role — only "consent active" can keep a session
+  // open past 3h 5min.
 
-  it('skips ceo (normalizes to admin)', () => {
+  it.each([
+    ['admin'],
+    ['ceo'],
+    ['owner'],
+    ['superadmin'],
+    ['lead'],
+    ['ic'],
+    ['intern'],
+  ])('closes role=%s past the boundary', (role) => {
     const result = decideAutoClockOut({
       clockedInAt:          clockedInAgo(BOUNDARY + 60),
-      role:                 'ceo',
-      overtimeConsentUntil: null,
-      now:                  NOW,
-    });
-    expect(result).toEqual({ action: 'skip', reason: 'admin/ceo exempt' });
-  });
-
-  it('skips owner', () => {
-    const result = decideAutoClockOut({
-      clockedInAt:          clockedInAgo(BOUNDARY + 60),
-      role:                 'owner',
-      overtimeConsentUntil: null,
-      now:                  NOW,
-    });
-    expect(result).toEqual({ action: 'skip', reason: 'admin/ceo exempt' });
-  });
-
-  it('skips superadmin', () => {
-    const result = decideAutoClockOut({
-      clockedInAt:          clockedInAgo(BOUNDARY + 60),
-      role:                 'superadmin',
-      overtimeConsentUntil: null,
-      now:                  NOW,
-    });
-    expect(result).toEqual({ action: 'skip', reason: 'admin/ceo exempt' });
-  });
-
-  it('closes lead (not exempt — leads are non-technical PMs per project memory)', () => {
-    const result = decideAutoClockOut({
-      clockedInAt:          clockedInAgo(BOUNDARY + 60),
-      role:                 'lead',
+      role,
       overtimeConsentUntil: null,
       now:                  NOW,
     });
     expect(result.action).toBe('close');
   });
 
-  it('closes intern', () => {
-    const result = decideAutoClockOut({
-      clockedInAt:          clockedInAgo(BOUNDARY + 60),
-      role:                 'intern',
-      overtimeConsentUntil: null,
-      now:                  NOW,
-    });
-    expect(result.action).toBe('close');
-  });
-
-  it('treats null/empty role as non-admin (default to "ic" — closes)', () => {
+  it('treats null role as a regular session and closes', () => {
     const result = decideAutoClockOut({
       clockedInAt:          clockedInAgo(BOUNDARY + 60),
       role:                 null,
@@ -177,11 +140,9 @@ describe('decideAutoClockOut — invalid input', () => {
 
 describe('decideAutoClockOut — skip-order priority', () => {
   // If MULTIPLE skip reasons could apply, the cheapest check should win.
-  // Order: response window → admin exempt → consent. This documents the
-  // current cron behavior — a sub-3h5m admin gets "within response window",
-  // not "admin/ceo exempt".
+  // Order: response window → consent.
 
-  it('reports "within response window" when both that and admin apply', () => {
+  it('reports "within response window" when role is admin and session is sub-3h5m', () => {
     const result = decideAutoClockOut({
       clockedInAt:          clockedInAgo(60), // 1 minute ago
       role:                 'admin',
@@ -191,7 +152,7 @@ describe('decideAutoClockOut — skip-order priority', () => {
     expect(result).toEqual({ action: 'skip', reason: 'within response window' });
   });
 
-  it('reports "admin/ceo exempt" when both that and active consent apply', () => {
+  it('reports "consent active" for an admin past the boundary with live consent', () => {
     const consentUntil = new Date(NOW.getTime() + 60_000).toISOString();
     const result = decideAutoClockOut({
       clockedInAt:          clockedInAgo(BOUNDARY + 60),
@@ -199,6 +160,6 @@ describe('decideAutoClockOut — skip-order priority', () => {
       overtimeConsentUntil: consentUntil,
       now:                  NOW,
     });
-    expect(result).toEqual({ action: 'skip', reason: 'admin/ceo exempt' });
+    expect(result).toEqual({ action: 'skip', reason: 'consent active' });
   });
 });

@@ -1,4 +1,3 @@
-import { normalizeRole } from './rbac';
 import { OVERTIME_THRESHOLD_SECONDS } from './utils';
 
 // Grace window after the overtime prompt before we close the session.
@@ -21,8 +20,13 @@ export type AutoClockOutDecision =
 // Closes when ALL of these are true:
 //   - clocked_in_at parses to a finite timestamp
 //   - elapsed time >= 3h + 5min response window
-//   - user role does NOT normalize to "admin" (admin/ceo/owner/superadmin are exempt)
 //   - there is no live consent extension (none, or expired > 5min ago)
+//
+// No role exemption: admins and CEOs were previously exempt, which let them
+// accumulate unbounded "ghost" OT (e.g. a 25h open session) whenever they
+// closed the tab without clocking out. Everyone is swept now — admins who
+// genuinely want to keep working past 3h must hit "Yes, continue working"
+// on the overtime prompt, which extends overtime_consent_until.
 export function decideAutoClockOut(input: AutoClockOutInput): AutoClockOutDecision {
   const clockedInMs = new Date(input.clockedInAt).getTime();
   if (!Number.isFinite(clockedInMs)) {
@@ -32,10 +36,6 @@ export function decideAutoClockOut(input: AutoClockOutInput): AutoClockOutDecisi
   const elapsedSec = Math.round((input.now.getTime() - clockedInMs) / 1000);
   if (elapsedSec < OVERTIME_THRESHOLD_SECONDS + RESPONSE_WINDOW_SECONDS) {
     return { action: 'skip', reason: 'within response window' };
-  }
-
-  if (normalizeRole(input.role ?? '') === 'admin') {
-    return { action: 'skip', reason: 'admin/ceo exempt' };
   }
 
   if (input.overtimeConsentUntil) {

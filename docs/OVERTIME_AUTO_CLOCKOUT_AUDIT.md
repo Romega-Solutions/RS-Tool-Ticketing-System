@@ -1,7 +1,7 @@
 # Overtime Auto-Clockout — Audit Reference
 
 **RS Ticketing System — Internal Feature Audit**
-*Last updated: 2026-05-27*
+*Last updated: 2026-05-28*
 
 ---
 
@@ -27,7 +27,8 @@ This file does two things:
 | Blocking modal (with 3-tone audio alert) | `src/components/overtime-guardrail-dialog.tsx` | full file |
 | Persistent OT banner after consent | `src/components/overtime-status-banner.tsx` | full file |
 | Consent endpoint (sets 1h grace) | `src/app/api/presence/overtime-consent/route.ts` | `CONSENT_EXTENSION_MS = 60*60*1000` — L9 |
-| Server cron (fallback enforcer) | `src/app/api/cron/auto-clock-out/route.ts` | `RESPONSE_WINDOW_SECONDS = 5*60` — L11; skip rules L77/L82/L87 |
+| Server cron (fallback enforcer) | `src/app/api/cron/auto-clock-out/route.ts` | calls `decideAutoClockOut()` |
+| Cron skip-decision (pure helper) | `src/lib/auto-clock-out.ts` | `RESPONSE_WINDOW_SECONDS = 5*60`; skip rules: response window + consent only |
 | Admin force-out (sidebar) | `src/components/who-is-in-panel.tsx` | L131–145 |
 | Admin force-out (attendance page) | `src/app/(app)/attendance/attendance-client.tsx` | L264–282 |
 | Admin force-out endpoint | `src/app/api/admin/timesheets/force-clock-out/route.ts` | full file |
@@ -35,7 +36,7 @@ This file does two things:
 | Consent column migration | `drizzle/0009_timesheet_overtime_consent.sql` | + `docs/migrations/add-overtime-consent.sql` |
 | Tests | `src/__tests__/overtime.test.ts` | only covers `isOvertime` + `computeOvertime` utils |
 
-**Flow (non-exempt user, 3h+ session, AFK at the modal):**
+**Flow (any role, 3h+ session, AFK at the modal):**
 
 ```
 clock-in → +3h00m  → browser detects OT (15s poll) → modal opens, 5-min countdown starts, audio plays
@@ -45,7 +46,7 @@ clock-in → +3h00m  → browser detects OT (15s poll) → modal opens, 5-min co
        +3h05m → /api/cron/auto-clock-out (Vercel daily + n8n every 1 min) closes the row
 ```
 
-**Exempt users (admin / ceo):** `normalizeRole()` returns `"admin"`. The dialog still shows (no countdown), and the cron skips them entirely.
+**No server-side role exemption (changed 2026-05-28).** The cron used to skip admins / CEOs; that let them rack up unbounded ghost OT (e.g. Rich, 25h open session). Every role is swept now. The dialog still shows on the browser without a countdown for `isExempt` users (admin/ceo) — that's a UI-only courtesy. The only way to keep a session open past 3h 5min is hitting "Yes, continue working" to extend `overtime_consent_until`.
 
 ---
 
@@ -89,7 +90,7 @@ SECTION A — CONSTANTS & SCHEMA
 A1. src/lib/utils.ts exports OVERTIME_THRESHOLD_SECONDS = 10800 (exactly 3 hours).
 
 A2. src/components/clock-widget.tsx defines OVERTIME_RESPONSE_WINDOW_SECONDS = 5 * 60
-    AND src/app/api/cron/auto-clock-out/route.ts defines RESPONSE_WINDOW_SECONDS = 5 * 60.
+    AND src/lib/auto-clock-out.ts exports RESPONSE_WINDOW_SECONDS = 5 * 60.
     BOTH constants are 300 seconds. If they ever diverge, the cron and the browser
     will disagree about when to close. Verify they are byte-for-byte equivalent.
 
@@ -154,17 +155,17 @@ C1. /api/cron/auto-clock-out requires Authorization: Bearer ${CRON_SECRET}.
 C2. The cron selects every row where clocked_out_at IS NULL. For each row, it
     skips when ANY of these is true:
       - elapsedSec < OVERTIME_THRESHOLD_SECONDS + RESPONSE_WINDOW_SECONDS  (< 3h5m)
-      - normalizeRole(role) === 'admin'                                    (admin/ceo)
       - overtime_consent_until is set AND now < consent_until + 5min       (active consent)
-    Verify the order is correct (cheap-skip-first is fine; just verify all
-    three are present).
+    There is intentionally NO role exemption — admin/CEO are swept too,
+    per the 2026-05-28 policy change. Verify no third skip rule has crept
+    back in.
 
-C3. Verify normalizeRole() in src/lib/rbac.ts maps "ceo", "admin", "owner",
-    and any other role-strings the same way the client's isExempt prop is
-    derived. If the layout passes isExempt for a role the cron does NOT
-    skip (or vice versa), an exempt user will be auto-closed inconsistently.
-    Cross-check: where is isExempt computed at the layout / page level, and
-    does it use normalizeRole()? Quote both call sites.
+C3. Verify the browser-side `isExempt` (admin / CEO UI courtesy) does NOT
+    disable the cron sweep. The dialog hides the countdown bar for exempt
+    users, but `decideAutoClockOut` in src/lib/auto-clock-out.ts does not
+    read the role — so an admin who closes the tab past 3h 5m WILL be
+    auto-closed by cron. Confirm this asymmetry is intentional and the
+    user-visible copy isn't misleading admins into thinking they're safe.
 
 C4. When the cron closes a session, it updates:
       clocked_out_at   = now ISO
@@ -338,16 +339,16 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 
 ✅ Response should list your session in `closed` with `durationSeconds ≈ 11160`. Re-query timesheets to confirm `is_overtime = 1`, `overtime_seconds ≈ 360`.
 
-### Test 5 — Admin exemption
+### Test 5 — Admins are no longer exempt (2026-05-28 policy change)
 
-Log in as the admin / CEO user. Backdate their clock-in by 3h 5m. Hit the cron:
+Log in as the admin / CEO user. Backdate their clock-in by 3h 6m. Hit the cron:
 
 ```bash
 curl -H "Authorization: Bearer $CRON_SECRET" \
   http://localhost:3000/api/cron/auto-clock-out | jq
 ```
 
-✅ Their session should appear in `skipped` with reason `"admin/ceo exempt"`. The session must remain open.
+✅ Their session should appear in `closed` — the admin/ceo exemption is gone. The dialog still hides the countdown bar for admins (UI courtesy), but the cron will close them just like an IC. Verify the row now has `clocked_out_at` set, `is_overtime = 1`, `overtime_seconds ≈ 360`.
 
 ---
 
@@ -359,7 +360,7 @@ These are the audit-time concerns to keep an eye on. None are confirmed bugs —
 
 2. **CRON_SECRET is load-bearing.** Empty / missing → cron 500s → nothing closes. Per memory, prod once shipped without it. Add a healthcheck or log alarm that catches a string of cron 500s.
 
-3. **Exemption logic lives in two places.** The client-passed `isExempt` and the cron's `normalizeRole(...) === 'admin'` must always agree. If a new role string (e.g. `"founder"`) is added and only one side normalizes it, exempt status diverges.
+3. **Client `isExempt` is now UI-only.** As of 2026-05-28 the cron no longer reads role at all — it sweeps every open session past 3h 5m. The client still hides the countdown bar for admins/CEOs as a courtesy, but they get force-closed by the cron the same as anyone else. Make sure the dialog copy doesn't mislead them into thinking they're immune.
 
 4. **Consent grace = 65 min, not 60.** Cron immunity is `consent_until + 5min`. This is *probably* intentional — it lets the browser re-prompt at the 1h mark and the user gets the full 5-min response window before cron eligibility resumes. Worth documenting explicitly so it doesn't get "fixed" later.
 

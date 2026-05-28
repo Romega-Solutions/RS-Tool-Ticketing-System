@@ -1,0 +1,101 @@
+{
+  "name": "Romega Attendance — Auto Clock-Out Sweep",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 * * * * *" }
+          ]
+        }
+      },
+      "id": "node-cron",
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 304],
+      "notes": "Fires once a minute. Vercel's Hobby plan only supports daily crons in vercel.json, so this n8n trigger provides the tight enforcement for the 3h+5min auto clock-out."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://rs-tool-ticketing-system.vercel.app/api/cron/auto-clock-out",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "node-call-cron",
+      "name": "Call /api/cron/auto-clock-out",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 304],
+      "credentials": {
+        "httpHeaderAuth": { "id": "REPLACE_ME", "name": "Romega Cron Bearer" }
+      },
+      "notes": "Header credential must send `Authorization: Bearer <CRON_SECRET>` — same value as the CRON_SECRET env var in Vercel."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "any-closed",
+              "leftValue": "={{ $json.closed && $json.closed.length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "node-only-on-close",
+      "name": "Only when something closed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [720, 304],
+      "notes": "Skips the noisy 'nothing to close' minutes. Downstream nodes only fire when the cron actually closed at least one session."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format a Slack/Discord/Gmail-friendly summary of which users were auto-closed.\nconst closed = ($json.closed || []);\nconst lines = closed.map(c => {\n  const h = Math.floor(c.durationSeconds / 3600);\n  const m = Math.floor((c.durationSeconds % 3600) / 60);\n  return `• user_id=${c.userId} → ${h}h ${m}m`;\n});\nreturn [{\n  json: {\n    ranAt: $json.ranAt,\n    closedCount: closed.length,\n    summary: `Auto-closed ${closed.length} stale session(s) at ${$json.ranAt}\\n${lines.join('\\n')}`,\n  }\n}];"
+      },
+      "id": "node-format",
+      "name": "Format summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 304]
+    }
+  ],
+  "connections": {
+    "Every minute": {
+      "main": [[{ "node": "Call /api/cron/auto-clock-out", "type": "main", "index": 0 }]]
+    },
+    "Call /api/cron/auto-clock-out": {
+      "main": [[{ "node": "Only when something closed", "type": "main", "index": 0 }]]
+    },
+    "Only when something closed": {
+      "main": [
+        [{ "node": "Format summary", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "attendance-auto-clockout-sweep-v1",
+  "meta": {
+    "description": "Hits /api/cron/auto-clock-out every minute with the CRON_SECRET bearer header so non-admin sessions past 3h+5min get auto-closed even when the user closed the browser tab. Replace the `Romega Cron Bearer` credential (httpHeaderAuth, value=`Bearer <CRON_SECRET>`) before activating. Pair the 'Format summary' Code node with a Slack/Gmail node downstream if you want an audit ping."
+  }
+}
