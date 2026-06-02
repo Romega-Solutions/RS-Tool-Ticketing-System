@@ -1,24 +1,17 @@
 'use client';
 
 import { useEffect } from 'react';
-import { AlertTriangle, Loader2, LogOut, Play } from 'lucide-react';
-import { formatDuration, OVERTIME_THRESHOLD_SECONDS } from '@/lib/utils';
+import { AlertTriangle, Loader2, Check, Send } from 'lucide-react';
+import { formatDuration } from '@/lib/utils';
+
+type RequestState = 'idle' | 'sending' | 'pending' | 'error';
 
 type Props = {
-  elapsedSeconds: number;
-  busy: boolean;
-  onContinue: () => void;
-  onClockOut: () => void;
-  /** Seconds left before auto clock-out, or null for exempt users (no auto-out). */
-  autoClockOutInSeconds?: number | null;
+  weekSecondsTotal: number;
+  requestState: RequestState;
+  onRequest: () => void;
+  onClose: () => void;
 };
-
-function formatMmSs(total: number): string {
-  const t = Math.max(0, total);
-  const m = Math.floor(t / 60);
-  const s = t % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
 
 // Urgent three-tone alert — more insistent than the soft clock-out chime.
 function playOvertimeAlert() {
@@ -41,27 +34,21 @@ function playOvertimeAlert() {
     beep(880, 0, 0.25);
     beep(880, 0.3, 0.25);
     beep(1175, 0.6, 0.45);
-    // Last oscillator ends at ~1.05s — close the context shortly after so it
-    // doesn't linger until garbage collection on repeat OT prompts.
     setTimeout(() => { ctx.close().catch(() => {}); }, 1200);
   } catch {
     // AudioContext blocked by browser policy — fail silently
   }
 }
 
-export function OvertimeGuardrailDialog({
-  elapsedSeconds,
-  busy,
-  onContinue,
-  onClockOut,
-  autoClockOutInSeconds = null,
-}: Props) {
+// Shown the moment a non-admin crosses the 15-hour weekly cap. The session has
+// already been stopped (server-enforced); overtime is no longer self-served —
+// the contractor must request it and an admin must approve before continuing.
+export function OvertimeGuardrailDialog({ weekSecondsTotal, requestState, onRequest, onClose }: Props) {
   useEffect(() => {
     playOvertimeAlert();
   }, []);
 
-  const overtimeSeconds = Math.max(0, elapsedSeconds - OVERTIME_THRESHOLD_SECONDS);
-  const showAutoOut = autoClockOutInSeconds != null;
+  const pending = requestState === 'pending';
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-4">
@@ -73,38 +60,34 @@ export function OvertimeGuardrailDialog({
             </div>
             <div>
               <h2 className="text-base font-serif font-semibold text-(--rs-neutral-grey-900)">
-                Overtime check
+                Weekly 15-hour limit reached
               </h2>
               <p className="mt-1 text-sm text-(--rs-neutral-grey-600)">
-                You&apos;ve been clocked in for{' '}
+                You&apos;ve hit{' '}
                 <span className="font-semibold text-(--rs-neutral-grey-900)">
-                  {formatDuration(elapsedSeconds)}
+                  {formatDuration(weekSecondsTotal)}
                 </span>
-                {overtimeSeconds > 0 && (
-                  <>
-                    {' '}— that&apos;s{' '}
-                    <span className="font-semibold text-amber-700">
-                      {formatDuration(overtimeSeconds)}
-                    </span>{' '}
-                    past the 3-hour mark
-                  </>
-                )}
-                . Do you want to continue into overtime?
+                {' '}this week and have been clocked out. Overtime needs an admin&apos;s approval —
+                request it below and you&apos;ll be able to clock back in once it&apos;s approved.
               </p>
             </div>
           </div>
         </div>
 
-        <div className="px-5 py-4 space-y-3">
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Choosing <span className="font-semibold">clock me out</span> ends your session now.
-            Continuing keeps the timer running and flags this session as overtime.
-          </div>
-          {showAutoOut && (
+        <div className="px-5 py-4">
+          {pending ? (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+              Overtime requested — waiting for an admin to approve. You&apos;ll be able to clock
+              back in once they do.
+            </div>
+          ) : requestState === 'error' ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              You&apos;ll be automatically clocked out in{' '}
-              <span className="font-semibold tabular-nums">{formatMmSs(autoClockOutInSeconds!)}</span>{' '}
-              if you don&apos;t respond.
+              Couldn&apos;t send the request. Please try again.
+            </div>
+          ) : (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              The 15-hour weekly limit is enforced automatically. An admin can grant overtime
+              for the rest of today.
             </div>
           )}
         </div>
@@ -112,22 +95,29 @@ export function OvertimeGuardrailDialog({
         <div className="flex items-center justify-end gap-2 border-t border-(--rs-neutral-grey-100) px-5 py-4">
           <button
             type="button"
-            onClick={onClockOut}
-            disabled={busy}
-            className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
+            onClick={onClose}
+            className="inline-flex items-center gap-2 rounded-lg border border-(--rs-neutral-grey-200) px-3 py-2 text-sm font-medium text-(--rs-neutral-grey-600) transition-colors hover:bg-(--rs-neutral-grey-50)"
           >
-            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
-            No, clock me out
+            {pending ? 'Close' : 'Not now'}
           </button>
-          <button
-            type="button"
-            onClick={onContinue}
-            disabled={busy}
-            className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
-          >
-            <Play className="w-4 h-4" />
-            Yes, continue working
-          </button>
+          {!pending && (
+            <button
+              type="button"
+              onClick={onRequest}
+              disabled={requestState === 'sending'}
+              className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
+            >
+              {requestState === 'sending'
+                ? <Loader2 className="w-4 h-4 animate-spin" />
+                : <Send className="w-4 h-4" />}
+              Request overtime
+            </button>
+          )}
+          {pending && (
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-100 px-3 py-2 text-sm font-medium text-emerald-700">
+              <Check className="w-4 h-4" /> Requested
+            </span>
+          )}
         </div>
       </div>
     </div>

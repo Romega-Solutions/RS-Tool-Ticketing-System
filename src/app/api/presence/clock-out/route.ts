@@ -3,6 +3,7 @@ import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clockOut } from '@/lib/presence';
 import { computeOvertime } from '@/lib/utils';
+import { weeklySecondsForUser } from '@/lib/overtime-server';
 
 export const runtime = 'nodejs';
 
@@ -22,9 +23,13 @@ export async function POST() {
     return NextResponse.json({ error: 'No open clock-in session found' }, { status: 400 });
   }
 
-  const now = new Date().toISOString();
+  const nowDate = new Date();
+  const now = nowDate.toISOString();
   const durationSeconds = Math.round((Date.now() - new Date(open.clocked_in_at).getTime()) / 1000);
-  const { isOvertime, overtimeSeconds } = computeOvertime(durationSeconds);
+  // Overtime is the slice of this session beyond the 15h weekly cap. The open
+  // row has a null duration, so it's naturally excluded from the week sum.
+  const weekSecondsBefore = await weeklySecondsForUser(admin, session.id, nowDate);
+  const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds);
 
   await admin
     .from('timesheets')

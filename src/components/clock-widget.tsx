@@ -2,13 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { AlertTriangle, Loader2, LogIn, LogOut } from 'lucide-react';
-import { formatDuration, isOvertime, OVERTIME_THRESHOLD_SECONDS } from '@/lib/utils';
+import { formatDuration, isOvertime, WEEKLY_CAP_SECONDS } from '@/lib/utils';
 import { ClockOutReminderBanner } from '@/components/clock-out-reminder-banner';
 import { OvertimeGuardrailDialog } from '@/components/overtime-guardrail-dialog';
 import { OvertimeStatusBanner } from '@/components/overtime-status-banner';
-
-const OVERTIME_REPROMPT_SECONDS = 3600; // re-prompt every additional hour
-const OVERTIME_RESPONSE_WINDOW_SECONDS = 5 * 60; // auto clock-out if no answer in 5 min
 
 type WidgetState = 'loading' | 'out' | 'in';
 type PendingAction = 'clock-in' | 'clock-out' | null;
@@ -127,25 +124,22 @@ export function ClockWidget({
   const [noteSaved, setNoteSaved] = useState(true);
   const [noteDraft, setNoteDraft] = useState('');
   const [elapsed, setElapsed] = useState(0);
+  const [weekSecondsBefore, setWeekSecondsBefore] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [reminderEnabled, setReminderEnabled] = useState(true);
   const [reminderIntervalMinutes, setReminderIntervalMinutes] = useState(120);
   const [reminderVisible, setReminderVisible] = useState(false);
-  const [overtimeConsented, setOvertimeConsented] = useState(false);
-  const [overtimePromptVisible, setOvertimePromptVisible] = useState(false);
-  const [overtimeDeadline, setOvertimeDeadline] = useState<number | null>(null);
-  const [overtimeRemaining, setOvertimeRemaining] = useState(OVERTIME_RESPONSE_WINDOW_SECONDS);
+  const [overtimeApproved, setOvertimeApproved] = useState(false);
+  const [limitDialogVisible, setLimitDialogVisible] = useState(false);
+  const [limitWeekTotal, setLimitWeekTotal] = useState(0);
+  const [otRequestState, setOtRequestState] = useState<'idle' | 'sending' | 'pending' | 'error'>('idle');
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedRef = useRef(0);
+  const weekBeforeRef = useRef(0);
   const lastReminderFiredRef = useRef<number>(0);
-  const lastOvertimeBlockRef = useRef<number>(-1);
-
-  const overtimeBlock = (sec: number) =>
-    sec < OVERTIME_THRESHOLD_SECONDS
-      ? -1
-      : Math.floor((sec - OVERTIME_THRESHOLD_SECONDS) / OVERTIME_REPROMPT_SECONDS);
+  const overtimeHandledRef = useRef(false);
 
   function startTimer(sinceIso: string) {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -175,7 +169,7 @@ export function ClockWidget({
       fetch('/api/profile/me').then(r => r.json()),
     ])
       .then(([presenceData, profileData]: [
-        { openSession?: { clockedInAt: string; notes?: string | null } | null },
+        { openSession?: { clockedInAt: string; notes?: string | null } | null; weekSecondsBefore?: number },
         { user?: { reminderEnabled?: boolean; reminderIntervalMinutes?: number } }
       ]) => {
         if (cancelled) return;
@@ -183,6 +177,9 @@ export function ClockWidget({
           setReminderEnabled(profileData.user.reminderEnabled ?? true);
           setReminderIntervalMinutes(profileData.user.reminderIntervalMinutes ?? 120);
         }
+        const wsb = presenceData.weekSecondsBefore ?? 0;
+        setWeekSecondsBefore(wsb);
+        weekBeforeRef.current = wsb;
         if (presenceData.openSession?.clockedInAt) {
           setSessionNote(presenceData.openSession.notes ?? '');
           setNoteSaved(true);
@@ -214,49 +211,57 @@ export function ClockWidget({
     return () => clearInterval(id);
   }, [state, reminderEnabled, reminderIntervalMinutes]);
 
-  // Overtime guardrail: hard prompt at 3h, then again every additional hour.
+  // Overtime guardrail. The 15h weekly cap is hard-enforced server-side; this
+  // mirrors it in the browser using the week-to-date total (completed seconds
+  // before this session + live elapsed). When it crosses 15h a non-admin is
+  // clocked out and shown the request dialog — unless they already hold an
+  // active admin approval, in which case the session keeps running under an
+  // "On overtime" banner. Admins are exempt (a high safety ceiling still
+  // applies server-side).
   useEffect(() => {
     if (state !== 'in') return;
-    const check = () => {
-      const block = overtimeBlock(elapsedRef.current);
-      if (block > lastOvertimeBlockRef.current) {
-        setOvertimePromptVisible(true);
-        setOvertimeDeadline(isExempt ? null : Date.now() + OVERTIME_RESPONSE_WINDOW_SECONDS * 1000);
-        setOvertimeRemaining(OVERTIME_RESPONSE_WINDOW_SECONDS);
-      }
+    const check = async () => {
+      if (weekBeforeRef.current + elapsedRef.current < WEEKLY_CAP_SECONDS) return;
+      if (overtimeHandledRef.current) return;
+      overtimeHandledRef.current = true;
+
+      if (isExempt) { setOvertimeApproved(true); return; }
+
+      let approved = false;
+      try {
+        const r = await fetch('/api/presence/overtime-request');
+        const d = (await r.json()) as { request?: { status: string; approved_until: string | null } | null };
+        const req = d.request;
+        approved = !!req && req.status === 'approved' && !!req.approved_until
+          && new Date(req.approved_until).getTime() > Date.now();
+      } catch { /* treat as not approved */ }
+
+      if (approved) { setOvertimeApproved(true); return; }
+
+      setLimitWeekTotal(weekBeforeRef.current + elapsedRef.current);
+      setLimitDialogVisible(true);
+      void confirmClockOut();
     };
-    check();
+    void check();
     const id = setInterval(check, 15_000);
     return () => clearInterval(id);
+    // confirmClockOut is a stable function declaration; only fired once at 15h.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, isExempt]);
 
-  // 5-min response window: if non-exempt user ignores the overtime prompt, auto clock-out.
-  useEffect(() => {
-    if (!overtimePromptVisible || overtimeDeadline == null) return;
-    const tick = () => {
-      const remaining = Math.max(0, Math.ceil((overtimeDeadline - Date.now()) / 1000));
-      setOvertimeRemaining(remaining);
-      if (remaining <= 0) {
-        void confirmClockOut();
-      }
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-    // confirmClockOut is stable enough — invoked only when remaining hits 0.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overtimePromptVisible, overtimeDeadline]);
-
-  function consentOvertime() {
-    lastOvertimeBlockRef.current = overtimeBlock(elapsedRef.current);
-    setOvertimeConsented(true);
-    setOvertimePromptVisible(false);
-    setOvertimeDeadline(null);
-    // Record consent on the server so the auto-clock-out cron skips this
-    // session for the next hour even if the browser is later closed.
-    fetch('/api/presence/overtime-consent', { method: 'POST' }).catch(() => {
-      // Best-effort — the client-side guard still keeps the session running.
-    });
+  async function requestOvertime() {
+    setOtRequestState('sending');
+    try {
+      const res = await fetch('/api/presence/overtime-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error('request failed');
+      setOtRequestState('pending');
+    } catch {
+      setOtRequestState('error');
+    }
   }
 
   function dismissReminder() {
@@ -288,18 +293,26 @@ export function ClockWidget({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirmed: true, notes: noteDraft }),
       });
-      const data = (await res.json()) as { clockedInAt?: string; error?: string; notes?: string | null; noteSaved?: boolean };
+      const data = (await res.json()) as { clockedInAt?: string; error?: string; notes?: string | null; noteSaved?: boolean; weekSecondsBefore?: number };
       if (!res.ok) {
         setError(data.error ?? 'Failed to clock in');
         return;
       }
 
       const ts = data.clockedInAt!;
+      const wsb = data.weekSecondsBefore ?? 0;
+      setWeekSecondsBefore(wsb);
+      weekBeforeRef.current = wsb;
       setSessionNote(data.notes ?? noteDraft.trim());
       setNoteSaved(data.noteSaved ?? true);
       startTimer(ts);
       setState('in');
       setPendingAction(null);
+      // Fresh session — re-arm the overtime guardrail.
+      overtimeHandledRef.current = false;
+      setOvertimeApproved(false);
+      setLimitDialogVisible(false);
+      setOtRequestState('idle');
     } catch {
       setError('Request failed');
     } finally {
@@ -321,10 +334,7 @@ export function ClockWidget({
       stopTimer();
       setReminderVisible(false);
       lastReminderFiredRef.current = 0;
-      setOvertimeConsented(false);
-      setOvertimePromptVisible(false);
-      setOvertimeDeadline(null);
-      lastOvertimeBlockRef.current = -1;
+      setOvertimeApproved(false);
       setSessionNote('');
       setNoteDraft('');
       setNoteSaved(true);
@@ -343,24 +353,23 @@ export function ClockWidget({
     ? 'This session is active, but note saving is not available until the database update is applied.'
     : '';
 
-  const inOvertime = state === 'in' && isOvertime(elapsed);
+  const inOvertime = state === 'in' && isOvertime(weekSecondsBefore + elapsed);
 
   const overtimeOverlays = (
     <>
-      {state === 'in' && overtimeConsented && (
+      {state === 'in' && overtimeApproved && (
         <OvertimeStatusBanner
-          elapsedSeconds={elapsed}
+          weekSecondsTotal={weekSecondsBefore + elapsed}
           busy={busy}
           onClockOut={confirmClockOut}
         />
       )}
-      {state === 'in' && overtimePromptVisible && (
+      {limitDialogVisible && (
         <OvertimeGuardrailDialog
-          elapsedSeconds={elapsed}
-          busy={busy}
-          onContinue={consentOvertime}
-          onClockOut={confirmClockOut}
-          autoClockOutInSeconds={isExempt ? null : overtimeRemaining}
+          weekSecondsTotal={limitWeekTotal}
+          requestState={otRequestState}
+          onRequest={requestOvertime}
+          onClose={() => setLimitDialogVisible(false)}
         />
       )}
     </>

@@ -182,6 +182,67 @@ export async function lookupPersonByName(name: string): Promise<OrgPerson | null
   return lookupPerson({ name });
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// Photo resolution for lists of people. `pickPhoto` is pure and unit-tested;
+// `getPhotoResolver` wraps it with a 5-minute in-memory people cache so list
+// endpoints (attendance, presence, sidebar) can map a whole roster to photos
+// cheaply without hammering the org-chart service. Mirrors the caching pattern
+// already used by `getCanonicalTeams`.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** Minimal shape `pickPhoto` needs — RawPerson and OrgPerson both satisfy it. */
+type PhotoSource = { name: string; email?: string | null; photoUrl?: string | null };
+
+/**
+ * Resolve one person to an absolute photo URL (or null) using the same matching
+ * as `lookupPerson`: email-exact → name-exact → first+last token. Identity wins
+ * over photo presence — an email/name match returns that person's photo even if
+ * it's null, rather than falling through to a different person who has one.
+ */
+export function pickPhoto(
+  active: PhotoSource[],
+  who: { name?: string | null; email?: string | null },
+): string | null {
+  const email = who.email?.toLowerCase().trim();
+  const name  = who.name?.trim();
+
+  if (email) {
+    const m = active.find(p => p.email?.toLowerCase().trim() === email);
+    if (m) return resolvePhotoUrl(m.photoUrl);
+  }
+  if (name && name.length >= 2) {
+    const norm = normalizeStr(name);
+    const exact = active.find(p => normalizeStr(p.name) === norm);
+    if (exact) return resolvePhotoUrl(exact.photoUrl);
+    const tokens = active.find(p => firstLastMatch(p.name, name));
+    if (tokens) return resolvePhotoUrl(tokens.photoUrl);
+  }
+  return null;
+}
+
+let _peopleCache: { at: number; people: RawPerson[] } | null = null;
+const PEOPLE_TTL_MS = 5 * 60 * 1000;
+
+/** People list cached for 5 minutes. Only caches non-empty responses so a
+ *  transient failure never pins an empty list for the whole window. */
+export async function getCachedPeople(): Promise<RawPerson[]> {
+  const now = Date.now();
+  if (_peopleCache && now - _peopleCache.at < PEOPLE_TTL_MS) return _peopleCache.people;
+  const people = await fetchPeople();
+  if (people.length) _peopleCache = { at: now, people };
+  return people;
+}
+
+export type PhotoResolver = (who: { name?: string | null; email?: string | null }) => string | null;
+
+/** Build a reusable resolver over the cached active people list. Call once per
+ *  request, then map a whole roster through the returned closure. */
+export async function getPhotoResolver(): Promise<PhotoResolver> {
+  const people = await getCachedPeople();
+  const active = people.filter(p => p.isActive !== false && p.isActive !== 0);
+  return (who) => pickPhoto(active, who);
+}
+
 /**
  * Single source of truth for team names across the app. Tries the org-chart
  * API first (so we pick up live additions/renames), normalizes every value to

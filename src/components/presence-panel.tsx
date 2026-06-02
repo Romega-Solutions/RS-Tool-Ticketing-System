@@ -10,6 +10,7 @@ type PresenceUser = {
   role:        string;
   team:        string | null;
   clockedInAt: string;
+  weekSecondsBefore?: number;
 };
 
 type SSEEvent =
@@ -26,7 +27,7 @@ function sinceLabel(iso: string): string {
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
-function LiveDuration({ clockedInAt }: { clockedInAt: string }) {
+function LiveDuration({ clockedInAt, weekSecondsBefore = 0 }: { clockedInAt: string; weekSecondsBefore?: number }) {
   const [secs, setSecs] = useState(() =>
     Math.max(0, Math.round((Date.now() - new Date(clockedInAt).getTime()) / 1000))
   );
@@ -40,7 +41,7 @@ function LiveDuration({ clockedInAt }: { clockedInAt: string }) {
 
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
-  const over = isOvertime(secs);
+  const over = isOvertime(weekSecondsBefore + secs);
   const label = h > 0 ? `${h}h ${m}m` : `${m}m`;
   return (
     <span className={`text-xs ${over ? 'font-semibold text-amber-600' : 'text-(--rs-neutral-grey-400)'}`}>
@@ -119,7 +120,7 @@ export function PresencePanel() {
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                <LiveDuration clockedInAt={user.clockedInAt} />
+                <LiveDuration clockedInAt={user.clockedInAt} weekSecondsBefore={user.weekSecondsBefore} />
               </div>
             </div>
           ))

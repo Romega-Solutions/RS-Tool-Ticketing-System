@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { FileText, Loader2, Download } from 'lucide-react';
+import { FileSpreadsheet, Loader2, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export function MyReportButton({
@@ -53,35 +53,30 @@ export function MyReportButton({
   };
 
   return (
-    <div className="max-w-md space-y-4">
-      <div className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-5 space-y-4">
-        <div>
-          <h2 className="text-base font-serif font-semibold text-(--rs-neutral-grey-900)">My Weekly Report</h2>
-          <p className="text-sm text-(--rs-neutral-grey-500) mt-1">
-            Generates a report of your current and completed tasks for this week.
-          </p>
+    <div className="space-y-3">
+      <Button
+        onClick={handleGenerate}
+        disabled={generating}
+        className="bg-(--rs-primary-500) hover:bg-(--rs-primary-600) text-white"
+      >
+        {generating
+          ? <Loader2 className="w-4 h-4 animate-spin" />
+          : <FileSpreadsheet className="w-4 h-4" />}
+        {generating ? 'Generating…' : 'Download My Report (.xlsx)'}
+      </Button>
+
+      {success && (
+        <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 px-3 py-2.5 rounded-lg">
+          <Download className="w-4 h-4 shrink-0" />
+          Report downloaded. Check your Downloads folder.
         </div>
+      )}
 
-        <Button onClick={handleGenerate} disabled={generating}>
-          {generating
-            ? <Loader2 className="w-4 h-4 animate-spin" />
-            : <FileText className="w-4 h-4" />}
-          {generating ? 'Generating…' : 'Download My Report'}
-        </Button>
-
-        {success && (
-          <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 px-3 py-2.5 rounded-lg">
-            <Download className="w-4 h-4 shrink-0" />
-            Report downloaded. Check your Downloads folder.
-          </div>
-        )}
-
-        {error && (
-          <div className="text-sm text-red-700 bg-red-50 border border-red-200 px-3 py-2.5 rounded-lg">
-            {error}
-          </div>
-        )}
-      </div>
+      {error && (
+        <div className="text-sm text-red-700 bg-red-50 border border-red-200 px-3 py-2.5 rounded-lg">
+          {error}
+        </div>
+      )}
     </div>
   );
 }

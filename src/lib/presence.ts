@@ -8,6 +8,8 @@ export type PresenceUser = {
   role:        AppRole;
   team:        string | null;
   clockedInAt: string; // ISO string
+  weekSecondsBefore?: number; // completed seconds earlier this Mon–Sun week — fixed for the open session, used for the weekly OT badge
+  photoUrl?:   string | null; // org chart photo, resolved at clock-in / hydration
 };
 
 type Subscriber = {

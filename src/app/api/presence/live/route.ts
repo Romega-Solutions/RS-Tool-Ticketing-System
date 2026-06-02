@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { subscribeToLive, unsubscribeFromLive, getAllOnline, seedUsers, type PresenceUser } from '@/lib/presence';
+import { getPhotoResolver } from '@/lib/orgchart';
+import { weeklySecondsForUsers } from '@/lib/overtime-server';
 import type { AppRole } from '@/lib/rbac';
 
 export const runtime = 'nodejs';
@@ -19,14 +21,16 @@ async function hydrateFromDB(): Promise<void> {
     const userIds = (openSessions as { user_id: number; clocked_in_at: string }[]).map(s => s.user_id);
     const { data: users } = await admin
       .from('users')
-      .select('id, name, role, team')
+      .select('id, name, email, role, team')
       .in('id', userIds)
       .eq('is_active', 1);
 
     const userMap = new Map(
-      ((users ?? []) as { id: number; name: string; role: string; team: string | null }[]).map(u => [u.id, u])
+      ((users ?? []) as { id: number; name: string; email: string | null; role: string; team: string | null }[]).map(u => [u.id, u])
     );
 
+    const resolvePhoto = await getPhotoResolver();
+    const weekByUser = await weeklySecondsForUsers(admin, userIds, new Date());
     const toSeed: PresenceUser[] = [];
     for (const s of openSessions as { user_id: number; clocked_in_at: string }[]) {
       const u = userMap.get(s.user_id);
@@ -37,6 +41,8 @@ async function hydrateFromDB(): Promise<void> {
           role: u.role as AppRole,
           team: u.team,
           clockedInAt: s.clocked_in_at,
+          weekSecondsBefore: weekByUser.get(s.user_id) ?? 0,
+          photoUrl: resolvePhoto({ name: u.name, email: u.email }),
         });
       }
     }

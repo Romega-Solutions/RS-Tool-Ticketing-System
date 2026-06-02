@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clockIn } from '@/lib/presence';
+import { getPhotoResolver } from '@/lib/orgchart';
+import { decideClockInAllowed } from '@/lib/overtime-policy';
+import { weeklySecondsForUser, activeApprovalUntil } from '@/lib/overtime-server';
 
 export const runtime = 'nodejs';
 
@@ -82,8 +85,14 @@ export async function POST(req: Request) {
   }
 
   const notes = body.notes?.trim() || null;
+  const photoUrl = (await getPhotoResolver())({ name: session.name, email: session.email });
 
   const admin = createAdminClient();
+  const nowDate = new Date();
+  // Completed seconds earlier this week — fixed for the whole open session and
+  // used by the weekly OT badge / browser guardrail. The open row (null
+  // duration) is naturally excluded.
+  const weekSecondsBefore = await weeklySecondsForUser(admin, session.id, nowDate);
   const { data: existingWithNotes, error: existingError } = await admin
     .from('timesheets')
     .select('id, clocked_in_at, notes')
@@ -102,14 +111,32 @@ export async function POST(req: Request) {
     : existingWithNotes;
 
   if (existing) {
-    clockIn({ userId: session.id, name: session.name, role: session.role, team: session.team, clockedInAt: existing.clocked_in_at });
+    clockIn({ userId: session.id, name: session.name, role: session.role, team: session.team, clockedInAt: existing.clocked_in_at, weekSecondsBefore, photoUrl });
     return NextResponse.json({
       timesheetId: existing.id,
       clockedInAt: existing.clocked_in_at,
       resumed: true,
+      weekSecondsBefore,
       notes: 'notes' in existing ? (existing.notes ?? null) : null,
       noteSaved: 'notes' in existing,
     });
+  }
+
+  // Weekly-cap gate: block a NEW session when the contractor has already hit
+  // 15h this week with no active admin approval. Resuming an open session
+  // (handled above) is always allowed; the cron enforces caps on running ones.
+  const approvedUntil = await activeApprovalUntil(admin, session.id);
+  const gate = decideClockInAllowed({
+    role:              session.role,
+    weekSecondsBefore,
+    approvedUntil,
+    now:               nowDate,
+  });
+  if (!gate.allowed) {
+    return NextResponse.json(
+      { error: 'Weekly 15-hour limit reached. Request overtime approval to continue.', code: 'weekly_cap' },
+      { status: 403 },
+    );
   }
 
   const now = new Date().toISOString();
@@ -143,8 +170,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Failed to start clock-in session' }, { status: 500 });
   }
 
-  clockIn({ userId: session.id, name: session.name, role: session.role, team: session.team, clockedInAt: now });
+  clockIn({ userId: session.id, name: session.name, role: session.role, team: session.team, clockedInAt: now, weekSecondsBefore, photoUrl });
   await autoMarkPresent(session.id);
 
-  return NextResponse.json({ timesheetId: inserted.id, clockedInAt: now, notes, noteSaved });
+  return NextResponse.json({ timesheetId: inserted.id, clockedInAt: now, weekSecondsBefore, notes, noteSaved });
 }

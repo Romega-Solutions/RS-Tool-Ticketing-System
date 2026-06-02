@@ -140,7 +140,7 @@ async function SummarySection() {
         </Card>
       </Link>
 
-      <Link href="/reports">
+      <Link href="/weekly-report">
         <Card className="hover:shadow-md hover:border-(--rs-accent-300) transition-all cursor-pointer h-full">
           <CardContent className="flex items-center justify-between px-5 py-4">
             <div>
@@ -513,7 +513,7 @@ async function TicketsSection({ userId, userEmail }: { userId: string | null; us
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-lg font-serif">Team Workload</CardTitle>
-            <Link href="/reports" className="text-sm text-(--rs-primary-500) hover:text-(--rs-primary-700) font-medium transition-colors">
+            <Link href="/weekly-report" className="text-sm text-(--rs-primary-500) hover:text-(--rs-primary-700) font-medium transition-colors">
               View reports →
             </Link>
           </CardHeader>

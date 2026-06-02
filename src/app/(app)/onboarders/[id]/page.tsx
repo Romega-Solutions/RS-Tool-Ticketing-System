@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
 import { canAccessLeadTool } from '@/lib/rbac';
+import { getPhotoResolver } from '@/lib/orgchart';
 import { refreshOnboarderSignedUrl } from '@/lib/storage';
 import {
   OnboarderStatusSelect,
@@ -34,6 +35,7 @@ import {
   NotesEditor,
 } from '../onboarder-actions';
 import type { OnboarderStatus } from '../constants';
+import { formatPhoneNumber } from '@/lib/format';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -205,6 +207,11 @@ export default async function OnboarderDetailPage({
   if (!data) notFound();
   const o = data as Onboarder;
 
+  // Onboarders are pre-employment, so most won't be on the org chart yet — this
+  // resolves to a photo only once they've been added there; otherwise the
+  // gradient initials below stand in.
+  const photoUrl = (await getPhotoResolver())({ name: o.full_name, email: o.personal_email });
+
   // Children fetched in parallel
   const [refsRes, versRes, docsRes, histRes, creatorRes] = await Promise.all([
     supabase.from('onboarder_references')
@@ -261,9 +268,18 @@ export default async function OnboarderDetailPage({
       <Card>
         <CardContent className="p-6">
           <div className="flex flex-col md:flex-row md:items-start gap-5">
-            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-(--rs-primary-500) to-(--rs-primary-700) text-white text-xl font-bold shadow-sm">
-              {initials(o.full_name)}
-            </div>
+            {photoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={photoUrl}
+                alt={o.full_name}
+                className="h-16 w-16 shrink-0 rounded-2xl object-cover shadow-sm"
+              />
+            ) : (
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-(--rs-primary-500) to-(--rs-primary-700) text-white text-xl font-bold shadow-sm">
+                {initials(o.full_name)}
+              </div>
+            )}
             <div className="min-w-0 flex-1 space-y-3">
               <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
                 <div className="min-w-0">
@@ -292,7 +308,7 @@ export default async function OnboarderDetailPage({
                 {o.romega_email && (
                   <ContactPill icon={<MailCheck className="w-3.5 h-3.5" />} text={o.romega_email} href={`mailto:${o.romega_email}`} />
                 )}
-                {o.phone && <ContactPill icon={<Phone className="w-3.5 h-3.5" />} text={o.phone} href={`tel:${o.phone.replace(/\s+/g, '')}`} />}
+                {o.phone && <ContactPill icon={<Phone className="w-3.5 h-3.5" />} text={formatPhoneNumber(o.phone)} href={`tel:${o.phone.replace(/\s+/g, '')}`} />}
               </div>
 
               <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-(--rs-neutral-grey-500)">
@@ -560,7 +576,7 @@ function BgCheckTab({
                       </td>
                       <td className="px-3 py-3 text-[11px] text-(--rs-neutral-grey-600)">
                         <p className="truncate max-w-[160px]">{r.email}</p>
-                        {r.mobile && <p className="mt-0.5">{r.mobile}</p>}
+                        {r.mobile && <p className="mt-0.5 tabular-nums">{formatPhoneNumber(r.mobile)}</p>}
                       </td>
                       <td className="px-3 py-3 text-[11px] text-(--rs-neutral-grey-600) whitespace-nowrap">
                         {r.request_sent_at ? formatDate(r.request_sent_at) : '—'}
@@ -609,7 +625,7 @@ function BgCheckTab({
                       <td className="px-3 py-3 text-[11px] text-(--rs-neutral-grey-600)">
                         {v.hr_contact_name && <p className="font-semibold text-(--rs-neutral-grey-800)">{v.hr_contact_name}</p>}
                         <p className="truncate max-w-[160px]">{v.hr_email}</p>
-                        {v.hr_phone && <p className="mt-0.5">{v.hr_phone}</p>}
+                        {v.hr_phone && <p className="mt-0.5 tabular-nums">{formatPhoneNumber(v.hr_phone)}</p>}
                       </td>
                       <td className="px-3 py-3 text-[11px] text-(--rs-neutral-grey-600) whitespace-nowrap">
                         {v.request_sent_at ? formatDate(v.request_sent_at) : '—'}

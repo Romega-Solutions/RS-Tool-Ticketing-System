@@ -3,6 +3,7 @@ import { getSession } from '@/lib/session';
 import { canAccessReports, canAccessAdmin } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { computeOvertime } from '@/lib/utils';
+import { weeklySecondsForUser } from '@/lib/overtime-server';
 
 export const runtime = 'nodejs';
 
@@ -120,7 +121,7 @@ export async function PATCH(req: Request) {
   const admin = createAdminClient();
   const { data: existing } = await admin
     .from('timesheets')
-    .select('id, clocked_in_at, clocked_out_at')
+    .select('id, user_id, clocked_in_at, clocked_out_at')
     .eq('id', id)
     .maybeSingle();
   if (!existing) {
@@ -154,7 +155,10 @@ export async function PATCH(req: Request) {
 
   if (outDate) {
     const durationSeconds = Math.round((outDate.getTime() - inDate.getTime()) / 1000);
-    const { isOvertime, overtimeSeconds } = computeOvertime(durationSeconds);
+    // Weekly OT for this row: sum the user's other completed sessions in the
+    // edited row's week, then take the slice of this session beyond 15h.
+    const weekSecondsBefore = await weeklySecondsForUser(admin, existing.user_id, inDate, id);
+    const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds);
     update.duration_seconds = durationSeconds;
     update.is_overtime = isOvertime ? 1 : 0;
     update.overtime_seconds = isOvertime ? overtimeSeconds : null;

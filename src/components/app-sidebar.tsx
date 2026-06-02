@@ -4,9 +4,10 @@ import React, { useState } from "react";
 import Image from "next/image";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap, BookMarked } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap, BookMarked, Timer, LifeBuoy } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { PersonAvatar } from "@/components/person-avatar";
 import type { AppRole } from "@/lib/rbac";
 import { canAccessReports, canAccessAdmin, canAccessLeadTool, roleLabel } from "@/lib/rbac";
 
@@ -16,8 +17,8 @@ const navItems = [
   { href: "/projects",          label: "Projects",             icon: Briefcase,       category: "main"      },
   { href: "/learning",          label: "My Learning",          icon: BookMarked,      category: "main"      },
   { href: "/learning/certificates", label: "My Certificates",  icon: GraduationCap,   category: "main"      },
-  { href: "/reports",           label: "Weekly Reports",       icon: FileText,        category: "main"      },
-  { href: "/weekly-report",     label: "Status Report",        icon: ClipboardList,   category: "main"      },
+  { href: "/weekly-report",     label: "Weekly Reports",       icon: FileText,        category: "main"      },
+  { href: "/help",              label: "Help & Guide",         icon: LifeBuoy,        category: "main"      },
   { href: "/attendance",        label: "Attendance",           icon: Calendar,        category: "reports"   },
   { href: "/sales/leads",            label: "Sales / Leads",       icon: Users2,        category: "leadTools" },
   { href: "/recruiting/candidates",  label: "Applicant Tracking System", icon: UserPlus2, category: "leadTools" },
@@ -26,9 +27,9 @@ const navItems = [
   { href: "/ceo/briefing",           label: "CEO / Briefing",      icon: Sun,           category: "leadTools" },
   { href: "/marketing/content",      label: "Marketing / Content", icon: Wand2,         category: "leadTools" },
   { href: "/admin/users",       label: "User Management",      icon: Shield,            category: "admin"     },
+  { href: "/admin/overtime",    label: "Overtime Requests",    icon: Timer,             category: "admin"     },
   { href: "/admin/learning",    label: "Manage Learning",      icon: BookOpen,          category: "admin"     },
   { href: "/rates",             label: "Rates & Currency",     icon: CircleDollarSign,  category: "admin"     },
-  { href: "/wise-guide",        label: "Wise Integration",     icon: BookOpen,          category: "admin"     },
 ];
 
 function NavPendingDot({ collapsed }: { collapsed: boolean }) {
@@ -252,7 +253,7 @@ function LogoutButton({ collapsed = false }: { collapsed?: boolean }) {
   );
 }
 
-export function AppSidebar({ role, userName, team }: { role: AppRole; userName: string; team: string | null }) {
+export function AppSidebar({ role, userName, team, photoUrl }: { role: AppRole; userName: string; team: string | null; photoUrl?: string | null }) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -314,9 +315,15 @@ export function AppSidebar({ role, userName, team }: { role: AppRole; userName: 
 
       {/* Footer */}
       <div className={`${collapsed ? "px-2 py-3" : "px-3 py-3"} border-t border-white/10 space-y-0.5`}>
+        {collapsed && (
+          <div className="mb-2 flex justify-center">
+            <PersonAvatar name={userName} photoUrl={photoUrl} size={32} className="ring-2 ring-white/15" />
+          </div>
+        )}
         {!collapsed && (
           <div className="mb-2 rounded-2xl border border-white/10 bg-white/6 px-3.5 py-3">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <PersonAvatar name={userName} photoUrl={photoUrl} size={40} className="ring-2 ring-white/15" />
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-white truncate">{userName}</p>
                 <div className="mt-1 flex flex-wrap items-center gap-2">

@@ -1,21 +1,21 @@
 'use client';
 
 import { AlertTriangle, Loader2, LogOut } from 'lucide-react';
-import { formatDuration, OVERTIME_THRESHOLD_SECONDS } from '@/lib/utils';
+import { formatDuration, WEEKLY_CAP_SECONDS } from '@/lib/utils';
 
 type Props = {
-  elapsedSeconds: number;
+  weekSecondsTotal: number;
   busy: boolean;
   onClockOut: () => void;
 };
 
 /**
- * App-wide overtime status card. Rendered while the user is in
- * consented overtime — a non-dismissible status indicator (the
- * blocking prompt handles consent; this just keeps it visible).
+ * App-wide overtime status card. Rendered while the user is in approved
+ * overtime — i.e. their week-to-date total has passed the 15h cap under an
+ * active admin approval. Non-dismissible status indicator.
  */
-export function OvertimeStatusBanner({ elapsedSeconds, busy, onClockOut }: Props) {
-  const overtimeSeconds = Math.max(0, elapsedSeconds - OVERTIME_THRESHOLD_SECONDS);
+export function OvertimeStatusBanner({ weekSecondsTotal, busy, onClockOut }: Props) {
+  const overtimeSeconds = Math.max(0, weekSecondsTotal - WEEKLY_CAP_SECONDS);
 
   return (
     <div className="fixed top-3 left-1/2 z-50 -translate-x-1/2 w-[min(92vw,32rem)] rounded-2xl border border-amber-300 bg-amber-50 shadow-xl">
@@ -26,7 +26,7 @@ export function OvertimeStatusBanner({ elapsedSeconds, busy, onClockOut }: Props
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-amber-900">On overtime</p>
           <p className="text-xs text-amber-700">
-            {formatDuration(overtimeSeconds)} over · {formatDuration(elapsedSeconds)} total this session
+            {formatDuration(overtimeSeconds)} over the 15h weekly limit · {formatDuration(weekSecondsTotal)} this week
           </p>
         </div>
         <button

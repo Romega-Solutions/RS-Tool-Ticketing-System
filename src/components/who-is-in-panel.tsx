@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { LogOut, Loader2, X } from 'lucide-react';
 import { isOvertime } from '@/lib/utils';
+import { PersonAvatar } from '@/components/person-avatar';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -12,6 +13,8 @@ type PresenceUser = {
   role:        string;
   team:        string | null;
   clockedInAt: string;
+  weekSecondsBefore?: number;
+  photoUrl?:   string | null;
 };
 
 type SSEEvent =
@@ -21,15 +24,11 @@ type SSEEvent =
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-function initials(name: string): string {
-  return name.split(' ').map(w => w[0] ?? '').join('').toUpperCase().slice(0, 2);
-}
-
 function sinceLabel(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
-function LiveDuration({ clockedInAt }: { clockedInAt: string }) {
+function LiveDuration({ clockedInAt, weekSecondsBefore = 0 }: { clockedInAt: string; weekSecondsBefore?: number }) {
   const [secs, setSecs] = useState(() =>
     Math.max(0, Math.round((Date.now() - new Date(clockedInAt).getTime()) / 1000))
   );
@@ -44,7 +43,7 @@ function LiveDuration({ clockedInAt }: { clockedInAt: string }) {
 
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
-  const over = isOvertime(secs);
+  const over = isOvertime(weekSecondsBefore + secs);
   const label = h > 0 ? `${h}h ${m}m` : `${m}m`;
   return (
     <span className={over ? 'text-amber-600' : 'text-green-600'}>
@@ -104,9 +103,7 @@ function PanelContent({
                 <div key={user.userId} className="group flex items-center gap-3 px-4 py-3 hover:bg-(--rs-neutral-grey-50)">
                   {/* Avatar */}
                   <div className="relative shrink-0">
-                    <div className="w-9 h-9 rounded-full bg-(--rs-primary-100) text-(--rs-primary-700) flex items-center justify-center text-xs font-bold">
-                      {initials(user.name)}
-                    </div>
+                    <PersonAvatar name={user.name} photoUrl={user.photoUrl} size={36} />
                     <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-green-400 border-2 border-white">
                       <span className="absolute inset-0 rounded-full bg-green-400 animate-ping opacity-60" />
                     </span>
@@ -123,7 +120,7 @@ function PanelContent({
                   {/* Time */}
                   <div className="shrink-0 text-right">
                     <p className="text-xs font-semibold tabular-nums">
-                      <LiveDuration clockedInAt={user.clockedInAt} />
+                      <LiveDuration clockedInAt={user.clockedInAt} weekSecondsBefore={user.weekSecondsBefore} />
                     </p>
                     <p className="text-[10px] text-(--rs-neutral-grey-400)">since {sinceLabel(user.clockedInAt)}</p>
                   </div>

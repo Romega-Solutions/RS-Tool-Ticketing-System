@@ -3,6 +3,7 @@
 import { Fragment, useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { AttendanceExportSheet } from '@/components/attendance-export-sheet';
+import { PersonAvatar } from '@/components/person-avatar';
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock, Search, X, Pencil, LogOut, Save, Trash2, ShieldCheck } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -18,11 +19,11 @@ interface AttendanceRecord {
   notes: string | null; submittedAt: string | null;
 }
 
-interface TeamUser { id: number; name: string; team: string | null; role: string; memberCode?: string | null; hourlyRateUsd?: number | null; }
+interface TeamUser { id: number; name: string; team: string | null; role: string; memberCode?: string | null; hourlyRateUsd?: number | null; photoUrl?: string | null; }
 
 interface MonthlySummary {
   userId: number; name: string; team: string | null; role: string;
-  hourlyRateUsd?: number | null;
+  hourlyRateUsd?: number | null; photoUrl?: string | null;
   present: number; wfh: number; leave: number; absent: number; workdays: number;
   weekendWork: number; totalSeconds: number;
 }
@@ -87,37 +88,8 @@ function detailDayStatusLabel(day: DetailDay): string {
 
 // ── Avatar / today helpers ─────────────────────────────────────────────────────
 
-const AVATAR_PALETTE = [
-  'bg-blue-100 text-blue-700',
-  'bg-purple-100 text-purple-700',
-  'bg-emerald-100 text-emerald-700',
-  'bg-amber-100 text-amber-700',
-  'bg-rose-100 text-rose-700',
-  'bg-cyan-100 text-cyan-700',
-  'bg-indigo-100 text-indigo-700',
-  'bg-orange-100 text-orange-700',
-];
-
-function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0][0].toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-function avatarColor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
-  return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
-}
-
-function MemberAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' }) {
-  const sizeClass = size === 'sm' ? 'w-7 h-7 text-[10px]' : 'w-9 h-9 text-xs';
-  return (
-    <div className={`shrink-0 rounded-full flex items-center justify-center font-semibold ${sizeClass} ${avatarColor(name)}`}>
-      {getInitials(name)}
-    </div>
-  );
+function MemberAvatar({ name, photoUrl, size = 'md' }: { name: string; photoUrl?: string | null; size?: 'sm' | 'md' }) {
+  return <PersonAvatar name={name} photoUrl={photoUrl} size={size === 'sm' ? 28 : 36} />;
 }
 
 function isSameLocalDay(iso: string, ref: Date): boolean {
@@ -911,7 +883,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                             </td>
                             <td className="py-4 pl-2 pr-4 align-middle">
                               <div className="flex items-center gap-3">
-                                <MemberAvatar name={user.name} />
+                                <MemberAvatar name={user.name} photoUrl={user.photoUrl} />
                                 <div className="min-w-0">
                                   <div className="font-medium text-(--rs-neutral-grey-900) truncate">{user.name}</div>
                                   {user.team && <div className="text-xs text-(--rs-neutral-grey-400) truncate">{user.team}</div>}
@@ -1090,7 +1062,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                         <tr key={row.userId} className="border-b border-(--rs-neutral-grey-100) hover:bg-(--rs-neutral-grey-50)/60">
                           <td className="py-4 pl-4 pr-4 align-middle">
                             <div className="flex items-center gap-3">
-                              <MemberAvatar name={row.name} />
+                              <MemberAvatar name={row.name} photoUrl={row.photoUrl} />
                               <div className="min-w-0">
                                 <div className="font-medium text-(--rs-neutral-grey-900) truncate">{row.name}</div>
                                 {row.team && <div className="text-xs text-(--rs-neutral-grey-400) truncate">{row.team}</div>}

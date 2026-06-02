@@ -13,25 +13,38 @@ export function formatDuration(seconds: number): string {
   return `${h}h ${m}m`;
 }
 
-// ── Overtime guardrail ──────────────────────────────────────────────────────
-// A continuous clock-in session is "overtime" once it reaches 3 hours.
-// This single rule is shared by every clock/presence surface and the DB write.
+// ── Overtime ────────────────────────────────────────────────────────────────
+// Overtime is weekly: any time worked beyond the 15h Mon–Sun cap. There is no
+// per-session or per-day cap. This single rule is shared by every clock/presence
+// surface and the DB write.
 
-export const OVERTIME_THRESHOLD_SECONDS = 3 * 60 * 60; // 10800
+// Max regular (non-overtime) hours per Mon–Sun week. Once a contractor reaches
+// this, new clock-ins are blocked and a running session is cut when it would
+// cross it — unless an admin has approved overtime. Anything beyond it is OT.
+export const WEEKLY_CAP_SECONDS = 15 * 60 * 60; // 54000
 
-/** True once a live session's elapsed time has reached the 3h threshold. */
-export function isOvertime(elapsedSeconds: number): boolean {
-  return elapsedSeconds >= OVERTIME_THRESHOLD_SECONDS;
+// Absolute ghost-session guard. Applies to EVERY role incl. admin, so an
+// admin who closes their tab can't leave an unbounded open session behind
+// (the 25h ghost session that prompted removing the admin exemption in May).
+export const SAFETY_CEILING_SECONDS = 16 * 60 * 60; // 57600
+
+/** True once a user's week-to-date total (incl. the live session) passes 15h. */
+export function isOvertime(weekSecondsTotal: number): boolean {
+  return weekSecondsTotal > WEEKLY_CAP_SECONDS;
 }
 
-/** Server-side: derive the overtime flag + seconds from a completed session. */
-export function computeOvertime(durationSeconds: number): {
+/**
+ * Server-side: the overtime portion of a just-finished session — the slice of
+ * `durationSeconds` lying beyond the 15h weekly cap, given the user's already
+ * completed seconds earlier this Mon–Sun week (`weekSecondsBefore`).
+ */
+export function computeOvertime(weekSecondsBefore: number, durationSeconds: number): {
   isOvertime: boolean;
   overtimeSeconds: number;
 } {
-  const over = isOvertime(durationSeconds);
-  return {
-    isOvertime: over,
-    overtimeSeconds: over ? durationSeconds - OVERTIME_THRESHOLD_SECONDS : 0,
-  };
+  const overtimeSeconds = Math.max(
+    0,
+    Math.min(durationSeconds, weekSecondsBefore + durationSeconds - WEEKLY_CAP_SECONDS),
+  );
+  return { isOvertime: overtimeSeconds > 0, overtimeSeconds };
 }

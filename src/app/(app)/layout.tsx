@@ -3,11 +3,13 @@ import { AppSidebar, MobileNav } from "@/components/app-sidebar";
 import { getSession } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { canAccessPath, defaultLandingPath } from "@/lib/rbac";
+import { canAccessPath, defaultLandingPath, canAccessAdmin } from "@/lib/rbac";
+import { getPhotoResolver } from "@/lib/orgchart";
 import { hasIncompleteHardCourse, isPathExemptFromHardEnforcement } from "@/lib/lms-enforcement";
 import { ClockWidget } from "@/components/clock-widget";
 import { LiveClock } from "@/components/live-clock";
 import { WhoIsInPanel } from "@/components/who-is-in-panel";
+import { FloatingGuide } from "@/components/guide/floating-guide.client";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 
@@ -81,10 +83,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const firstName = session.name.trim().split(" ")[0] ?? "User";
   const quoteSeed = new Date().getDate() + (session.id ?? 0);
   const quote = await getDailyQuote(quoteSeed);
+  const myPhotoUrl = (await getPhotoResolver())({ name: session.name, email: session.email });
 
   return (
     <div className="flex h-screen bg-(--rs-primary-50) overflow-hidden text-(--rs-neutral-grey-900)">
-      <AppSidebar role={session.role} userName={session.name} team={session.team} />
+      <AppSidebar role={session.role} userName={session.name} team={session.team} photoUrl={myPhotoUrl} />
       <main className="flex-1 flex flex-col h-full overflow-hidden w-full">
         <header className="shrink-0 border-b border-[rgba(15,23,42,0.08)] bg-white px-4 py-3 shadow-[0_1px_3px_rgba(15,23,42,0.06)] md:px-8">
           <div className="flex items-center justify-between gap-4">
@@ -116,6 +119,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
       </main>
+      <FloatingGuide isAdmin={canAccessAdmin(session.role)} />
     </div>
   );
 }

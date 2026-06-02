@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Radio, Loader2 } from 'lucide-react';
 import { isOvertime } from '@/lib/utils';
+import { PersonAvatar } from '@/components/person-avatar';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -12,6 +13,8 @@ type PresenceUser = {
   role:        string;
   team:        string | null;
   clockedInAt: string;
+  weekSecondsBefore?: number;
+  photoUrl?:   string | null;
 };
 
 type SSEEvent =
@@ -20,10 +23,6 @@ type SSEEvent =
   | { type: 'clock_out'; userId: number };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-function initials(name: string): string {
-  return name.split(' ').map(w => w[0] ?? '').join('').toUpperCase().slice(0, 2);
-}
 
 function sinceLabel(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
@@ -49,7 +48,7 @@ function roleLabel(role: string): string {
 
 // ── Live duration ticker ───────────────────────────────────────────────────────
 
-function LiveDuration({ clockedInAt }: { clockedInAt: string }) {
+function LiveDuration({ clockedInAt, weekSecondsBefore = 0 }: { clockedInAt: string; weekSecondsBefore?: number }) {
   const [secs, setSecs] = useState(() =>
     Math.max(0, Math.round((Date.now() - new Date(clockedInAt).getTime()) / 1000))
   );
@@ -65,7 +64,7 @@ function LiveDuration({ clockedInAt }: { clockedInAt: string }) {
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
   const s = secs % 60;
-  const over = isOvertime(secs);
+  const over = isOvertime(weekSecondsBefore + secs);
 
   const label = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
   return (
@@ -84,9 +83,7 @@ function PersonCard({ user }: { user: PresenceUser }) {
       {/* Avatar + live indicator */}
       <div className="flex items-start justify-between">
         <div className="relative">
-          <div className="w-12 h-12 rounded-full bg-(--rs-primary-100) text-(--rs-primary-700) flex items-center justify-center text-base font-bold">
-            {initials(user.name)}
-          </div>
+          <PersonAvatar name={user.name} photoUrl={user.photoUrl} size={48} />
           {/* Pulsing green dot */}
           <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-green-400 border-2 border-white">
             <span className="absolute inset-0 rounded-full bg-green-400 animate-ping opacity-75" />
@@ -116,7 +113,7 @@ function PersonCard({ user }: { user: PresenceUser }) {
         <div className="flex items-center justify-between text-xs">
           <span className="text-(--rs-neutral-grey-400)">Duration</span>
           <span className="font-semibold tabular-nums">
-            <LiveDuration clockedInAt={user.clockedInAt} />
+            <LiveDuration clockedInAt={user.clockedInAt} weekSecondsBefore={user.weekSecondsBefore} />
           </span>
         </div>
       </div>

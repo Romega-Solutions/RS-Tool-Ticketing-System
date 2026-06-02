@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { canAccessReports } from '@/lib/rbac';
+import { getPhotoResolver } from '@/lib/orgchart';
 
 export const runtime = 'nodejs';
 
@@ -96,12 +97,13 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'Invalid month format (YYYY-MM)' }, { status: 400 });
     }
 
-    let usersQuery = admin.from('users').select('id, name, team, role, member_code, hourly_rate_usd').eq('is_active', 1);
+    let usersQuery = admin.from('users').select('id, name, email, team, role, member_code, hourly_rate_usd').eq('is_active', 1);
     if (session.role !== 'admin') {
       usersQuery = usersQuery.eq('team', session.team ?? '');
     }
     const { data: teamUsersData } = await usersQuery;
     const teamUsers = teamUsersData ?? [];
+    const resolvePhoto = await getPhotoResolver();
 
     const userIds = teamUsers.map((u: { id: number }) => u.id);
     let records: AttendanceRow[] = [];
@@ -117,7 +119,7 @@ export async function GET(req: Request) {
     const workdays = countWorkdaysInMonth(monthParam);
     const recordsByUserAndWeek = new Map(records.map(record => [`${record.user_id}:${record.week_start}`, record] as const));
 
-    const summary = teamUsers.map((user: { id: number; name: string; team: string | null; role: string; hourly_rate_usd: number | string | null }) => {
+    const summary = teamUsers.map((user: { id: number; name: string; email: string | null; team: string | null; role: string; hourly_rate_usd: number | string | null }) => {
       let present = 0, wfh = 0, leave = 0, absent = 0, weekendWork = 0;
       const [year, month] = monthParam.split('-').map(Number);
       const lastDay = new Date(year, month, 0).getDate();
@@ -144,6 +146,7 @@ export async function GET(req: Request) {
 
       return {
         userId: user.id, name: user.name, team: user.team, role: user.role,
+        photoUrl: resolvePhoto({ name: user.name, email: user.email }),
         hourlyRateUsd: user.hourly_rate_usd == null ? null : Number(user.hourly_rate_usd),
         present, wfh, leave, absent, weekendWork, workdays,
       };
@@ -183,12 +186,13 @@ export async function GET(req: Request) {
     .eq('week_start', weekStart);
   const rawRecords = rawRecordsData ?? [];
 
-  let usersQuery = admin.from('users').select('id, name, team, role, member_code, hourly_rate_usd').eq('is_active', 1);
+  let usersQuery = admin.from('users').select('id, name, email, team, role, member_code, hourly_rate_usd').eq('is_active', 1);
   if (session.role !== 'admin') {
     usersQuery = usersQuery.eq('team', session.team ?? '');
   }
   const { data: teamUsersData2 } = await usersQuery;
   const teamUsers = teamUsersData2 ?? [];
+  const resolvePhoto = await getPhotoResolver();
 
   // Map snake_case DB rows to camelCase for the client
   const records = (rawRecords as AttendanceRow[]).map(r => ({
@@ -229,10 +233,11 @@ export async function GET(req: Request) {
     }
   }
 
-  const usersOut = (teamUsers as { id: number; name: string; team: string | null; role: string; member_code: string | null; hourly_rate_usd: number | string | null }[])
+  const usersOut = (teamUsers as { id: number; name: string; email: string | null; team: string | null; role: string; member_code: string | null; hourly_rate_usd: number | string | null }[])
     .map(u => ({
       id: u.id, name: u.name, team: u.team, role: u.role,
       memberCode: u.member_code ?? null,
+      photoUrl: resolvePhoto({ name: u.name, email: u.email }),
       hourlyRateUsd: u.hourly_rate_usd == null ? null : Number(u.hourly_rate_usd),
     }));
 

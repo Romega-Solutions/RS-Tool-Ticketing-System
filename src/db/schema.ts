@@ -34,6 +34,21 @@ export const timesheets = pgTable('timesheets', {
   createdAt:       text('created_at').default(sql`CURRENT_TIMESTAMP`),
 });
 
+// Overtime admin-approval queue. A contractor cut at the 15h weekly cap files a
+// request; an admin approves it and sets approvedUntil, which suspends the
+// cap for that user until it expires. Mirror of docs/migrations/add-overtime-requests.sql.
+export const overtimeRequests = pgTable('overtime_requests', {
+  id:            serial('id').primaryKey(),
+  userId:        integer('user_id').notNull(),
+  weekStart:     text('week_start').notNull(),
+  status:        text('status').notNull().default('pending'), // pending | approved | denied
+  reason:        text('reason'),
+  requestedAt:   text('requested_at').default(sql`CURRENT_TIMESTAMP`),
+  decidedBy:     integer('decided_by'),
+  decidedAt:     text('decided_at'),
+  approvedUntil: text('approved_until'),
+});
+
 export const weeklyReports = pgTable('weekly_reports', {
   id:                serial('id').primaryKey(),
   userId:            integer('user_id').notNull(),

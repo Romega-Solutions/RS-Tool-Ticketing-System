@@ -4,6 +4,7 @@ import { canAccessAdmin } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clockOut } from '@/lib/presence';
 import { computeOvertime } from '@/lib/utils';
+import { weeklySecondsForUser } from '@/lib/overtime-server';
 
 export const runtime = 'nodejs';
 
@@ -55,7 +56,8 @@ export async function POST(req: Request) {
   }
 
   const durationSeconds = Math.round((outDate.getTime() - inDate.getTime()) / 1000);
-  const { isOvertime, overtimeSeconds } = computeOvertime(durationSeconds);
+  const weekSecondsBefore = await weeklySecondsForUser(admin, userId, outDate);
+  const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds);
 
   const { error } = await admin
     .from('timesheets')
