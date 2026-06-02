@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { LifeBuoy, X, Shield, ArrowRight } from 'lucide-react';
-import { USER_GUIDES, ADMIN_GUIDES, HowToCard } from '@/components/guide/guide-content';
+import { LifeBuoy, X, ArrowRight } from 'lucide-react';
+import { GuideWizard } from '@/components/guide/guide-wizard.client';
 
 // App-wide floating help launcher: a bottom-right button that opens a right-hand
 // slide-over drawer with the same page-by-page guide as /help (single source of
@@ -66,25 +66,10 @@ export function FloatingGuide({ isAdmin = false }: { isAdmin?: boolean }) {
           </button>
         </div>
 
-        {/* Body — only mounted while open (keeps anchor ids unique app-wide) */}
+        {/* Body — only mounted while open */}
         {open && (
-          <div className="flex-1 space-y-4 overflow-y-auto px-5 py-5">
-            <p className="text-sm text-(--rs-neutral-grey-500)">
-              Step-by-step help for each page. Open the full guide for the daily-flow overview.
-            </p>
-
-            {USER_GUIDES.map(g => <HowToCard key={g.id} guide={g} anchor={false} />)}
-
-            {isAdmin && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 pt-1">
-                  <Shield className="h-4 w-4 text-(--rs-accent-600)" />
-                  <h3 className="font-serif text-base font-semibold text-(--rs-neutral-grey-900)">Admin tools</h3>
-                  <span className="rounded-full bg-(--rs-accent-50) px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-(--rs-accent-700)">Admins only</span>
-                </div>
-                {ADMIN_GUIDES.map(g => <HowToCard key={g.id} guide={g} anchor={false} />)}
-              </div>
-            )}
+          <div className="flex-1 overflow-y-auto px-5 py-5">
+            <GuideWizard isAdmin={isAdmin} />
           </div>
         )}
 
