@@ -63,7 +63,7 @@ export function FxRateWidget() {
           </p>
           {fx ? (
             <p className="mt-0.5 text-2xl font-bold tabular-nums text-(--rs-neutral-grey-900) leading-tight">
-              ₱{php(fx.rate)}
+              ₱ {php(fx.rate)}
               <span className="text-sm font-normal text-(--rs-neutral-grey-400)"> per $1</span>
             </p>
           ) : error ? (

@@ -12,6 +12,7 @@ import { CandidateStatus, CandidateRating, CandidateDelete, CandidatePublicTalen
 import { ResumeUploadCard } from '../resume-upload';
 import { CandidateEditForm } from '../candidate-edit-form';
 import { ResendEmailButton } from './resend-email-button';
+import { formatPhoneNumber } from '@/lib/format';
 
 type Candidate = {
   id:             number;
@@ -228,7 +229,7 @@ export default async function CandidateDetailPage({
 
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-(--rs-neutral-grey-700)">
                 {c.email    && <ContactPill icon={<Mail     className="w-3.5 h-3.5" />} text={c.email}    href={`mailto:${c.email}`} />}
-                {c.phone    && <ContactPill icon={<Phone    className="w-3.5 h-3.5" />} text={c.phone}    href={`tel:${c.phone.replace(/\s+/g, '')}`} />}
+                {c.phone    && <ContactPill icon={<Phone    className="w-3.5 h-3.5" />} text={formatPhoneNumber(c.phone)} href={`tel:${c.phone.replace(/\s+/g, '')}`} />}
                 {c.location && <ContactPill icon={<MapPin   className="w-3.5 h-3.5" />} text={c.location} />}
                 {c.linkedin_url && <ContactPill icon={<Link2 className="w-3.5 h-3.5" />} text="LinkedIn" href={c.linkedin_url} />}
                 {c.website  && <ContactPill icon={<Globe    className="w-3.5 h-3.5" />} text="Website"  href={c.website} />}

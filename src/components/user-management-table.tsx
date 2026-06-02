@@ -300,7 +300,7 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
                           />
                         </div>
                       ) : user.hourlyRateUsd != null ? (
-                        <span className="text-sm font-medium text-(--rs-neutral-grey-800) tabular-nums">${formatUsd(user.hourlyRateUsd)}</span>
+                        <span className="text-sm font-medium text-(--rs-neutral-grey-800) tabular-nums">$ {formatUsd(user.hourlyRateUsd)}</span>
                       ) : (
                         <span className="text-xs text-(--rs-neutral-grey-300) italic">Not set</span>
                       )}

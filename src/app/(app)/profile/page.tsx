@@ -370,7 +370,7 @@ export default function ProfilePage() {
                 <div className="flex items-end justify-between rounded-lg border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-4 py-3">
                   <div>
                     <p className="text-2xl font-serif font-bold text-(--rs-neutral-grey-900) tabular-nums leading-none">
-                      ${user.hourlyRateUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      $ {user.hourlyRateUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       <span className="text-sm font-sans font-normal text-(--rs-neutral-grey-400)"> / hr</span>
                     </p>
                   </div>
@@ -378,11 +378,11 @@ export default function ProfilePage() {
                     {fx ? (
                       <>
                         <p className="text-lg font-semibold text-(--rs-primary-600) tabular-nums leading-none">
-                          ₱{(user.hourlyRateUsd * fx.rate).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          ₱ {(user.hourlyRateUsd * fx.rate).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           <span className="text-xs font-normal text-(--rs-neutral-grey-400)"> / hr</span>
                         </p>
                         <p className="text-[10px] text-(--rs-neutral-grey-400) mt-1">
-                          @ ₱{fx.rate.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/$1{fx.stale ? ' · cached' : ' · live'}
+                          @ ₱ {fx.rate.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/$1{fx.stale ? ' · cached' : ' · live'}
                         </p>
                       </>
                     ) : (

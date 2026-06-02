@@ -126,7 +126,7 @@ export function RatesClient({ users }: { users: RateUser[] }) {
           ) : fx ? (
             <>
               <p className="mt-4 text-4xl font-serif font-bold text-(--rs-neutral-grey-900) tabular-nums leading-none">
-                ₱{php(fx.rate)}
+                ₱ {php(fx.rate)}
                 <span className="ml-2 text-sm font-sans font-normal text-(--rs-neutral-grey-400)">per $1 USD</span>
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-(--rs-neutral-grey-400)">
@@ -230,12 +230,12 @@ export function RatesClient({ users }: { users: RateUser[] }) {
                   <td className="px-4 py-2.5 text-(--rs-neutral-grey-600)">{u.role}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
                     {u.hourlyRateUsd != null
-                      ? <span className="font-medium text-(--rs-neutral-grey-800)">${usd(u.hourlyRateUsd)}</span>
+                      ? <span className="font-medium text-(--rs-neutral-grey-800)">$ {usd(u.hourlyRateUsd)}</span>
                       : <span className="text-xs text-(--rs-neutral-grey-300) italic">Not set</span>}
                   </td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
                     {u.hourlyRateUsd != null && fx
-                      ? <span className="font-semibold text-(--rs-primary-600)">₱{php(u.hourlyRateUsd * fx.rate)}</span>
+                      ? <span className="font-semibold text-(--rs-primary-600)">₱ {php(u.hourlyRateUsd * fx.rate)}</span>
                       : <span className="text-xs text-(--rs-neutral-grey-300)">—</span>}
                   </td>
                 </tr>

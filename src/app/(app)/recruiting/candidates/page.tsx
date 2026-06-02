@@ -12,6 +12,7 @@ import { CandidateStatus, CandidateRating, CandidateDelete } from './candidate-r
 import { ResumeUploadButton } from './resume-upload';
 import { deleteAllCandidates } from './actions';
 import { AtsTabs } from '../ats-tabs';
+import { formatPhoneNumber } from '@/lib/format';
 
 type CandidateRowData = {
   id:           number;
@@ -276,7 +277,7 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
                                 <div className="text-xs text-(--rs-neutral-grey-500) flex gap-2 mt-0.5">
                                   {c.email && <span>{c.email}</span>}
                                   {c.email && c.phone && <span className="text-(--rs-neutral-grey-300)">·</span>}
-                                  {c.phone && <span>{c.phone}</span>}
+                                  {c.phone && <span className="tabular-nums">{formatPhoneNumber(c.phone)}</span>}
                                 </div>
                               )}
                             </Link>
