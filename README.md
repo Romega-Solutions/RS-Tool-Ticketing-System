@@ -1,143 +1,93 @@
-# RS Ticketing System
+# RS Internal Operations Platform
 
-Internal reporting and visibility layer for Romega Solutions. Sits on top of Plane.so — it does not replace it.
+Romega Solutions' internal web app — attendance, project tracking, learning (LMS),
+recruiting, onboarding, and lead/admin tooling in one place.
 
-## Architecture
+> **Naming note**: the repo is still called `RS-Tool-Ticketing-System`. It began life as a
+> read-only reporting layer on top of Plane.so, but it has since absorbed those
+> responsibilities and several more. Plane.so and the old Python report script have been
+> decommissioned (see `docs/PLANE_DECOMMISSION_AUDIT.md`). A full picture of the current
+> state lives in `docs/SETUP_AUDIT.md`.
 
-```
-Plane.so (source of truth)
-    ↓
-Python report script / Next.js API (transformation layer)
-    ↓
-Excel reports + Web dashboard (presentation layer)
-```
+## Stack
 
-### Who uses what
+- **Next.js 16** (App Router) · **React 19** · TypeScript · Tailwind v4 · **shadcn/ui** + Base UI
+- **Supabase** — Postgres (Drizzle ORM), Auth (Google OAuth), Storage
+- **n8n** — webhook automations (ATS comms, onboarding sequence, attendance sweep, CEO briefing)
+- **Groq** — LLM features (CEO briefing, PM status drafter, content repurposer)
+- **Wise API** — live USD→PHP exchange rate
+- Excel export (`exceljs`), PDF certificates (`pdf-lib`)
+- Deployed on **Vercel** (daily cron → `/api/cron/auto-clock-out`)
 
-| Role | Tool | What they do |
-|------|------|-------------|
-| **ICs** (Ken, Jenn, Duane, Mich) | Plane only | Create/update tasks, set status, due dates, labels |
-| **Team Leads** (Mark, Cherry Ann) | Plane + reports | Review tasks, generate/receive weekly reports, add context |
-| **Admin/CEO** (Robbie) | Custom web app | Dashboard view, download reports, see risks across org |
+## Modules
 
-ICs never touch this app. Plane is their system. This app is for visibility and reporting only.
+| Module | What it does |
+|--------|--------------|
+| **Attendance** | Clock in/out, weekly 15h overtime cap with admin approval, auto clock-out cron |
+| **Weekly reports** | 7-section weekly/status reports with Excel export |
+| **Projects / tickets** | In-app PM: projects, work items, cycles, labels, comments, saved views (replaces Plane) |
+| **LMS** | Courses, lessons, server-graded quizzes, auto PDF certificates, cohort assignments, discussions |
+| **Recruiting / ATS** | Candidates, positions, public `/apply` form, n8n resume parser + comms |
+| **Sales / Marketing / CEO / PM** | Leads, content repurposer, daily briefing, weekly status drafter |
+| **Onboarding** | Onboarder records + n8n welcome / BG-check / 30-day / 90-day sequence |
+| **Rates** | Per-user USD hourly rate with live FX conversion |
 
----
+## Roles
 
-## Components
+`intern` · `ic` · `lead` · `admin`. ICs/interns land on `/my-tasks`; leads/admin on `/dashboard`.
+Leads see extra tools gated by their team; admins see everything. See `src/lib/rbac.ts`.
 
-### 1. Report Script (`report-script/`)
+## Getting started
 
-Python script that pulls task data from Plane's API and generates the 7-section weekly report as `.xlsx`.
-
-**Auto-populated sections:**
-- Section 4: Pending Projects (active tasks: backlog/unstarted/started and todo/in_progress/in_review)
-- Section 5: Key Accomplishments (tasks completed this week)
-
-**Manually filled by ICs:**
-- Section 2: Client Engagement Activities
-- Section 3: Risks / Issues / Roadblocks
-- Section 6: Ideas / Recommendations
-- Section 7: Management Remarks (filled by supervisor)
-
-**Setup:**
 ```bash
-cd report-script
-python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-# Fill in PLANE_BASE_URL, PLANE_API_KEY, PLANE_WORKSPACE_SLUG
-```
-
-**Usage:**
-```bash
-python generate_report.py                      # current week, all users
-python generate_report.py --user "Ken Garcia"  # one user
-python generate_report.py --user "ken@romega-solutions.com"   # one user by email
-python generate_report.py --user "135f22ae-dd76-402b-a54f-a9aa6d28af8d"  # one user by id
-python generate_report.py --week 2026-05-05    # specific week (Monday date)
-python generate_report.py --bulk               # all users, one workbook
-python generate_report.py --dry-run            # validate config only
-python generate_report.py --debug-members --user "ken"  # debug member matching
-python generate_report.py --debug-issues --user "ken"   # debug issue/status mapping
-python check_members.py                         # show member count
-python check_members.py --show-all             # list all members
-```
-
-**Automate (cron — every Friday 3pm):**
-```bash
-0 15 * * 5 cd /path/to/report-script && /path/to/venv/bin/python generate_report.py --bulk
-```
-
----
-
-### 2. Web App (`src/`)
-
-Next.js 16 app (App Router). Built for leads and admin only — not for ICs.
-
-**Stack:** Next.js 16 · Drizzle ORM · SQLite · shadcn/ui · Tailwind v4
-
-**Core features (MVP):**
-- Admin dashboard: completed vs. pending tasks per person, risks flagged in Plane
-- Generate reports: select user + week → download Excel
-- Bulk reports: generate all users → download ZIP
-- Report history: list of past generated reports, download anytime
-
-**Dev (from project root):**
-```bash
-cd /Users/kuya/Documents/WORK/RS_Workspace/RS_Tools/RS-Tool-Ticketing-System
 npm install
-npm run dev     # http://localhost:3000
-npm run build
-npm run lint
+cp .env.example .env     # fill in Supabase + the keys you need
+npm run dev              # http://localhost:3000
 ```
 
-If you see `Can't resolve 'tailwindcss' in '/.../RS_Tools'`, you're running from the parent folder instead of this repository root. `cd` into this project path first, then run the npm commands above.
+Then seed accounts and (optionally) sample LMS content:
 
----
+```bash
+npx tsx scripts/seed-auth-users.ts   # Supabase Auth users for every public.users row (default pass Demo@1234)
+npx tsx scripts/seed-lms.ts          # sample courses/lessons/quiz
+```
 
-## Plane.so Configuration
+### Common commands
 
-Self-hosted at: `https://romega-projects-rs-plane.ikuuwb.easypanel.host`
+```bash
+npm run dev      # dev server
+npm run build    # production build
+npm run lint     # ESLint
+npm run verify   # lint + build (pre-PR check)
+npm test         # vitest
 
-Workspace slug: `romega-solutions`
+npx drizzle-kit generate   # create a migration after editing src/db/schema.ts
+npx drizzle-kit migrate    # apply migrations
+```
 
-**Projects:** C1 (Romega Digital v3) · C2 (PinayMate) · C3 (Internal Tools) · C4 (Upskilling)
+> If you see `Can't resolve 'tailwindcss'`, you're running from the parent `RS_Tools/` folder.
+> `cd` into this repository root first.
 
-**Workflow states:** Backlog → To Do → In Progress → In Review → Done / Cancelled
+## Configuration
 
-**Labels ICs must use for reports to work:**
-- `client-engagement`
-- `risk` or `blocked`
-- `idea`
-
-> Sections 2/3/6 are currently manual in the generated Excel. These labels are for process consistency and future automation.
-
-**Minimum task fields required (enforce this with team):**
-- Assignee (must be set)
-- Status (must be kept current)
-- Due date (must be set)
-
-Without these, report auto-population breaks.
-
----
-
-## Failure Modes
-
-**Garbage in → garbage out.** If ICs don't assign tasks, set status, or add due dates, reports will be empty or wrong. Enforce the minimum fields above.
-
-**Leads ignoring reports.** Automate delivery via n8n or cron so it doesn't depend on someone manually generating.
-
----
+All config is environment variables — see **`.env.example`** for the full annotated list.
+Minimum to boot locally: the four `NEXT_PUBLIC_SUPABASE_*` / `SUPABASE_SERVICE_ROLE_KEY` /
+`DATABASE_URL` values. `CRON_SECRET` is required for the auto-clock-out cron (and must match
+the value configured in Vercel).
 
 ## Docs
 
 | Doc | What it covers |
-|-----|---------------|
-| `docs/plan/handoff-ken.md` | Step-by-step deployment checklist |
-| `docs/plan/plane-configuration.md` | Projects, states, labels, members setup |
-| `docs/plan/weekly-report-workflow.md` | Report sections, auto-population logic |
-| `docs/plan/migration.md` | Task import from markdown TODOs, parallel run, cutover |
-| `docs/plan/data-model.md` | DB schema reference (web app) |
-| `docs/plan/features.md` | Web app feature spec (Option A reference) |
-| `report-script/README.md` | Report script full usage and config |
+|-----|----------------|
+| `docs/SETUP_AUDIT.md` | Current state of the repo + drift checklist |
+| `docs/PLANE_DECOMMISSION_AUDIT.md` | Plane.so teardown |
+| `docs/SUPABASE_AUDIT.md` | Supabase schema / migration audit |
+| `docs/LMS_BUILD_PLAN.md` | LMS design |
+| `docs/INTERNAL_PM_BUILD_PLAN.md` | In-app PM / tickets design |
+| `docs/RECRUITMENT_AI_AGENT_BUILD_PLAN.md` | ATS / recruiting automation |
+| `docs/INTERNAL_ONBOARDING_BUILD_PLAN.md` | Onboarding sequence |
+| `docs/OVERTIME_AUTO_CLOCKOUT_AUDIT.md` | Attendance / overtime policy |
+| `docs/design-system.md` | `--rs-` color tokens, fonts, utilities |
+
+> `docs/TODO.md` and `docs/plan/*` describe the original Plane-based proposal and are kept for
+> history only — they no longer reflect how the app works.

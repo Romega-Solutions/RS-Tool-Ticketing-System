@@ -1,5 +1,10 @@
 # RS Ticketing System — TODO
 
+> ⚠️ **SUPERSEDED — historical only.** This file (and the rest of `docs/plan/`) describes the
+> original proposal to deploy Plane.so on a VPS with a Python report script. That approach was
+> abandoned: the app now owns its own data on Supabase and Plane was decommissioned. Kept for
+> history. For the current state see **`docs/SETUP_AUDIT.md`** and **`README.md`**.
+
 > Status: **APPROVED by Robbie (Apr 22).** Spec complete. Pitch materials polished. Next: share handoff with Ken in May.
 > Last updated: 2026-04-22
 

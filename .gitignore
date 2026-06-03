@@ -44,7 +44,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# SQLite WAL/lock files (never commit these)
+# SQLite — legacy dev DB, fully replaced by Supabase Postgres (never commit)
+sqlite.db
 sqlite.db-shm
 sqlite.db-wal
 .env*.local
