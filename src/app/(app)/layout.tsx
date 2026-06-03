@@ -3,6 +3,7 @@ import { AppSidebar, MobileNav } from "@/components/app-sidebar";
 import { getSession } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { hasSupabaseConfig } from "@/lib/supabase/config";
 import { canAccessPath, defaultLandingPath, canAccessAdmin } from "@/lib/rbac";
 import { getPhotoResolver } from "@/lib/orgchart";
 import { hasIncompleteHardCourse, isPathExemptFromHardEnforcement } from "@/lib/lms-enforcement";
@@ -38,6 +39,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
 
   if (!session) {
+    if (!hasSupabaseConfig()) redirect('/login');
+
     // Disambiguate: stale cookie vs. missing DB row vs. deactivated account.
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
