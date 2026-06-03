@@ -224,7 +224,7 @@ export async function updateOnboarderStatus(id: number, status: string): Promise
   const supabase = createAdminClient();
   const { data: before } = await supabase
     .from('onboarders')
-    .select('status, full_name, personal_email, role_title, team, direct_supervisor, onboarding_lead, onboarder_type')
+    .select('status, full_name, personal_email, role_title, team, direct_supervisor, onboarding_lead, onboarder_type, chief_of_staff')
     .eq('id', id)
     .maybeSingle();
 
@@ -253,7 +253,33 @@ export async function updateOnboarderStatus(id: number, status: string): Promise
       direct_supervisor: before.direct_supervisor ?? '',
       onboarding_lead:   before.onboarding_lead ?? session.name,
     };
-    if (status === 'thirty_day') {
+    if (status === 'background_check') {
+      // SOP §3: the background-check email goes out when the onboarder enters
+      // background_check. Reference + employment-verification asks stay manual
+      // (they need per-referee / per-company child rows).
+      await fireOnboardingTemplate(
+        supabase, session, id,
+        { onboarderId: id, template: 'bg-check-initiate', event: 'status_changed', context: baseContext },
+        'auto: BG-check initiate on stage entry',
+      );
+    } else if (status === 'pre_onboarding') {
+      // SOP §5: the official welcome email (contractor/intern variant, forked in
+      // n8n on onboarder_type) goes out when the onboarder enters pre_onboarding.
+      await fireOnboardingTemplate(
+        supabase, session, id,
+        {
+          onboarderId: id,
+          template:    'welcome',
+          event:       'status_changed',
+          context:     {
+            ...baseContext,
+            onboarder_type: before.onboarder_type,
+            chief_of_staff: before.chief_of_staff ?? '',
+          },
+        },
+        'auto: welcome email on stage entry',
+      );
+    } else if (status === 'thirty_day') {
       await fireOnboardingTemplate(
         supabase, session, id,
         { onboarderId: id, template: '30-day-checkin', event: 'status_changed', context: baseContext },
