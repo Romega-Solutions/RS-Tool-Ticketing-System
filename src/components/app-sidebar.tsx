@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import Image from "next/image";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap, BookMarked, Timer, LifeBuoy } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap, BookMarked, Timer } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { PersonAvatar } from "@/components/person-avatar";
@@ -12,24 +12,22 @@ import type { AppRole } from "@/lib/rbac";
 import { canAccessReports, canAccessAdmin, canAccessLeadTool, roleLabel } from "@/lib/rbac";
 
 const navItems = [
-  { href: "/dashboard",         label: "Dashboard",           icon: LayoutDashboard, category: "main"      },
-  { href: "/my-tasks",          label: "My Tasks",             icon: CheckSquare,     category: "main"      },
-  { href: "/projects",          label: "Projects",             icon: Briefcase,       category: "main"      },
-  { href: "/learning",          label: "My Learning",          icon: BookMarked,      category: "main"      },
-  { href: "/learning/certificates", label: "My Certificates",  icon: GraduationCap,   category: "main"      },
-  { href: "/weekly-report",     label: "Weekly Reports",       icon: FileText,        category: "main"      },
-  { href: "/help",              label: "Help & Guide",         icon: LifeBuoy,        category: "main"      },
-  { href: "/attendance",        label: "Attendance",           icon: Calendar,        category: "reports"   },
-  { href: "/sales/leads",            label: "Sales / Leads",       icon: Users2,        category: "leadTools" },
-  { href: "/recruiting/candidates",  label: "Applicant Tracking System", icon: UserPlus2, category: "leadTools" },
-  { href: "/onboarders",             label: "Internal Onboarding",  icon: GraduationCap, category: "leadTools" },
-  { href: "/pm/status-drafter",      label: "PM / Status Drafter", icon: ClipboardList, category: "leadTools" },
-  { href: "/ceo/briefing",           label: "CEO / Briefing",      icon: Sun,           category: "leadTools" },
-  { href: "/marketing/content",      label: "Marketing / Content", icon: Wand2,         category: "leadTools" },
-  { href: "/admin/users",       label: "User Management",      icon: Shield,            category: "admin"     },
-  { href: "/admin/overtime",    label: "Overtime Requests",    icon: Timer,             category: "admin"     },
-  { href: "/admin/learning",    label: "Manage Learning",      icon: BookOpen,          category: "admin"     },
-  { href: "/rates",             label: "Rates & Currency",     icon: CircleDollarSign,  category: "admin"     },
+  { href: "/dashboard",         label: "Dashboard",      icon: LayoutDashboard, category: "main"      },
+  { href: "/my-tasks",          label: "My Tasks",       icon: CheckSquare,     category: "main"      },
+  { href: "/projects",          label: "Projects",       icon: Briefcase,       category: "main"      },
+  { href: "/learning",          label: "Learning",       icon: BookMarked,      category: "main"      },
+  { href: "/weekly-report",     label: "Weekly Reports", icon: FileText,        category: "main"      },
+  { href: "/attendance",        label: "Attendance",     icon: Calendar,        category: "reports"   },
+  { href: "/sales/leads",            label: "Sales",      icon: Users2,          category: "leadTools" },
+  { href: "/recruiting/candidates",  label: "Recruiting", icon: UserPlus2,       category: "leadTools" },
+  { href: "/onboarders",             label: "Onboarding", icon: GraduationCap,   category: "leadTools" },
+  { href: "/pm/status-drafter",      label: "PM",         icon: ClipboardList,   category: "leadTools" },
+  { href: "/ceo/briefing",           label: "Briefing",   icon: Sun,             category: "leadTools" },
+  { href: "/marketing/content",      label: "Marketing",  icon: Wand2,           category: "leadTools" },
+  { href: "/admin/users",       label: "Users",          icon: Shield,            category: "admin"     },
+  { href: "/admin/overtime",    label: "Overtime",       icon: Timer,             category: "admin"     },
+  { href: "/admin/learning",    label: "Manage Learning",icon: BookOpen,          category: "admin"     },
+  { href: "/rates",             label: "Rates",          icon: CircleDollarSign,  category: "admin"     },
 ];
 
 function NavPendingDot({ collapsed }: { collapsed: boolean }) {
@@ -134,22 +132,10 @@ function NavLinks({ collapsed = false, role, team }: { collapsed?: boolean; role
 
   return (
     <nav className="flex-1 overflow-y-auto w-full" aria-label="Main Navigation">
-      <div className="space-y-0.5">
-        {mainItems.map(item => (
-          <NavLink
-            key={item.href}
-            href={item.href}
-            label={item.label}
-            icon={item.icon}
-            active={isActive(item.href)}
-            collapsed={collapsed}
-          />
-        ))}
-      </div>
-
-      <NavSection label="Reports"    items={reportItems}   collapsed={collapsed} isActive={isActive} />
-      <NavSection label="Lead Tools" items={leadToolItems} collapsed={collapsed} isActive={isActive} />
-      <NavSection label="Admin"      items={adminItems}    collapsed={collapsed} isActive={isActive} />
+      <NavSection label="Workspace" items={mainItems}     collapsed={collapsed} isActive={isActive} />
+      <NavSection label="Team"      items={reportItems}   collapsed={collapsed} isActive={isActive} />
+      <NavSection label="Tools"     items={leadToolItems} collapsed={collapsed} isActive={isActive} />
+      <NavSection label="Admin"     items={adminItems}    collapsed={collapsed} isActive={isActive} />
     </nav>
   );
 }

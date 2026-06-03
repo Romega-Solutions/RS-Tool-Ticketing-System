@@ -28,19 +28,9 @@ export function canAccessAdmin(role: AppRole): boolean {
 }
 
 export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string | null): boolean {
-  void tool;
-  void role;
-  void team;
-  // Temporary testing mode: expose all lead tools to any authenticated user.
-  // Keep destructive actions behind explicit typed confirmation in the tool UI.
-  //
-  // NOTE on /onboarders: the Onboarding Lead (Erich) MUST keep access when
-  // proper RBAC is restored. The commented allowlist below already covers
-  // her — 'hr', 'human resources', and 'people' are included so any HR-
-  // adjacent team_name on her user row will pass.
-  return true;
-
-  /*
+  // Admins see every tool; ICs/interns see none; a lead sees a tool only if their
+  // team is in that tool's allowlist. The Onboarding Lead keeps access via the
+  // 'hr' / 'human resources' / 'people' entries under `onboarding`.
   const normalizeTeamName = (value: string | null | undefined) => String(value ?? '').trim().toLowerCase();
   const LEAD_TOOL_TEAMS: Record<LeadToolKey, string[]> = {
     ceo: ['executive', 'executive & admin', 'admin'],
@@ -57,7 +47,6 @@ export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string
   if (role === 'admin') return true;
   if (role !== 'lead') return false;
   return LEAD_TOOL_TEAMS[tool].includes(normalizeTeamName(team));
-  */
 }
 
 export function canAccessPath(pathname: string, role: AppRole, team: string | null = null): boolean {
