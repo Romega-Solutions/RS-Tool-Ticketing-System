@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { AlertTriangle, Loader2, LogIn, LogOut } from 'lucide-react';
-import { formatDuration, isOvertime, WEEKLY_CAP_SECONDS } from '@/lib/utils';
+import { formatDuration, isOvertime, weeklyBudget, WEEKLY_CAP_SECONDS } from '@/lib/utils';
 import { ClockOutReminderBanner } from '@/components/clock-out-reminder-banner';
 import { OvertimeGuardrailDialog } from '@/components/overtime-guardrail-dialog';
 import { OvertimeStatusBanner } from '@/components/overtime-status-banner';
@@ -105,6 +105,34 @@ function ClockConfirmDialog({
             {isClockIn ? 'Start Clock-In' : 'Confirm Clock-Out'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Personal weekly-budget meter for the dark sidebar: how much of the 15h
+// Mon–Sun cap is used and how much is left. Live-ticks via `elapsed` while
+// clocked in; still shows completed-week usage when clocked out.
+function WeeklyBudgetBar({ weekSecondsBefore, elapsed }: { weekSecondsBefore: number; elapsed: number }) {
+  const { usedSeconds, remainingSeconds, capSeconds, percentUsed, isOvertime: over } =
+    weeklyBudget(weekSecondsBefore, elapsed);
+  const fillColor = over ? 'bg-amber-400' : percentUsed >= 80 ? 'bg-amber-300' : 'bg-green-400';
+  const usedH = (usedSeconds / 3600).toFixed(usedSeconds % 3600 === 0 ? 0 : 1);
+  const capH  = Math.round(capSeconds / 3600);
+
+  return (
+    <div className="px-3 pt-1.5">
+      <div className="flex items-center justify-between text-[10px] mb-1">
+        <span className="text-white/45">{usedH}h / {capH}h this week</span>
+        <span className={over ? 'font-semibold text-amber-300' : 'text-white/70'}>
+          {over ? `OT +${formatDuration(usedSeconds - capSeconds)}` : `${formatDuration(remainingSeconds)} left`}
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+        <div
+          className={`h-full rounded-full transition-all ${fillColor}`}
+          style={{ width: `${over ? 100 : Math.max(percentUsed, 2)}%` }}
+        />
       </div>
     </div>
   );
@@ -331,6 +359,12 @@ export function ClockWidget({
         return;
       }
 
+      // Roll the just-finished session into the week total so the budget bar
+      // stays accurate without waiting for a reload.
+      const finishedSeconds = elapsedRef.current;
+      setWeekSecondsBefore(w => w + finishedSeconds);
+      weekBeforeRef.current += finishedSeconds;
+
       stopTimer();
       setReminderVisible(false);
       lastReminderFiredRef.current = 0;
@@ -486,6 +520,9 @@ export function ClockWidget({
               {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5 shrink-0" />}
               Clock In
             </button>
+          )}
+          {state !== 'loading' && (
+            <WeeklyBudgetBar weekSecondsBefore={weekSecondsBefore} elapsed={state === 'in' ? elapsed : 0} />
           )}
           {error && <p className="px-3 text-[10px] text-red-400">{error}</p>}
         </div>

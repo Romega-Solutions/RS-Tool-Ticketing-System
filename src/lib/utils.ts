@@ -48,3 +48,36 @@ export function computeOvertime(weekSecondsBefore: number, durationSeconds: numb
   );
   return { isOvertime: overtimeSeconds > 0, overtimeSeconds };
 }
+
+export type WeeklyBudget = {
+  /** Total seconds counted against the cap (completed week + live session). */
+  usedSeconds: number;
+  /** Seconds left before the 15h cap, floored at zero. */
+  remainingSeconds: number;
+  /** The cap itself (15h), so callers don't re-import the constant. */
+  capSeconds: number;
+  /** Progress toward the cap, 0–100 (clamped). */
+  percentUsed: number;
+  isOvertime: boolean;
+};
+
+/**
+ * Personal "how much of my 15h week is left" snapshot. Pure mirror of the
+ * server-enforced weekly cap, shared by the clock widget and the dashboard
+ * "My Hours" card so the personal view always matches enforcement.
+ *
+ * @param weekSecondsBefore completed (clocked-out) seconds this Mon–Sun week
+ * @param elapsedSeconds    live seconds of the open session (0 when clocked out)
+ */
+export function weeklyBudget(weekSecondsBefore: number, elapsedSeconds = 0): WeeklyBudget {
+  const usedSeconds = Math.max(0, weekSecondsBefore + elapsedSeconds);
+  const remainingSeconds = Math.max(0, WEEKLY_CAP_SECONDS - usedSeconds);
+  const percentUsed = Math.min(100, Math.round((usedSeconds / WEEKLY_CAP_SECONDS) * 100));
+  return {
+    usedSeconds,
+    remainingSeconds,
+    capSeconds: WEEKLY_CAP_SECONDS,
+    percentUsed,
+    isOvertime: usedSeconds > WEEKLY_CAP_SECONDS,
+  };
+}

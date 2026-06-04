@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { canAccessReports } from '@/lib/rbac';
+import { canAccessReports, canAccessAdmin } from '@/lib/rbac';
 import { getPhotoResolver } from '@/lib/orgchart';
 
 export const runtime = 'nodejs';
@@ -244,9 +244,13 @@ export async function GET(req: Request) {
   return NextResponse.json({ weekStart, records, users: usersOut, timesheetsByDay });
 }
 
+// Attendance edits are admin-only. This legacy self-submit path has no UI caller;
+// the live edit surface is PATCH /api/admin/attendance. Gating it to admins keeps
+// the "edits come from Admin" model intact and closes the only un-gated write path.
 export async function POST(req: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!canAccessAdmin(session.role)) return NextResponse.json({ error: 'Admins only' }, { status: 403 });
 
   const body = await req.json() as {
     weekStart: string;
