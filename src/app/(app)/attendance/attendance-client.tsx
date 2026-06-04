@@ -837,16 +837,25 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                 </div>
               </div>
 
+              {/* table-fixed + colgroup makes the grid fill the full width and
+                  flex its columns evenly; overflow-x-auto only kicks in below the
+                  small min-width (phones), per responsive-table guidance. */}
               <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[920px]">
+                <table className="w-full text-sm min-w-[680px] table-fixed">
+                  <colgroup>
+                    <col className="w-8" />
+                    <col className="w-[17%]" />
+                    {DAY_KEYS.map(day => <col key={day} className="w-[9%]" />)}
+                    <col className="w-[14%]" />
+                  </colgroup>
                   <thead>
                     <tr className="border-b border-(--rs-neutral-grey-100) bg-(--rs-neutral-grey-50)/40">
-                      <th className="w-6 py-3" />
+                      <th className="py-3" />
                       <th className="text-left py-3 pl-2 pr-4 font-medium text-(--rs-neutral-grey-500) text-xs uppercase tracking-wide">Member</th>
                       {DAY_KEYS.map((day, i) => {
                         const isTodayCol = isSameLocalDay(weekdayDateStrs[i], today);
                         return (
-                          <th key={day} className="text-center py-3 px-2 font-medium w-24">
+                          <th key={day} className="text-center py-3 px-1 font-medium">
                             <div className={`text-xs uppercase tracking-wide ${isTodayCol ? 'text-(--rs-primary-600) font-bold' : 'text-(--rs-neutral-grey-500)'}`}>
                               {DAY_LABELS[day][0]}
                             </div>
@@ -856,7 +865,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                           </th>
                         );
                       })}
-                      <th className="text-center py-3 px-4 font-medium text-(--rs-neutral-grey-500) text-xs uppercase tracking-wide w-24">Total</th>
+                      <th className="text-center py-3 px-2 font-medium text-(--rs-neutral-grey-500) text-xs uppercase tracking-wide">Total</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -897,9 +906,9 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                               const isRestDay = isWeekend && !val && secs === 0;
                               const isTodayCol = isSameLocalDay(weekdayDateStrs[i], today);
                               return (
-                                <td key={day} className={`text-center py-4 px-2 align-middle ${isTodayCol ? 'bg-(--rs-primary-50)/30' : ''}`}>
+                                <td key={day} className={`text-center py-4 px-1 align-middle ${isTodayCol ? 'bg-(--rs-primary-50)/30' : ''}`}>
                                   {isRestDay ? (
-                                    <span className="inline-block w-full rounded bg-(--rs-neutral-grey-200) text-(--rs-neutral-grey-500) text-[10px] font-medium px-2 py-1">
+                                    <span className="inline-block w-full rounded bg-(--rs-neutral-grey-200) text-(--rs-neutral-grey-500) text-[10px] font-medium px-1 py-1">
                                       Rest day
                                     </span>
                                   ) : (
@@ -1041,17 +1050,27 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[640px]">
+                <table className="w-full text-sm min-w-[560px] table-fixed">
+                  <colgroup>
+                    <col className="w-[22%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[11%]" />
+                  </colgroup>
                   <thead>
                     <tr className="border-b border-(--rs-neutral-grey-100) bg-(--rs-neutral-grey-50)/40">
                       <th className="text-left py-3 pl-4 pr-4 font-medium text-(--rs-neutral-grey-500) text-xs uppercase tracking-wide">Member</th>
-                      <th className="text-center py-3 px-3 font-medium text-green-700 text-xs uppercase tracking-wide">Present</th>
-                      <th className="text-center py-3 px-3 font-medium text-blue-700 text-xs uppercase tracking-wide">WFH</th>
-                      <th className="text-center py-3 px-3 font-medium text-yellow-700 text-xs uppercase tracking-wide">Leave</th>
-                      <th className="text-center py-3 px-3 font-medium text-red-700 text-xs uppercase tracking-wide">Absent</th>
-                      <th className="text-center py-3 px-3 font-medium text-purple-700 text-xs uppercase tracking-wide">Weekend</th>
-                      <th className="text-center py-3 px-3 font-medium text-(--rs-neutral-grey-500) text-xs uppercase tracking-wide">Tracked</th>
-                      <th className="text-center py-3 px-4 font-medium text-(--rs-neutral-grey-500) text-xs uppercase tracking-wide">Total</th>
+                      <th className="text-center py-3 px-2 font-medium text-green-700 text-xs uppercase tracking-wide">Present</th>
+                      <th className="text-center py-3 px-2 font-medium text-blue-700 text-xs uppercase tracking-wide">WFH</th>
+                      <th className="text-center py-3 px-2 font-medium text-yellow-700 text-xs uppercase tracking-wide">Leave</th>
+                      <th className="text-center py-3 px-2 font-medium text-red-700 text-xs uppercase tracking-wide">Absent</th>
+                      <th className="text-center py-3 px-2 font-medium text-purple-700 text-xs uppercase tracking-wide">Weekend</th>
+                      <th className="text-center py-3 px-2 font-medium text-(--rs-neutral-grey-500) text-xs uppercase tracking-wide">Tracked</th>
+                      <th className="text-center py-3 px-2 font-medium text-(--rs-neutral-grey-500) text-xs uppercase tracking-wide">Total</th>
                     </tr>
                   </thead>
                   <tbody>
