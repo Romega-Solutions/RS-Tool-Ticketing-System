@@ -38,6 +38,33 @@ export async function createPosition(formData: FormData) {
   revalidatePath('/recruiting/positions');
 }
 
+export async function updatePosition(id: number, formData: FormData) {
+  await requireSession();
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Invalid id');
+
+  const jobTitle       = String(formData.get('jobTitle')       ?? '').trim();
+  const client         = String(formData.get('client')         ?? '').trim() || null;
+  const location       = String(formData.get('location')       ?? '').trim() || null;
+  const jobDescription = String(formData.get('jobDescription') ?? '').trim() || null;
+
+  if (!jobTitle) throw new Error('Job title is required');
+
+  const supabase = createAdminClient();
+  const { error } = await supabase
+    .from('positions')
+    .update({
+      job_title:       jobTitle,
+      client,
+      location,
+      job_description: jobDescription,
+      updated_at:      new Date().toISOString(),
+    })
+    .eq('id', id);
+  if (error) throw new Error(`Failed to update position: ${error.message}`);
+
+  revalidatePath('/recruiting/positions');
+}
+
 export async function updatePositionStatus(id: number, isOpen: boolean) {
   await requireSession();
   if (!Number.isInteger(id) || id <= 0) throw new Error('Invalid id');

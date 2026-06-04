@@ -3,8 +3,6 @@
 import { useState, useTransition } from 'react';
 import { Plus, Briefcase, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
@@ -14,10 +12,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { PositionFields } from './position-fields';
 import { createPosition } from './actions';
-
-const inputClass =
-  'h-11 rounded-xl border-(--rs-neutral-grey-200) focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100)';
 
 export function PositionForm() {
   const [open, setOpen]         = useState(false);
@@ -54,31 +50,7 @@ export function PositionForm() {
         </DialogHeader>
 
         <form action={onSubmit} className="space-y-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-4">
-            <div className="space-y-1.5 md:col-span-2">
-              <Label htmlFor="jobTitle" className="text-(--rs-neutral-grey-700) font-medium">Job title *</Label>
-              <Input id="jobTitle" name="jobTitle" required placeholder="Senior Frontend Engineer" className={inputClass} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="client" className="text-(--rs-neutral-grey-700) font-medium">Client</Label>
-              <Input id="client" name="client" placeholder="Romega Solutions" className={inputClass} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="location" className="text-(--rs-neutral-grey-700) font-medium">Location</Label>
-              <Input id="location" name="location" placeholder="Remote · PH" className={inputClass} />
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="jobDescription" className="text-(--rs-neutral-grey-700) font-medium">Job description</Label>
-            <textarea
-              id="jobDescription"
-              name="jobDescription"
-              rows={6}
-              placeholder="Responsibilities, requirements, and any other context recruiters should know…"
-              className="flex w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white px-4 py-3 text-sm placeholder:text-(--rs-neutral-grey-400) outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100)"
-            />
-          </div>
+          <PositionFields />
 
           {errorMsg && (
             <div className="flex items-start gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">

@@ -1,34 +1,18 @@
 import { redirect } from 'next/navigation';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { Card, CardContent } from '@/components/ui/card';
-import { Briefcase, Building2, MapPin, AlertCircle } from 'lucide-react';
+import { Briefcase, AlertCircle } from 'lucide-react';
 import { LeadToolHeader, StatCard } from '@/components/lead-tool-header';
 import { getSession } from '@/lib/session';
 import { canAccessLeadTool } from '@/lib/rbac';
 import { AtsTabs } from '../ats-tabs';
 import { PositionForm } from './position-form';
-import { PositionStatusToggle, PositionDelete } from './position-row';
-import { CopyApplicationLinkButton } from './copy-link-button';
-
-type PositionRow = {
-  id:              number;
-  job_title:       string;
-  client:          string | null;
-  location:        string | null;
-  job_description: string | null;
-  is_open:         boolean;
-  created_at:      string;
-};
+import { PositionTableRow, type Position } from './position-table-row';
 
 function isTableMissing(msg: string | undefined) {
   if (!msg) return false;
   const m = msg.toLowerCase();
   return m.includes('relation') && m.includes('does not exist');
-}
-
-function formatDate(iso: string) {
-  try { return new Date(iso).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }); }
-  catch { return iso; }
 }
 
 export default async function PositionsPage() {
@@ -47,7 +31,7 @@ export default async function PositionsPage() {
   const errorMsg = error?.message;
   const tableMissing = isTableMissing(errorMsg);
   const unexpectedError = error && !tableMissing ? errorMsg : null;
-  const positions: PositionRow[] = (data as PositionRow[] | null) ?? [];
+  const positions: Position[] = (data as Position[] | null) ?? [];
 
   const openCount   = positions.filter(p => p.is_open).length;
   const closedCount = positions.length - openCount;
@@ -127,40 +111,7 @@ export default async function PositionsPage() {
                     </thead>
                     <tbody className="divide-y divide-(--rs-neutral-grey-100)">
                       {positions.map(p => (
-                        <tr key={p.id} className="hover:bg-(--rs-neutral-grey-50) transition-colors">
-                          <td className="px-6 py-3.5">
-                            <div className="font-medium text-(--rs-neutral-grey-900)">{p.job_title}</div>
-                            {p.job_description && (
-                              <div className="text-xs text-(--rs-neutral-grey-500) mt-0.5 line-clamp-1 max-w-md">
-                                {p.job_description}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3.5 text-(--rs-neutral-grey-700)">
-                            {p.client ? (
-                              <span className="inline-flex items-center gap-1.5">
-                                <Building2 className="w-3 h-3 text-(--rs-neutral-grey-400)" />
-                                {p.client}
-                              </span>
-                            ) : '—'}
-                          </td>
-                          <td className="px-4 py-3.5 text-(--rs-neutral-grey-700)">
-                            {p.location ? (
-                              <span className="inline-flex items-center gap-1.5">
-                                <MapPin className="w-3 h-3 text-(--rs-neutral-grey-400)" />
-                                {p.location}
-                              </span>
-                            ) : '—'}
-                          </td>
-                          <td className="px-4 py-3.5 text-(--rs-neutral-grey-500) whitespace-nowrap">{formatDate(p.created_at)}</td>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <PositionStatusToggle id={p.id} isOpen={p.is_open} />
-                              {p.is_open && <CopyApplicationLinkButton positionId={p.id} />}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5"><PositionDelete id={p.id} /></td>
-                        </tr>
+                        <PositionTableRow key={p.id} position={p} />
                       ))}
                     </tbody>
                   </table>
