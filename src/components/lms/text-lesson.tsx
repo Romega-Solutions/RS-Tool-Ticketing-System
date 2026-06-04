@@ -9,7 +9,7 @@ export function TextLesson({ body }: { body: string | null }) {
     );
   }
   return (
-    <div className="prose prose-sm max-w-none prose-headings:font-serif prose-headings:text-(--rs-neutral-grey-900)">
+    <div className="prose prose-sm prose-headings:font-serif prose-headings:text-(--rs-neutral-grey-900)">
       <ReactMarkdown>{body}</ReactMarkdown>
     </div>
   );

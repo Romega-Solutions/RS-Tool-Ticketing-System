@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { normalizeRole, type AppRole } from '@/lib/rbac';
@@ -13,7 +14,11 @@ export type SessionUser = {
   isOnboarding: boolean;
 };
 
-export async function getSession(): Promise<SessionUser | null> {
+// Wrapped in React.cache so the two network round-trips (Supabase auth.getUser
+// + the public.users lookup) run at most ONCE per server request, even though
+// the layout, the page, and any server action all call getSession(). This alone
+// removes a large chunk of per-navigation latency across every page.
+export const getSession = cache(async (): Promise<SessionUser | null> => {
   try {
     const supabase = await createClient();
     const { data: { user }, error } = await supabase.auth.getUser();
@@ -41,4 +46,4 @@ export async function getSession(): Promise<SessionUser | null> {
   } catch {
     return null;
   }
-}
+});

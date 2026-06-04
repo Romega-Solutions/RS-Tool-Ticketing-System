@@ -4,6 +4,7 @@ import { getSession } from '@/lib/session';
 import { canAccessAdmin } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createCourse } from '../actions';
+import { SubmitButton } from '@/components/learning/submit-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +31,7 @@ export default async function NewCoursePage() {
   }
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <div className="space-y-6 max-w-3xl">
       <header>
         <Link href="/admin/learning" className="text-xs text-(--rs-primary-600) hover:underline">
           ← Manage Learning
@@ -68,10 +69,12 @@ export default async function NewCoursePage() {
           </select>
         </div>
         <div className="flex items-center gap-2 pt-2">
-          <button type="submit"
-            className="rounded-lg bg-(--rs-primary-500) text-white text-sm font-semibold px-4 py-2 hover:bg-(--rs-primary-600)">
+          <SubmitButton
+            pendingText="Creating…"
+            className="rounded-lg bg-(--rs-primary-500) text-white text-sm font-semibold px-4 py-2 hover:bg-(--rs-primary-600)"
+          >
             Create course
-          </button>
+          </SubmitButton>
           <Link href="/admin/learning" className="text-sm text-(--rs-neutral-grey-600) hover:underline">
             Cancel
           </Link>

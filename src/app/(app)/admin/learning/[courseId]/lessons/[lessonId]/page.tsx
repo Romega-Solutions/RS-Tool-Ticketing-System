@@ -5,6 +5,9 @@ import { getSession } from '@/lib/session';
 import { canAccessAdmin } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { updateLesson, uploadLessonVideoFile, upsertQuiz, deleteQuiz, createQuestion, deleteQuestion } from '../../../actions';
+import { SubmitButton } from '@/components/learning/submit-button';
+import { YoutubePreview } from '@/components/learning/youtube-preview';
+import { isYoutubeUrl } from '@/lib/youtube';
 
 export const dynamic = 'force-dynamic';
 
@@ -111,7 +114,7 @@ export default async function AdminLessonEditPage({
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 max-w-5xl">
       <header className="space-y-1">
         <Link href={`/admin/learning/${cid}`} className="text-xs text-(--rs-primary-600) hover:underline">
           ← Course
@@ -147,11 +150,23 @@ export default async function AdminLessonEditPage({
           name="videoUrl"
           defaultValue={lesson.video_url ?? ''}
         />
-        <button type="submit"
-          className="rounded-lg bg-(--rs-primary-500) text-white text-sm font-semibold px-4 py-2 hover:bg-(--rs-primary-600)">
+        <SubmitButton
+          pendingText="Saving…"
+          className="rounded-lg bg-(--rs-primary-500) text-white text-sm font-semibold px-4 py-2 hover:bg-(--rs-primary-600)"
+        >
           Save lesson
-        </button>
+        </SubmitButton>
       </form>
+
+      {lesson.video_url && (lesson.video_source === 'youtube' || isYoutubeUrl(lesson.video_url)) && (
+        <section className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-6 space-y-3">
+          <h2 className="font-serif text-base font-semibold text-(--rs-neutral-grey-800)">Video preview</h2>
+          <p className="text-xs text-(--rs-neutral-grey-500)">
+            This is exactly what learners will see (saved from the form above). If it plays here, it will play for them.
+          </p>
+          <YoutubePreview url={lesson.video_url} />
+        </section>
+      )}
 
       <section className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-6 space-y-4">
         <h2 className="font-serif text-base font-semibold text-(--rs-neutral-grey-800)">Quiz (optional)</h2>
@@ -163,28 +178,40 @@ export default async function AdminLessonEditPage({
             <span className="text-sm text-(--rs-neutral-grey-600)">Max attempts</span>
             <input type="number" name="maxAttempts" placeholder="∞" min={1}
               className="w-20 rounded-md border border-(--rs-neutral-grey-300) bg-white px-2 py-1 text-sm" />
-            <button type="submit"
-              className="rounded-md bg-(--rs-primary-500) text-white text-sm font-semibold px-3 py-1.5 hover:bg-(--rs-primary-600)">
+            <SubmitButton
+              pendingText="Enabling…"
+              className="rounded-md bg-(--rs-primary-500) text-white text-sm font-semibold px-3 py-1.5 hover:bg-(--rs-primary-600)"
+            >
               Enable quiz
-            </button>
+            </SubmitButton>
           </form>
         ) : (
           <>
-            <form action={saveQuiz} className="flex items-center gap-2">
-              <span className="text-sm text-(--rs-neutral-grey-600)">Pass score</span>
-              <input type="number" name="passScore" defaultValue={quiz.pass_score} min={0} max={100}
-                className="w-20 rounded-md border border-(--rs-neutral-grey-300) bg-white px-2 py-1 text-sm" />
-              <span className="text-sm text-(--rs-neutral-grey-600)">Max attempts</span>
-              <input type="number" name="maxAttempts" defaultValue={quiz.max_attempts ?? ''} placeholder="∞" min={1}
-                className="w-20 rounded-md border border-(--rs-neutral-grey-300) bg-white px-2 py-1 text-sm" />
-              <button type="submit"
-                className="rounded-md bg-(--rs-primary-500) text-white text-sm font-semibold px-3 py-1.5 hover:bg-(--rs-primary-600)">
-                Save
-              </button>
-              <form action={removeQuiz}>
-                <button type="submit" className="text-xs text-red-600 hover:underline">Delete quiz</button>
+            <div className="flex flex-wrap items-center gap-2">
+              <form action={saveQuiz} className="flex items-center gap-2">
+                <span className="text-sm text-(--rs-neutral-grey-600)">Pass score</span>
+                <input type="number" name="passScore" defaultValue={quiz.pass_score} min={0} max={100}
+                  className="w-20 rounded-md border border-(--rs-neutral-grey-300) bg-white px-2 py-1 text-sm" />
+                <span className="text-sm text-(--rs-neutral-grey-600)">Max attempts</span>
+                <input type="number" name="maxAttempts" defaultValue={quiz.max_attempts ?? ''} placeholder="∞" min={1}
+                  className="w-20 rounded-md border border-(--rs-neutral-grey-300) bg-white px-2 py-1 text-sm" />
+                <SubmitButton
+                  pendingText="Saving…"
+                  className="rounded-md bg-(--rs-primary-500) text-white text-sm font-semibold px-3 py-1.5 hover:bg-(--rs-primary-600)"
+                >
+                  Save
+                </SubmitButton>
               </form>
-            </form>
+              <form action={removeQuiz}>
+                <SubmitButton
+                  confirm="Delete this quiz and all its questions?"
+                  spinnerClassName="w-3 h-3"
+                  className="text-xs text-red-600 hover:underline"
+                >
+                  Delete quiz
+                </SubmitButton>
+              </form>
+            </div>
 
             <ul className="divide-y divide-(--rs-neutral-grey-100) text-sm">
               {((questions ?? []) as Array<{ id: number; prompt: string; question_type: string }>).map((q, i) => (
@@ -196,7 +223,9 @@ export default async function AdminLessonEditPage({
                   </span>
                   <form action={removeQuestion}>
                     <input type="hidden" name="qid" value={q.id} />
-                    <button type="submit" className="text-xs text-red-600 hover:underline">Remove</button>
+                    <SubmitButton spinnerClassName="w-3 h-3" className="text-xs text-red-600 hover:underline">
+                      Remove
+                    </SubmitButton>
                   </form>
                 </li>
               ))}
@@ -236,10 +265,12 @@ export default async function AdminLessonEditPage({
                   <input type="radio" name="correctTF" value="false" /> False (T/F)
                 </label>
               </div>
-              <button type="submit"
-                className="rounded-md bg-(--rs-primary-500) text-white text-sm font-semibold px-3 py-1.5 hover:bg-(--rs-primary-600)">
+              <SubmitButton
+                pendingText="Adding…"
+                className="rounded-md bg-(--rs-primary-500) text-white text-sm font-semibold px-3 py-1.5 hover:bg-(--rs-primary-600)"
+              >
                 Add question
-              </button>
+              </SubmitButton>
             </form>
           </>
         )}
@@ -254,10 +285,12 @@ export default async function AdminLessonEditPage({
         <form action={uploadVideo} className="flex items-center gap-2">
           <input type="file" name="file" accept="video/*" required
             className="block text-sm file:mr-3 file:rounded file:border-0 file:bg-(--rs-primary-50) file:px-3 file:py-1.5 file:text-(--rs-primary-700)" />
-          <button type="submit"
-            className="rounded-md bg-(--rs-primary-500) text-white text-sm font-semibold px-3 py-2 hover:bg-(--rs-primary-600)">
+          <SubmitButton
+            pendingText="Uploading…"
+            className="rounded-md bg-(--rs-primary-500) text-white text-sm font-semibold px-3 py-2 hover:bg-(--rs-primary-600)"
+          >
             Upload
-          </button>
+          </SubmitButton>
         </form>
       </section>
     </div>

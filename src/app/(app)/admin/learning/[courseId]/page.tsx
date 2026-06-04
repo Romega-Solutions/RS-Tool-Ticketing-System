@@ -7,6 +7,8 @@ import {
   updateCourse, togglePublishCourse, deleteCourse,
   createLesson, deleteLesson,
 } from '../actions';
+import { SubmitButton } from '@/components/learning/submit-button';
+import { CourseNav } from '@/components/learning/course-nav.client';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,24 +73,15 @@ export default async function AdminCourseEditPage({
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
-      <header className="space-y-1">
+    <div className="space-y-6 max-w-5xl">
+      <header className="space-y-3">
         <Link href="/admin/learning" className="text-xs text-(--rs-primary-600) hover:underline">
           ← Manage Learning
         </Link>
-        <div className="flex items-center justify-between gap-3">
-          <h1 className="font-serif text-2xl font-semibold text-(--rs-neutral-grey-900)">
-            {course.title}
-          </h1>
-          <nav className="flex items-center gap-3 text-sm">
-            <Link href={`/admin/learning/${id}/assign`} className="text-(--rs-primary-600) hover:underline">
-              Assign
-            </Link>
-            <Link href={`/admin/learning/${id}/roster`} className="text-(--rs-primary-600) hover:underline">
-              Roster
-            </Link>
-          </nav>
-        </div>
+        <h1 className="font-serif text-2xl font-semibold text-(--rs-neutral-grey-900)">
+          {course.title}
+        </h1>
+        <CourseNav courseId={id} />
       </header>
 
       <section className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-6 space-y-4">
@@ -96,48 +89,54 @@ export default async function AdminCourseEditPage({
         <form action={saveCourse} className="space-y-3">
           <Field label="Title" name="title" defaultValue={course.title} required />
           <Field label="Description" name="description" defaultValue={course.description ?? ''} textarea />
-          <div>
-            <label className="block text-sm font-medium text-(--rs-neutral-grey-800) mb-1">Audience</label>
-            <select name="scope" defaultValue={course.scope}
-              className="block w-full rounded-md border border-(--rs-neutral-grey-300) bg-white px-3 py-2 text-sm">
-              <option value="foundation">Foundation</option>
-              <option value="intern">Intern Track</option>
-              <option value="department">Department</option>
-            </select>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <label className="block text-sm font-medium text-(--rs-neutral-grey-800) mb-1">Audience</label>
+              <select name="scope" defaultValue={course.scope}
+                className="block w-full rounded-md border border-(--rs-neutral-grey-300) bg-white px-3 py-2 text-sm">
+                <option value="foundation">Foundation</option>
+                <option value="intern">Intern Track</option>
+                <option value="department">Department</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-(--rs-neutral-grey-800) mb-1">Department</label>
+              <select name="department" defaultValue={course.department ?? ''}
+                className="block w-full rounded-md border border-(--rs-neutral-grey-300) bg-white px-3 py-2 text-sm">
+                <option value="">—</option>
+                {teams.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-(--rs-neutral-grey-800) mb-1">Enforcement</label>
+              <select name="enforcement" defaultValue={course.enforcement}
+                className="block w-full rounded-md border border-(--rs-neutral-grey-300) bg-white px-3 py-2 text-sm">
+                <option value="soft">Soft</option>
+                <option value="hard">Hard</option>
+              </select>
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-(--rs-neutral-grey-800) mb-1">Department</label>
-            <select name="department" defaultValue={course.department ?? ''}
-              className="block w-full rounded-md border border-(--rs-neutral-grey-300) bg-white px-3 py-2 text-sm">
-              <option value="">—</option>
-              {teams.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-(--rs-neutral-grey-800) mb-1">Enforcement</label>
-            <select name="enforcement" defaultValue={course.enforcement}
-              className="block w-full rounded-md border border-(--rs-neutral-grey-300) bg-white px-3 py-2 text-sm">
-              <option value="soft">Soft</option>
-              <option value="hard">Hard</option>
-            </select>
-          </div>
-          <button type="submit"
-            className="rounded-lg bg-(--rs-primary-500) text-white text-sm font-semibold px-4 py-2 hover:bg-(--rs-primary-600)">
+          <SubmitButton
+            pendingText="Saving…"
+            className="rounded-lg bg-(--rs-primary-500) text-white text-sm font-semibold px-4 py-2 hover:bg-(--rs-primary-600)"
+          >
             Save
-          </button>
+          </SubmitButton>
         </form>
         <div className="border-t border-(--rs-neutral-grey-100) pt-4 flex items-center gap-3">
           <form action={publishToggle}>
-            <button type="submit"
-              className="text-sm font-semibold text-(--rs-primary-600) hover:underline">
+            <SubmitButton className="text-sm font-semibold text-(--rs-primary-600) hover:underline">
               {course.is_published ? 'Unpublish' : 'Publish'}
-            </button>
+            </SubmitButton>
           </form>
           <form action={destroy}>
-            <button type="submit"
-              className="text-sm font-semibold text-red-600 hover:underline">
+            <SubmitButton
+              confirm="Delete this course and all its lessons? This cannot be undone."
+              pendingText="Deleting…"
+              className="text-sm font-semibold text-red-600 hover:underline"
+            >
               Delete course
-            </button>
+            </SubmitButton>
           </form>
         </div>
       </section>
@@ -157,7 +156,13 @@ export default async function AdminCourseEditPage({
                 <span className="text-xs text-(--rs-neutral-grey-500) uppercase">{l.lesson_type}</span>
                 <form action={removeLesson}>
                   <input type="hidden" name="lessonId" value={l.id} />
-                  <button type="submit" className="text-xs text-red-600 hover:underline">Delete</button>
+                  <SubmitButton
+                    confirm={`Delete lesson “${l.title}”?`}
+                    spinnerClassName="w-3 h-3"
+                    className="text-xs text-red-600 hover:underline"
+                  >
+                    Delete
+                  </SubmitButton>
                 </form>
               </li>
             ))}
@@ -168,10 +173,12 @@ export default async function AdminCourseEditPage({
             type="text" name="title" placeholder="New lesson title…" required
             className="flex-1 rounded-md border border-(--rs-neutral-grey-300) bg-white px-3 py-2 text-sm"
           />
-          <button type="submit"
-            className="rounded-md bg-(--rs-primary-500) text-white text-sm font-semibold px-3 py-2 hover:bg-(--rs-primary-600)">
+          <SubmitButton
+            pendingText="Adding…"
+            className="rounded-md bg-(--rs-primary-500) text-white text-sm font-semibold px-3 py-2 hover:bg-(--rs-primary-600)"
+          >
             Add lesson
-          </button>
+          </SubmitButton>
         </form>
       </section>
     </div>

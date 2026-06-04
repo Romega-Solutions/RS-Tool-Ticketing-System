@@ -2,11 +2,17 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getSession } from '@/lib/session';
-import { canAccessAdmin } from '@/lib/rbac';
+import { canAccessAdmin, normalizeRole, roleLabel, type AppRole } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { userInCourseAudience, type LmsCourse } from '@/lib/lms';
 import { assignCourse, unassignCourse } from '../../actions';
+import { SubmitButton } from '@/components/learning/submit-button';
+import { CourseNav } from '@/components/learning/course-nav.client';
+import { AssignPicker, type PickerUser } from '@/components/learning/assign-picker.client';
 
 export const dynamic = 'force-dynamic';
+
+const ROLE_ORDER: AppRole[] = ['intern', 'ic', 'lead', 'admin'];
 
 export default async function AdminAssignPage({
   params,
@@ -23,42 +29,56 @@ export default async function AdminAssignPage({
 
   const admin = createAdminClient();
   const { data: course } = await admin
-    .from('lms_courses').select('id, title').eq('id', id).maybeSingle();
+    .from('lms_courses').select('id, title, scope, department').eq('id', id).maybeSingle();
   if (!course) notFound();
 
-  const { data: users } = await admin
-    .from('users')
-    .select('id, name, email, team, role, is_active')
-    .eq('is_active', 1)
-    .order('name', { ascending: true });
+  const [{ data: users }, { data: existing }] = await Promise.all([
+    admin.from('users')
+      .select('id, name, email, team, role, is_active')
+      .eq('is_active', 1)
+      .order('name', { ascending: true }),
+    admin.from('lms_course_assignments')
+      .select('id, user_id, due_at, assigned_at')
+      .eq('course_id', id),
+  ]);
 
-  const { data: existing } = await admin
-    .from('lms_course_assignments')
-    .select('id, user_id, due_at, assigned_at')
-    .eq('course_id', id);
+  type URow = { id: number; name: string; email: string | null; team: string | null; role: string };
   type ARow = { id: number; user_id: number; due_at: string | null; assigned_at: string };
-  const byUser = new Map<number, ARow>((existing ?? []).map((a: ARow) => [a.user_id, a]));
+  const byUser = new Map<number, ARow>(((existing ?? []) as ARow[]).map(a => [a.user_id, a]));
 
-  async function assign(formData: FormData) {
+  const lmsCourse = { ...course } as unknown as LmsCourse;
+  const pickerUsers: PickerUser[] = ((users ?? []) as URow[]).map(u => {
+    const nrole = normalizeRole(u.role);
+    return {
+      id: u.id, name: u.name, email: u.email, team: u.team,
+      role: nrole, roleLabel: roleLabel(nrole),
+      inAudience: userInCourseAudience(lmsCourse, { userId: u.id, role: nrole, team: u.team }),
+      assigned: byUser.has(u.id),
+    };
+  });
+
+  const teams = [...new Set(((users ?? []) as URow[]).map(u => u.team).filter((t): t is string => !!t))].sort();
+  const presentRoles = new Set(((users ?? []) as URow[]).map(u => normalizeRole(u.role)));
+  const roles = ROLE_ORDER.filter(r => presentRoles.has(r)).map(r => ({ value: r, label: roleLabel(r) }));
+
+  async function assignAction(userIds: number[], dueAtIso: string | null) {
     'use server';
-    const userIds = formData.getAll('userIds').map(v => Number(v)).filter(Number.isInteger);
-    const dueAt = String(formData.get('dueAt') ?? '');
-    if (userIds.length === 0) return;
-    await assignCourse({
-      courseId: id, userIds,
-      dueAt: dueAt ? new Date(dueAt).toISOString() : null,
-    });
+    const ids = userIds.filter(Number.isInteger);
+    if (ids.length === 0) return;
+    await assignCourse({ courseId: id, userIds: ids, dueAt: dueAtIso });
     revalidatePath(`/admin/learning/${id}/assign`);
+    revalidatePath(`/admin/learning/${id}/roster`);
   }
   async function unassign(formData: FormData) {
     'use server';
     const uid = Number(formData.get('userId'));
     if (Number.isInteger(uid)) await unassignCourse(id, uid);
     revalidatePath(`/admin/learning/${id}/assign`);
+    revalidatePath(`/admin/learning/${id}/roster`);
   }
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 max-w-5xl">
       <header className="space-y-1">
         <Link href={`/admin/learning/${id}`} className="text-xs text-(--rs-primary-600) hover:underline">
           ← {course.title}
@@ -67,33 +87,13 @@ export default async function AdminAssignPage({
           Assign — {course.title}
         </h1>
         <p className="text-sm text-(--rs-neutral-grey-500)">
-          Explicit assignment overrides the audience-derived list and sets a due date.
+          Search and pick people, set a due date, and assign. Explicit assignments override the audience-derived list.
         </p>
       </header>
 
-      <form action={assign} className="space-y-4 rounded-xl border border-(--rs-neutral-grey-200) bg-white p-6">
-        <div>
-          <label className="block text-sm font-medium text-(--rs-neutral-grey-800) mb-1">Users</label>
-          <select name="userIds" multiple size={10}
-            className="block w-full rounded-md border border-(--rs-neutral-grey-300) bg-white px-3 py-2 text-sm">
-            {(users ?? []).map((u: { id: number; name: string; team: string | null; role: string }) => (
-              <option key={u.id} value={u.id}>
-                {u.name} {u.team ? `· ${u.team}` : ''} · {u.role}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-xs text-(--rs-neutral-grey-500)">Hold ⌘/Ctrl to select multiple.</p>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-(--rs-neutral-grey-800) mb-1">Due date (optional)</label>
-          <input type="date" name="dueAt"
-            className="rounded-md border border-(--rs-neutral-grey-300) bg-white px-3 py-2 text-sm" />
-        </div>
-        <button type="submit"
-          className="rounded-lg bg-(--rs-primary-500) text-white text-sm font-semibold px-4 py-2 hover:bg-(--rs-primary-600)">
-          Assign
-        </button>
-      </form>
+      <CourseNav courseId={id} />
+
+      <AssignPicker users={pickerUsers} teams={teams} roles={roles} assignAction={assignAction} />
 
       <section className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-6 space-y-3">
         <h2 className="font-serif text-base font-semibold text-(--rs-neutral-grey-800)">Current explicit assignments</h2>
@@ -102,7 +102,7 @@ export default async function AdminAssignPage({
         ) : (
           <ul className="divide-y divide-(--rs-neutral-grey-100) text-sm">
             {[...byUser.entries()].map(([uid, a]) => {
-              const u = (users ?? []).find((x: { id: number }) => x.id === uid);
+              const u = ((users ?? []) as URow[]).find(x => x.id === uid);
               return (
                 <li key={uid} className="py-2 flex items-center gap-3">
                   <span className="flex-1 truncate">{u?.name ?? `User #${uid}`}</span>
@@ -111,7 +111,9 @@ export default async function AdminAssignPage({
                   </span>
                   <form action={unassign}>
                     <input type="hidden" name="userId" value={uid} />
-                    <button type="submit" className="text-xs text-red-600 hover:underline">Unassign</button>
+                    <SubmitButton spinnerClassName="w-3 h-3" className="text-xs text-red-600 hover:underline">
+                      Unassign
+                    </SubmitButton>
                   </form>
                 </li>
               );

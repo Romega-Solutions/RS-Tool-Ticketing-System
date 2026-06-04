@@ -4,6 +4,7 @@ import { getSession } from '@/lib/session';
 import { canAccessAdmin, normalizeRole } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { userInCourseAudience, type LmsCourse, type LmsScope, type LmsEnforcement } from '@/lib/lms';
+import { CourseNav } from '@/components/learning/course-nav.client';
 
 export const dynamic = 'force-dynamic';
 
@@ -81,6 +82,8 @@ export default async function AdminRosterPage({
           Roster — {course.title}
         </h1>
       </header>
+
+      <CourseNav courseId={id} />
 
       <div className="overflow-x-auto rounded-xl border border-(--rs-neutral-grey-200) bg-white">
         <table className="w-full text-sm">

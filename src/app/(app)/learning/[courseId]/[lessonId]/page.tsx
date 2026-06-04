@@ -32,11 +32,31 @@ export default async function LessonPage({
   if (!session) redirect('/login');
 
   const admin = createAdminClient();
-  const { data: courseRow } = await admin
-    .from('lms_courses')
-    .select('id, title, description, scope, department, cover_image_url, is_published, enforcement, sort_order, created_at, updated_at')
-    .eq('id', cid)
-    .maybeSingle();
+
+  // One parallel batch for everything keyed only on course / lesson / user — no
+  // request waterfall. Nested lookups (quiz detail, comment authors, signed
+  // upload URL) run in a second parallel batch once their parents are known.
+  const [
+    { data: courseRow },
+    { data: lessonRow },
+    { data: completedRow },
+    { data: quizRow },
+    { data: rawComments },
+    { data: siblings },
+  ] = await Promise.all([
+    admin.from('lms_courses')
+      .select('id, title, description, scope, department, cover_image_url, is_published, enforcement, sort_order, created_at, updated_at')
+      .eq('id', cid).maybeSingle(),
+    admin.from('lms_lessons').select('*').eq('id', lid).eq('course_id', cid).maybeSingle(),
+    admin.from('lms_lesson_completions').select('id').eq('user_id', session.id).eq('lesson_id', lid).maybeSingle(),
+    admin.from('lms_quizzes').select('id, pass_score, max_attempts').eq('lesson_id', lid).maybeSingle(),
+    admin.from('lms_lesson_comments')
+      .select('id, body, user_id, parent_id, pinned, deleted_at, created_at')
+      .eq('lesson_id', lid).order('created_at', { ascending: true }),
+    admin.from('lms_lessons').select('id, title, sort_order')
+      .eq('course_id', cid).order('sort_order', { ascending: true }),
+  ]);
+
   if (!courseRow || !courseRow.is_published) notFound();
   const course: LmsCourse = {
     id: courseRow.id, title: courseRow.title, description: courseRow.description,
@@ -52,12 +72,6 @@ export default async function LessonPage({
   });
   if (!isAdmin && !inAudience) notFound();
 
-  const { data: lessonRow } = await admin
-    .from('lms_lessons')
-    .select('*')
-    .eq('id', lid)
-    .eq('course_id', cid)
-    .maybeSingle();
   if (!lessonRow) notFound();
   const lesson: LmsLesson = {
     id: lessonRow.id, courseId: lessonRow.course_id, title: lessonRow.title,
@@ -66,72 +80,56 @@ export default async function LessonPage({
     videoDurationSeconds: lessonRow.video_duration_seconds, sortOrder: lessonRow.sort_order,
   };
 
-  // For uploaded videos we re-sign on every render so the URL is always fresh.
-  let playableVideoUrl: string | null = lesson.videoUrl;
-  if (lesson.videoSource === 'upload' && lesson.videoUrl) {
-    try {
-      playableVideoUrl = await refreshLessonVideoSignedUrl(lesson.videoUrl);
-    } catch {
-      playableVideoUrl = lesson.videoUrl;
-    }
-  }
-
-  const { data: completedRow } = await admin
-    .from('lms_lesson_completions')
-    .select('id')
-    .eq('user_id', session.id)
-    .eq('lesson_id', lid)
-    .maybeSingle();
   const alreadyDone = !!completedRow;
 
-  // Is there a quiz attached to this lesson? Load it + questions (sans
-  // correct_keys) so the QuizRunner has everything it needs.
-  const { data: quizRow } = await admin
-    .from('lms_quizzes')
-    .select('id, pass_score, max_attempts')
-    .eq('lesson_id', lid)
-    .maybeSingle();
+  type CRow = { id: number; body: string; user_id: number; parent_id: number | null; pinned: number; deleted_at: string | null; created_at: string };
+  const commentUserIds = [...new Set(((rawComments ?? []) as CRow[]).map(c => c.user_id))];
+
+  // Second parallel batch: re-sign the upload URL (upload lessons only), load
+  // quiz detail (only when a quiz exists), and resolve comment authors — each
+  // independent of the others.
+  const [playableVideoUrl, quizDetail, { data: commentUsers }] = await Promise.all([
+    (async (): Promise<string | null> => {
+      if (lesson.videoSource === 'upload' && lesson.videoUrl) {
+        try { return await refreshLessonVideoSignedUrl(lesson.videoUrl); }
+        catch { return lesson.videoUrl; }
+      }
+      return lesson.videoUrl;
+    })(),
+    (async () => {
+      if (!quizRow) return null;
+      const [{ data: qs }, { count }, { data: passRow }] = await Promise.all([
+        admin.from('lms_quiz_questions')
+          .select('id, prompt, question_type, choices, sort_order')
+          .eq('quiz_id', quizRow.id).order('sort_order', { ascending: true }),
+        admin.from('lms_quiz_attempts')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', session.id).eq('quiz_id', quizRow.id),
+        admin.from('lms_quiz_attempts').select('id')
+          .eq('user_id', session.id).eq('quiz_id', quizRow.id).eq('passed', 1).limit(1),
+      ]);
+      return { qs, count, passRow };
+    })(),
+    commentUserIds.length > 0
+      ? admin.from('users').select('id, name').in('id', commentUserIds)
+      : Promise.resolve({ data: [] as Array<{ id: number; name: string }> }),
+  ]);
 
   let quizQuestions: QuizQuestion[] = [];
   let attemptsUsed = 0;
   let quizPassed = false;
-  if (quizRow) {
-    const { data: qs } = await admin
-      .from('lms_quiz_questions')
-      .select('id, prompt, question_type, choices, sort_order')
-      .eq('quiz_id', quizRow.id)
-      .order('sort_order', { ascending: true });
+  if (quizDetail) {
     type QRow = { id: number; prompt: string; question_type: string; choices: unknown };
-    quizQuestions = ((qs ?? []) as QRow[]).map(r => ({
+    quizQuestions = ((quizDetail.qs ?? []) as QRow[]).map(r => ({
       id:           r.id,
       prompt:       r.prompt,
       questionType: r.question_type === 'true_false' ? 'true_false' : 'multiple_choice',
       choices:      Array.isArray(r.choices) ? (r.choices as { key: string; text: string }[]) : [],
     }));
-
-    const { count } = await admin
-      .from('lms_quiz_attempts')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', session.id).eq('quiz_id', quizRow.id);
-    attemptsUsed = count ?? 0;
-
-    const { data: passRow } = await admin
-      .from('lms_quiz_attempts').select('id')
-      .eq('user_id', session.id).eq('quiz_id', quizRow.id).eq('passed', 1).limit(1);
-    quizPassed = !!(passRow && passRow.length > 0);
+    attemptsUsed = quizDetail.count ?? 0;
+    quizPassed = !!(quizDetail.passRow && quizDetail.passRow.length > 0);
   }
 
-  // Discussion thread for this lesson.
-  const { data: rawComments } = await admin
-    .from('lms_lesson_comments')
-    .select('id, body, user_id, parent_id, pinned, deleted_at, created_at')
-    .eq('lesson_id', lid)
-    .order('created_at', { ascending: true });
-  type CRow = { id: number; body: string; user_id: number; parent_id: number | null; pinned: number; deleted_at: string | null; created_at: string };
-  const commentUserIds = [...new Set(((rawComments ?? []) as CRow[]).map(c => c.user_id))];
-  const { data: commentUsers } = commentUserIds.length > 0
-    ? await admin.from('users').select('id, name').in('id', commentUserIds)
-    : { data: [] as Array<{ id: number; name: string }> };
   const nameById = new Map((commentUsers ?? []).map((u: { id: number; name: string }) => [u.id, u.name]));
   const comments: DiscussionComment[] = ((rawComments ?? []) as CRow[]).map(c => ({
     id:        c.id,
@@ -145,17 +143,12 @@ export default async function LessonPage({
   }));
 
   // Prev/next lesson (by sort_order)
-  const { data: siblings } = await admin
-    .from('lms_lessons')
-    .select('id, title, sort_order')
-    .eq('course_id', cid)
-    .order('sort_order', { ascending: true });
   const idx = (siblings ?? []).findIndex((s: { id: number }) => s.id === lid);
   const prev = idx > 0 ? siblings![idx - 1] : null;
   const next = idx >= 0 && idx < (siblings?.length ?? 0) - 1 ? siblings![idx + 1] : null;
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-8 max-w-4xl">
       <header className="space-y-1">
         <Link href={`/learning/${course.id}`} className="text-xs text-(--rs-primary-600) hover:underline">
           ← {course.title}
@@ -174,7 +167,7 @@ export default async function LessonPage({
         <div className="space-y-6">
           {(lesson.lessonType === 'text' || lesson.lessonType === 'mixed') && (
             <div>
-              <div className="prose prose-sm max-w-none whitespace-pre-wrap text-(--rs-neutral-grey-800)">
+              <div className="prose prose-sm whitespace-pre-wrap text-(--rs-neutral-grey-800)">
                 {lesson.bodyMd}
               </div>
             </div>

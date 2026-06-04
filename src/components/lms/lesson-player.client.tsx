@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { TextLesson } from './text-lesson';
 import { YoutubePlayer } from './youtube-player.client';
 import { UploadVideoPlayer } from './upload-video-player.client';
+import { resolveLessonMedia } from '@/lib/lms-media';
 import type { LessonType } from '@/lib/lms';
 
 type Props = {
@@ -17,14 +18,18 @@ type Props = {
 };
 
 export function LessonPlayer(props: Props) {
+  // Decide what to render from the configured media, not the (often stale)
+  // lesson_type — so a YouTube video pasted onto a "text" lesson still plays.
+  const { showVideo, showText } = resolveLessonMedia(props);
+
   const [done, setDone] = useState(props.alreadyDone);
-  const [watchedToEnd, setWatchedToEnd] = useState(props.lessonType === 'text');
+  const [watchedToEnd, setWatchedToEnd] = useState(!showVideo);
   const [pending, startTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
 
-  // Text lessons can be marked complete immediately. Video / mixed
-  // unlock once the video reaches end.
-  const canMark = props.lessonType === 'text' || watchedToEnd;
+  // Lessons with no video can be marked complete immediately; lessons that show
+  // a video unlock once it reaches the end.
+  const canMark = !showVideo || watchedToEnd;
 
   function handleMark() {
     setErr(null);
@@ -37,9 +42,6 @@ export function LessonPlayer(props: Props) {
       }
     });
   }
-
-  const showVideo = props.lessonType === 'video' || props.lessonType === 'mixed';
-  const showText  = props.lessonType === 'text'  || props.lessonType === 'mixed';
 
   return (
     <div className="space-y-6">

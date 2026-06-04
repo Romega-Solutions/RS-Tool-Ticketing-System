@@ -7,6 +7,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
 import { canAccessAdmin } from '@/lib/rbac';
 import { uploadLessonVideo } from '@/lib/storage';
+import { extractYoutubeId, isYoutubeUrl } from '@/lib/youtube';
 
 async function requireAdmin() {
   const session = await getSession();
@@ -107,10 +108,40 @@ const lessonInput = z.object({
   videoDurationSeconds: z.number().int().nonnegative().nullable().optional(),
 });
 
+// Make "paste a YouTube link" actually play for learners. A lesson only shows
+// its video when type is video/mixed AND source is set AND the URL parses — easy
+// to get wrong across three fields, so we reconcile them on save:
+//   • a YouTube-looking URL with no source → source = youtube
+//   • a YouTube lesson left as "text"      → bumped to mixed (has body) / video
+//   • a youtube source with an unparseable URL → rejected with a clear message
+function normalizeLessonVideo(v: z.infer<typeof lessonInput>): {
+  lessonType:  'text' | 'video' | 'mixed';
+  videoSource: 'youtube' | 'upload' | null;
+  videoUrl:    string | null;
+} {
+  let lessonType  = v.lessonType;
+  let videoSource = v.videoSource ?? null;
+  const videoUrl  = v.videoUrl?.trim() ? v.videoUrl.trim() : null;
+
+  if (videoUrl && !videoSource && isYoutubeUrl(videoUrl)) {
+    videoSource = 'youtube';
+  }
+  if (videoSource === 'youtube' && videoUrl) {
+    if (!extractYoutubeId(videoUrl)) {
+      throw new Error('That doesn’t look like a valid YouTube link. Use a youtube.com/watch?v=… or youtu.be/… URL.');
+    }
+    if (lessonType === 'text') {
+      lessonType = v.bodyMd?.trim() ? 'mixed' : 'video';
+    }
+  }
+  return { lessonType, videoSource, videoUrl };
+}
+
 export async function createLesson(input: unknown): Promise<{ id: number }> {
   await requireAdmin();
   const v = lessonInput.parse(input);
-  if ((v.lessonType === 'video' || v.lessonType === 'mixed') && !v.videoUrl) {
+  const vid = normalizeLessonVideo(v);
+  if ((vid.lessonType === 'video' || vid.lessonType === 'mixed') && !vid.videoUrl) {
     throw new Error('Video URL is required for video and mixed lessons.');
   }
 
@@ -128,10 +159,10 @@ export async function createLesson(input: unknown): Promise<{ id: number }> {
     .insert({
       course_id:              v.courseId,
       title:                  v.title,
-      lesson_type:            v.lessonType,
+      lesson_type:            vid.lessonType,
       body_md:                v.bodyMd ?? null,
-      video_source:           v.videoSource ?? null,
-      video_url:              v.videoUrl ?? null,
+      video_source:           vid.videoSource,
+      video_url:              vid.videoUrl,
       video_duration_seconds: v.videoDurationSeconds ?? null,
       sort_order:             nextOrder,
     })
@@ -146,7 +177,8 @@ export async function createLesson(input: unknown): Promise<{ id: number }> {
 export async function updateLesson(id: number, input: unknown): Promise<void> {
   await requireAdmin();
   const v = lessonInput.parse(input);
-  if ((v.lessonType === 'video' || v.lessonType === 'mixed') && !v.videoUrl) {
+  const vid = normalizeLessonVideo(v);
+  if ((vid.lessonType === 'video' || vid.lessonType === 'mixed') && !vid.videoUrl) {
     throw new Error('Video URL is required for video and mixed lessons.');
   }
   const admin = createAdminClient();
@@ -154,10 +186,10 @@ export async function updateLesson(id: number, input: unknown): Promise<void> {
     .from('lms_lessons')
     .update({
       title:                  v.title,
-      lesson_type:            v.lessonType,
+      lesson_type:            vid.lessonType,
       body_md:                v.bodyMd ?? null,
-      video_source:           v.videoSource ?? null,
-      video_url:              v.videoUrl ?? null,
+      video_source:           vid.videoSource,
+      video_url:              vid.videoUrl,
       video_duration_seconds: v.videoDurationSeconds ?? null,
       updated_at:             new Date().toISOString(),
     })

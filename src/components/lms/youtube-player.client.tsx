@@ -1,13 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-
-// Pull a YouTube video ID out of a typical URL or shorthand.
-// Returns null when the input doesn't parse — caller renders a fallback.
-export function extractYoutubeId(url: string): string | null {
-  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([A-Za-z0-9_-]{11})/);
-  return m ? m[1] : null;
-}
+import { extractYoutubeId } from '@/lib/youtube';
 
 // Minimal global hook for the YouTube IFrame API script (loaded once).
 type YTPlayer = {
@@ -101,8 +95,8 @@ export function YoutubePlayer({
   }
 
   return (
-    <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
-      <div ref={mountRef} className="absolute inset-0" />
+    <div className="relative mx-auto aspect-video w-full max-w-[calc(74vh*16/9)] overflow-hidden rounded-xl bg-black shadow-sm ring-1 ring-(--rs-neutral-grey-200)">
+      <div ref={mountRef} className="absolute inset-0 h-full w-full" />
     </div>
   );
 }
