@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Users2, Briefcase, Workflow } from 'lucide-react';
+import { Users2, Briefcase, Workflow, Star } from 'lucide-react';
 
 const TABS = [
   { href: '/recruiting/candidates',   label: 'Candidates',   icon: Users2 },
   { href: '/recruiting/positions',    label: 'Positions',    icon: Briefcase },
+  { href: '/recruiting/talent-pool',  label: 'Talent Pool',  icon: Star },
   { href: '/recruiting/automations',  label: 'Automations',  icon: Workflow },
 ] as const;
 
