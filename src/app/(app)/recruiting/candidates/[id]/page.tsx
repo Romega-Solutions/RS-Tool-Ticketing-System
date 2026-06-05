@@ -6,9 +6,10 @@ import {
   ArrowLeft, Mail, Phone, MapPin, Link2, Globe, Briefcase,
   GraduationCap, Award, Languages as LanguagesIcon, Tag, Calendar,
   Sparkles, FileText, AlertCircle, User2, History as HistoryIcon,
-  Hash, MailCheck, MailWarning, Download,
+  Hash, MailCheck, MailWarning, Download, Eye,
 } from 'lucide-react';
-import { CandidateStatus, CandidateRating, CandidateDelete, CandidatePublicTalentToggle } from '../candidate-row';
+import { CandidateStatus, CandidateRating, CandidateDelete } from '../candidate-row';
+import { TalentConsentPanel } from '../talent-consent-panel';
 import { ResumeUploadCard } from '../resume-upload';
 import { CandidateEditForm } from '../candidate-edit-form';
 import { ResendEmailButton } from './resend-email-button';
@@ -42,6 +43,10 @@ type Candidate = {
   last_email_template: string | null;
   last_email_sent_at:  string | null;
   is_public_talent:    boolean | null;
+  consent_status:       string | null;
+  consent_requested_at: string | null;
+  consent_agreed_at:    string | null;
+  consent_method:       string | null;
 };
 
 type HistoryRow = {
@@ -200,7 +205,11 @@ export default async function CandidateDetailPage({
                   )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                  <CandidatePublicTalentToggle id={c.id} isPublic={!!c.is_public_talent} />
+                  {c.is_public_talent && (
+                    <span className="inline-flex items-center gap-1.5 rounded-md border border-green-300 bg-green-50 px-2 py-1 text-xs font-medium text-green-700">
+                      <Eye className="w-3 h-3" /> Public
+                    </span>
+                  )}
                   <CandidateRating id={c.id} rating={c.rating} />
                   <CandidateStatus id={c.id} status={c.status} />
                   <CandidateEditForm
@@ -360,6 +369,16 @@ export default async function CandidateDetailPage({
 
         {/* Right rail */}
         <aside className="space-y-5">
+          <TalentConsentPanel
+            id={c.id}
+            email={c.email}
+            isPublic={!!c.is_public_talent}
+            consentStatus={(c.consent_status ?? 'none') as 'none' | 'requested' | 'agreed' | 'revoked'}
+            consentRequestedAt={c.consent_requested_at}
+            consentAgreedAt={c.consent_agreed_at}
+            consentMethod={c.consent_method}
+          />
+
           <ResumeUploadCard candidateId={c.id} />
 
           {!hasParsedData && (

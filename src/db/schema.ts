@@ -87,6 +87,17 @@ export const candidates = pgTable('candidates', {
   // romega-solutions.com/talent. Default FALSE — requires explicit
   // recruiter publishing.
   isPublicTalent: boolean('is_public_talent').notNull().default(false),
+  // GDPR consent gate for public Talent Pool publishing. is_public_talent can
+  // only become TRUE once consent_status = 'agreed'. Consent is obtained via an
+  // n8n email whose one-click link records agreement (token + ip + timestamp);
+  // an HR manual-override path sets method='manual'. See
+  // docs/migrations/add-candidates-talent-consent.sql + docs/N8N_TALENT_CONSENT.md.
+  consentStatus:      text('consent_status').notNull().default('none'), // none | requested | agreed | revoked
+  consentToken:       text('consent_token'),
+  consentRequestedAt: text('consent_requested_at'),
+  consentAgreedAt:    text('consent_agreed_at'),
+  consentAgreedIp:    text('consent_agreed_ip'),
+  consentMethod:      text('consent_method'), // link | manual
   createdAt:      text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt:      text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });

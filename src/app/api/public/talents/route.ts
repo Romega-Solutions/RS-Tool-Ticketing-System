@@ -102,6 +102,7 @@ export async function GET(req: NextRequest) {
       'id, application_code, full_name, position, location, summary, skills, linkedin_url, experience, updated_at, created_at',
     )
     .eq('is_public_talent', true)
+    .eq('consent_status', 'agreed') // defense-in-depth: never surface un-consented profiles
     .order('updated_at', { ascending: false, nullsFirst: false })
     .limit(200);
 

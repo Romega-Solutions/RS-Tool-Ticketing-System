@@ -1,5 +1,6 @@
 'use server';
 
+import { randomBytes } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession, type SessionUser } from '@/lib/session';
@@ -461,12 +462,17 @@ export async function updateCandidatePublicTalent(id: number, isPublic: boolean)
   const supabase = createAdminClient();
   const { data: before } = await supabase
     .from('candidates')
-    .select('full_name, is_public_talent')
+    .select('full_name, is_public_talent, consent_status')
     .eq('id', id)
     .maybeSingle();
 
   if (!before) throw new Error('Candidate not found');
   if (before.is_public_talent === isPublic) return; // no-op
+
+  // GDPR gate: a candidate can only be published once consent is recorded.
+  if (isPublic && before.consent_status !== 'agreed') {
+    throw new Error('Cannot publish: candidate consent has not been recorded. Send the consent email and wait for the candidate to confirm, or mark consent agreed manually.');
+  }
 
   const { error } = await supabase
     .from('candidates')
@@ -481,6 +487,156 @@ export async function updateCandidatePublicTalent(id: number, isPublic: boolean)
     summary:  isPublic
       ? `Published to public Talent Pool (romega-solutions.com/talent)`
       : `Removed from public Talent Pool`,
+  }]);
+
+  revalidatePath('/recruiting/candidates');
+  revalidatePath(`/recruiting/candidates/${id}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GDPR Talent Pool consent
+//
+// A candidate must consent before being published to the public showcase.
+// Flow: requestTalentConsent (HR) → candidate clicks the email link
+// (/api/public/talents/confirm/<token>, sets method='link') → updateCandidate-
+// PublicTalent can now publish. markTalentConsentAgreed is the HR manual-
+// override (method='manual') for when written consent is held off-platform.
+// revokeTalentConsent honors right-to-withdraw and unpublishes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function consentBaseUrl(): string {
+  const raw = process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_BASE_URL || '';
+  return raw.replace(/\/+$/, '');
+}
+
+// HR sends (or resends) the consent-request email. Generates a fresh token,
+// moves status to 'requested', and fires the n8n communication webhook with a
+// one-click confirm link. Email failure is non-fatal (status still advances;
+// HR sees the failure in history and can resend).
+export async function requestTalentConsent(id: number) {
+  const session = await requireSession();
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Invalid id');
+
+  const supabase = createAdminClient();
+  const { data: before } = await supabase
+    .from('candidates')
+    .select('full_name, email, consent_status')
+    .eq('id', id)
+    .maybeSingle();
+  if (!before) throw new Error('Candidate not found');
+  if (!before.email) throw new Error('Candidate has no email on file — add one before requesting consent.');
+
+  const base = consentBaseUrl();
+  if (!base) throw new Error('APP_BASE_URL is not configured — cannot build the consent link.');
+
+  const token = randomBytes(32).toString('base64url');
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from('candidates')
+    .update({
+      consent_status:       'requested',
+      consent_token:        token,
+      consent_requested_at: now,
+      updated_at:           now,
+    })
+    .eq('id', id);
+  if (error) throw new Error(`Failed to record consent request: ${error.message}`);
+
+  await writeHistory(supabase, id, session, [{
+    field:    'consent_status',
+    oldValue: String(before.consent_status ?? 'none'),
+    newValue: 'requested',
+    summary:  'Talent Pool consent email requested',
+  }]);
+
+  const confirmUrl = `${base}/api/public/talents/confirm/${token}`;
+  await fireAutoCommunication(
+    supabase,
+    session,
+    id,
+    {
+      kind:           'talent_consent_request',
+      candidateId:    id,
+      candidateName:  before.full_name,
+      candidateEmail: before.email,
+      confirmUrl,
+    },
+    'talent_consent_request',
+  );
+
+  revalidatePath('/recruiting/candidates');
+  revalidatePath(`/recruiting/candidates/${id}`);
+}
+
+// HR manual override — records consent when written proof is held off-platform.
+export async function markTalentConsentAgreed(id: number) {
+  const session = await requireSession();
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Invalid id');
+
+  const supabase = createAdminClient();
+  const { data: before } = await supabase
+    .from('candidates')
+    .select('consent_status')
+    .eq('id', id)
+    .maybeSingle();
+  if (!before) throw new Error('Candidate not found');
+
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from('candidates')
+    .update({
+      consent_status:    'agreed',
+      consent_agreed_at: now,
+      consent_method:    'manual',
+      consent_agreed_ip: null,
+      updated_at:        now,
+    })
+    .eq('id', id);
+  if (error) throw new Error(`Failed to mark consent agreed: ${error.message}`);
+
+  await writeHistory(supabase, id, session, [{
+    field:    'consent_status',
+    oldValue: String(before.consent_status ?? 'none'),
+    newValue: 'agreed',
+    summary:  `Talent Pool consent marked agreed manually by ${session.name}`,
+  }]);
+
+  revalidatePath('/recruiting/candidates');
+  revalidatePath(`/recruiting/candidates/${id}`);
+}
+
+// HR revoke / candidate withdrawal — unpublishes and clears the token.
+export async function revokeTalentConsent(id: number) {
+  const session = await requireSession();
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Invalid id');
+
+  const supabase = createAdminClient();
+  const { data: before } = await supabase
+    .from('candidates')
+    .select('consent_status, is_public_talent')
+    .eq('id', id)
+    .maybeSingle();
+  if (!before) throw new Error('Candidate not found');
+
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from('candidates')
+    .update({
+      consent_status:   'revoked',
+      is_public_talent: false,
+      consent_token:    null,
+      updated_at:       now,
+    })
+    .eq('id', id);
+  if (error) throw new Error(`Failed to revoke consent: ${error.message}`);
+
+  await writeHistory(supabase, id, session, [{
+    field:    'consent_status',
+    oldValue: String(before.consent_status ?? 'none'),
+    newValue: 'revoked',
+    summary:  before.is_public_talent
+      ? 'Talent Pool consent revoked — candidate unpublished'
+      : 'Talent Pool consent revoked',
   }]);
 
   revalidatePath('/recruiting/candidates');

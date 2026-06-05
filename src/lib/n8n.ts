@@ -78,7 +78,14 @@ export function getResumeParserUrl(): string {
 export type CommunicationEvent =
   | { kind: 'created';        candidateId: number }
   | { kind: 'status_changed'; candidateId: number; status: string }
-  | { kind: 'resend';         candidateId: number; template: string };
+  | { kind: 'resend';         candidateId: number; template: string }
+  // GDPR Talent Pool consent request. n8n emails the candidate a one-click
+  // confirm link; clicking it records consent. See docs/N8N_TALENT_CONSENT.md.
+  | { kind: 'talent_consent_request';
+      candidateId:    number;
+      candidateName:  string;
+      candidateEmail: string;
+      confirmUrl:     string };
 
 export type CommunicationResult =
   | { ok: true;  template?: string }
