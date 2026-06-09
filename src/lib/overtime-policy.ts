@@ -1,4 +1,4 @@
-import { WEEKLY_CAP_SECONDS, SAFETY_CEILING_SECONDS } from './utils';
+import { WEEKLY_CAP_SECONDS, SAFETY_CEILING_SECONDS, computeOvertime } from './utils';
 import { normalizeRole } from './rbac';
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -59,6 +59,30 @@ export function decideAutoClockOut(input: AutoClockOutInput): AutoClockOutDecisi
     return { action: 'close', elapsedSec, reason: 'weekly cap' };
   }
   return { action: 'skip', reason: 'within limits' };
+}
+
+export type EnforcementPlan =
+  | { close: false; reason: string }
+  | { close: true; durationSeconds: number; isOvertime: boolean; overtimeSeconds: number | null; reason: string };
+
+// Pure: given an open session's context, decide whether the weekly-cap policy
+// requires closing it *now* and, if so, the exact timesheet fields to write.
+// Composes decideAutoClockOut (should we close?) with computeOvertime (how much
+// of the elapsed slice is overtime). Shared by the daily cron AND the
+// close-on-read path so both produce byte-identical results — there is one
+// enforcement decision in the codebase, not two that can drift.
+export function planEnforcement(input: AutoClockOutInput): EnforcementPlan {
+  const decision = decideAutoClockOut(input);
+  if (decision.action === 'skip') return { close: false, reason: decision.reason };
+
+  const { isOvertime, overtimeSeconds } = computeOvertime(input.weekSecondsBefore, decision.elapsedSec);
+  return {
+    close: true,
+    durationSeconds: decision.elapsedSec,
+    isOvertime,
+    overtimeSeconds: isOvertime ? overtimeSeconds : null,
+    reason: decision.reason,
+  };
 }
 
 export type ClockInInput = {

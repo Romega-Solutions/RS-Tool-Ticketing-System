@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   decideAutoClockOut,
   decideClockInAllowed,
+  planEnforcement,
   weekStartMonday,
 } from '@/lib/overtime-policy';
 import {
@@ -13,6 +14,40 @@ const NOW = new Date('2026-06-03T12:00:00.000Z'); // a Wednesday
 const ago = (seconds: number) => new Date(NOW.getTime() - seconds * 1000).toISOString();
 const future = (seconds: number) => new Date(NOW.getTime() + seconds * 1000).toISOString();
 const H = 3600;
+
+describe('planEnforcement — close-on-read decision + write payload', () => {
+  it('does not close a session within limits', () => {
+    const r = planEnforcement({ role: 'ic', clockedInAt: ago(2 * H), weekSecondsBefore: 5 * H, approvedUntil: null, now: NOW });
+    expect(r).toEqual({ close: false, reason: 'within limits' });
+  });
+
+  it('closes an over-cap session and reports the overtime slice', () => {
+    // 14h completed + 2h running = 16h → 1h beyond the 15h cap.
+    const r = planEnforcement({ role: 'ic', clockedInAt: ago(2 * H), weekSecondsBefore: 14 * H, approvedUntil: null, now: NOW });
+    expect(r).toMatchObject({ close: true, durationSeconds: 2 * H, isOvertime: true, overtimeSeconds: 1 * H, reason: 'weekly cap' });
+  });
+
+  it('closes exactly at the cap with no overtime (overtimeSeconds null)', () => {
+    // 14h completed + 1h running = 15h exactly → close, but no overtime slice.
+    const r = planEnforcement({ role: 'ic', clockedInAt: ago(1 * H), weekSecondsBefore: 14 * H, approvedUntil: null, now: NOW });
+    expect(r).toMatchObject({ close: true, durationSeconds: 1 * H, isOvertime: false, overtimeSeconds: null, reason: 'weekly cap' });
+  });
+
+  it('closes any session past the 16h safety ceiling, even an admin', () => {
+    const r = planEnforcement({ role: 'admin', clockedInAt: ago(SAFETY_CEILING_SECONDS), weekSecondsBefore: 0, approvedUntil: null, now: NOW });
+    expect(r).toMatchObject({ close: true, reason: 'safety ceiling' });
+  });
+
+  it('does not close an admin under the ceiling', () => {
+    const r = planEnforcement({ role: 'admin', clockedInAt: ago(4 * H), weekSecondsBefore: 20 * H, approvedUntil: null, now: NOW });
+    expect(r).toEqual({ close: false, reason: 'admin exempt' });
+  });
+
+  it('does not close a non-admin holding active approval', () => {
+    const r = planEnforcement({ role: 'ic', clockedInAt: ago(4 * H), weekSecondsBefore: 20 * H, approvedUntil: future(3600), now: NOW });
+    expect(r).toEqual({ close: false, reason: 'approved overtime' });
+  });
+});
 
 describe('decideAutoClockOut — no per-session/day cap', () => {
   it('does NOT cut a long session that is still under the weekly cap', () => {

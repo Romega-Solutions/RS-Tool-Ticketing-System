@@ -3,7 +3,7 @@ import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getOnline, getMyEntry, clockIn } from '@/lib/presence';
 import { getPhotoResolver } from '@/lib/orgchart';
-import { weeklySecondsForUser } from '@/lib/overtime-server';
+import { weeklySecondsForUser, enforceUserOpenSession, maybeSweepOpenSessions } from '@/lib/overtime-server';
 import type { AppRole } from '@/lib/rbac';
 
 export const runtime = 'nodejs';
@@ -12,10 +12,18 @@ export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const online = getOnline(session.role, session.team, session.id);
-
   const admin = createAdminClient();
-  const weekSecondsBefore = await weeklySecondsForUser(admin, session.id, new Date());
+  const now = new Date();
+  // Close-on-read: if this user's open session has crossed the 15h cap, end it
+  // now server-side instead of trusting the browser guardrail or the daily cron.
+  await enforceUserOpenSession(admin, session.id, now);
+  // Activity backstop: throttled sweep of *all* open sessions, so a user who
+  // clocked in then never reloaded the app is still capped within ~60s while
+  // anyone is using the app — not only at the daily cron.
+  await maybeSweepOpenSessions(admin, now);
+
+  const online = getOnline(session.role, session.team, session.id);
+  const weekSecondsBefore = await weeklySecondsForUser(admin, session.id, now);
 
   const myEntry = getMyEntry(session.id);
   let openSession: { timesheetId: number; clockedInAt: string; notes: string | null } | null = null;

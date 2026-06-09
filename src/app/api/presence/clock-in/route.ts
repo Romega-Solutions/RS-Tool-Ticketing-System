@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { clockIn } from '@/lib/presence';
 import { getPhotoResolver } from '@/lib/orgchart';
 import { decideClockInAllowed } from '@/lib/overtime-policy';
-import { weeklySecondsForUser, activeApprovalUntil } from '@/lib/overtime-server';
+import { weeklySecondsForUser, activeApprovalUntil, enforceUserOpenSession } from '@/lib/overtime-server';
 
 export const runtime = 'nodejs';
 
@@ -89,6 +89,10 @@ export async function POST(req: Request) {
 
   const admin = createAdminClient();
   const nowDate = new Date();
+  // Close-on-read first: never silently resume a session that is already over
+  // the cap. If the open session must end, this closes it now; the weekly total
+  // below then reflects it and the gate blocks a fresh start.
+  await enforceUserOpenSession(admin, session.id, nowDate);
   // Completed seconds earlier this week — fixed for the whole open session and
   // used by the weekly OT badge / browser guardrail. The open row (null
   // duration) is naturally excluded.
