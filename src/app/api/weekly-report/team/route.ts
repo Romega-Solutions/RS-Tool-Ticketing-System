@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getSession } from '@/lib/session';
-import { canAccessReports } from '@/lib/rbac';
+import { route, requireReports, badRequest } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -17,17 +16,15 @@ function getMondayOfWeek(dateStr: string): string | null {
 
 // GET /api/weekly-report/team?week=YYYY-MM-DD
 // Lead → their team's ICs; Admin → everyone grouped by team
-export async function GET(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!canAccessReports(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+export const GET = route(async (req: Request) => {
+  const session = await requireReports();
 
   const { searchParams } = new URL(req.url);
   const weekParam = searchParams.get('week');
-  if (!weekParam) return NextResponse.json({ error: 'week required' }, { status: 400 });
+  if (!weekParam) throw badRequest('week required');
 
   const weekStart = getMondayOfWeek(weekParam);
-  if (!weekStart) return NextResponse.json({ error: 'week must be a Monday (YYYY-MM-DD)' }, { status: 400 });
+  if (!weekStart) throw badRequest('week must be a Monday (YYYY-MM-DD)');
 
   const admin = createAdminClient();
 
@@ -77,4 +74,4 @@ export async function GET(req: Request) {
     });
 
   return NextResponse.json({ weekStart, members });
-}
+});

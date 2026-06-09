@@ -1,26 +1,28 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
+import { z } from 'zod';
 import { applyLabel, removeLabel, getWorkItemDetail, logActivity } from '@/lib/tickets';
 import { canEditWorkItem } from '@/lib/permissions';
+import { route, requireSession, parseBody, badRequest, forbidden, notFound } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
+const labelSchema = z.object({
+  labelId: z.number().int().positive().optional(),
+});
+
 // POST { labelId } — attach a label to the work item
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const POST = route(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const session = await requireSession();
 
   const { id } = await params;
   const detail = await getWorkItemDetail(id);
-  if (!detail) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (!detail) throw notFound();
   if (!(await canEditWorkItem(session, { id: detail.id, projectId: detail.project_id }))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    throw forbidden();
   }
 
-  let body: { labelId?: number } = {};
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }); }
-  if (!body.labelId) return NextResponse.json({ error: 'labelId required' }, { status: 400 });
+  const body = await parseBody(req, labelSchema);
+  if (!body.labelId) throw badRequest('labelId required');
 
   try {
     await applyLabel(id, body.labelId);
@@ -32,22 +34,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       { status: 502 },
     );
   }
-}
+});
 
 // DELETE ?labelId= — remove a label from the work item
-export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const DELETE = route(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const session = await requireSession();
 
   const { id } = await params;
   const detail = await getWorkItemDetail(id);
-  if (!detail) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (!detail) throw notFound();
   if (!(await canEditWorkItem(session, { id: detail.id, projectId: detail.project_id }))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    throw forbidden();
   }
 
   const labelId = Number(new URL(req.url).searchParams.get('labelId'));
-  if (!labelId) return NextResponse.json({ error: 'labelId required' }, { status: 400 });
+  if (!labelId) throw badRequest('labelId required');
 
   try {
     await removeLabel(id, labelId);
@@ -59,4 +60,4 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
       { status: 502 },
     );
   }
-}
+});

@@ -1,27 +1,29 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
+import { z } from 'zod';
 import { getSavedViews, createSavedView } from '@/lib/tickets';
+import { route, requireSession, parseBody, badRequest } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
-export async function GET(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+const savedViewSchema = z.object({
+  name: z.string().nullable().optional(),
+  projectId: z.string().nullable().optional(),
+  filters: z.record(z.string(), z.unknown()).optional(),
+});
+
+export const GET = route(async (req: Request) => {
+  const session = await requireSession();
   const projectId = new URL(req.url).searchParams.get('projectId');
   return NextResponse.json(await getSavedViews(session.id, projectId ?? undefined));
-}
+});
 
-export async function POST(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const POST = route(async (req: Request) => {
+  const session = await requireSession();
 
-  let body: { name?: string; projectId?: string | null; filters?: Record<string, unknown> } = {};
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }); }
-
+  const body = await parseBody(req, savedViewSchema);
   const name = (body.name ?? '').trim();
   if (!name || !body.filters) {
-    return NextResponse.json({ error: 'name and filters required' }, { status: 400 });
+    throw badRequest('name and filters required');
   }
   try {
     return NextResponse.json(
@@ -33,4 +35,4 @@ export async function POST(req: Request) {
       { status: 502 },
     );
   }
-}
+});

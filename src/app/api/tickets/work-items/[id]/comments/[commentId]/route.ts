@@ -1,29 +1,30 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
+import { z } from 'zod';
 import { getComment, updateComment, deleteComment } from '@/lib/tickets';
+import { route, requireSession, parseBody, badRequest, forbidden, notFound } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
-export async function PATCH(
-  req: Request,
-  { params }: { params: Promise<{ id: string; commentId: string }> },
-) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+type CommentCtx = { params: Promise<{ id: string; commentId: string }> };
 
-  const { commentId } = await params;
+const commentSchema = z.object({
+  body: z.string().nullable().optional(),
+});
+
+export const PATCH = route(async (req: Request, ctx: CommentCtx) => {
+  const session = await requireSession();
+
+  const { commentId } = await ctx.params;
   const existing = await getComment(commentId);
-  if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (!existing) throw notFound();
   if (existing.author_id !== session.id && session.role !== 'admin') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    throw forbidden();
   }
 
-  let body: { body?: string } = {};
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }); }
+  const body = await parseBody(req, commentSchema);
 
   const trimmed = (body.body ?? '').trim();
-  if (!trimmed) return NextResponse.json({ error: 'body is required' }, { status: 400 });
+  if (!trimmed) throw badRequest('body is required');
 
   try {
     await updateComment(commentId, trimmed);
@@ -34,20 +35,16 @@ export async function PATCH(
       { status: 502 },
     );
   }
-}
+});
 
-export async function DELETE(
-  _req: Request,
-  { params }: { params: Promise<{ id: string; commentId: string }> },
-) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const DELETE = route(async (_req: Request, ctx: CommentCtx) => {
+  const session = await requireSession();
 
-  const { commentId } = await params;
+  const { commentId } = await ctx.params;
   const existing = await getComment(commentId);
-  if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (!existing) throw notFound();
   if (existing.author_id !== session.id && session.role !== 'admin') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    throw forbidden();
   }
 
   try {
@@ -59,4 +56,4 @@ export async function DELETE(
       { status: 502 },
     );
   }
-}
+});

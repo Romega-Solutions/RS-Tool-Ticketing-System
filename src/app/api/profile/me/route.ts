@@ -1,14 +1,23 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
+import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { hash } from 'bcryptjs';
 import { normalizeRole } from '@/lib/rbac';
+import { route, requireSession, parseBody, badRequest, notFound } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
-export async function GET() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+const profileUpdateSchema = z.object({
+  name: z.string().optional(),
+  team: z.string().nullable().optional(),
+  jobTitle: z.string().nullable().optional(),
+  password: z.string().optional(),
+  reminderEnabled: z.boolean().optional(),
+  reminderIntervalMinutes: z.union([z.number(), z.string()]).optional(),
+});
+
+export const GET = route(async () => {
+  const session = await requireSession();
 
   const admin = createAdminClient();
   const { data: user } = await admin
@@ -17,7 +26,7 @@ export async function GET() {
     .eq('id', session.id)
     .maybeSingle();
 
-  if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  if (!user) throw notFound('User not found');
 
   const [{ data: teamRows }, { data: jobTitleRows }] = await Promise.all([
     admin.from('users').select('team').not('team', 'is', null).eq('is_active', 1),
@@ -53,27 +62,18 @@ export async function GET() {
     availableTeams,
     availableJobTitles,
   });
-}
+});
 
-export async function PUT(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const body = await req.json() as {
-    name?: string;
-    team?: string;
-    jobTitle?: string;
-    password?: string;
-    reminderEnabled?: boolean;
-    reminderIntervalMinutes?: number;
-  };
+export const PUT = route(async (req: Request) => {
+  const session = await requireSession();
+  const body = await parseBody(req, profileUpdateSchema);
 
   const name = String(body.name || '').trim();
   const team = String(body.team || '').trim();
   const jobTitle = String(body.jobTitle || '').trim();
   const password = String(body.password || '');
 
-  if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+  if (!name) throw badRequest('Name is required');
 
   const VALID_INTERVALS = [30, 60, 120, 180];
   const payload: Record<string, string | number | null> = {
@@ -92,7 +92,7 @@ export async function PUT(req: Request) {
 
   if (password) {
     if (password.length < 8) {
-      return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
+      throw badRequest('Password must be at least 8 characters');
     }
     payload.password_hash = await hash(password, 10);
   }
@@ -101,7 +101,7 @@ export async function PUT(req: Request) {
   await admin.from('users').update(payload).eq('id', session.id);
 
   const { data: updated } = await admin.from('users').select('*').eq('id', session.id).maybeSingle();
-  if (!updated) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  if (!updated) throw notFound('User not found');
 
   return NextResponse.json({
     success: true,
@@ -119,4 +119,4 @@ export async function PUT(req: Request) {
       reminderIntervalMinutes: updated.reminder_interval_minutes ?? 120,
     },
   });
-}
+});

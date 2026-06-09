@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
+import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { weekStartMonday } from '@/lib/overtime-policy';
+import { route, requireSession, parseBody } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -13,10 +14,13 @@ type RequestRow = {
   approved_until: string | null;
 };
 
+const overtimeRequestSchema = z.object({
+  reason: z.string().optional(),
+});
+
 // GET — the caller's overtime request for the current week (or null).
-export async function GET() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = route(async () => {
+  const session = await requireSession();
 
   const admin = createAdminClient();
   const weekStart = weekStartMonday(new Date());
@@ -29,16 +33,14 @@ export async function GET() {
     .limit(1);
 
   return NextResponse.json({ request: (data?.[0] as RequestRow | undefined) ?? null });
-}
+});
 
 // POST — file an overtime request for the current week. Idempotent: if a
 // pending or still-active approved request already exists, it's returned as-is.
-export async function POST(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const POST = route(async (req: Request) => {
+  const session = await requireSession();
 
-  let body: { reason?: string } = {};
-  try { body = await req.json(); } catch { body = {}; }
+  const body = await parseBody(req, overtimeRequestSchema);
   const reason = body.reason?.trim() || null;
 
   const admin = createAdminClient();
@@ -71,4 +73,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `Could not file request: ${error.message}` }, { status: 500 });
   }
   return NextResponse.json({ request: inserted });
-}
+});

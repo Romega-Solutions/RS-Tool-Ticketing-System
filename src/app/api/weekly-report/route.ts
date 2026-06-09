@@ -1,8 +1,30 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getSession } from '@/lib/session';
+import { route, requireSession, parseBody, badRequest } from '@/lib/api';
 
 export const runtime = 'nodejs';
+
+const weeklyReportSchema = z.object({
+  weekStart: z.string().optional(),
+  clientEngagements: z.array(z.object({
+    activity: z.string(),
+    date: z.string(),
+    details: z.string(),
+  })).optional(),
+  risks: z.array(z.object({
+    description: z.string(),
+    resolution: z.string(),
+    escalation: z.string(),
+  })).optional(),
+  meetings: z.array(z.object({
+    title: z.string(),
+    date: z.string(),
+    participants: z.string(),
+    notes: z.string(),
+  })).optional(),
+  ideas: z.string().optional(),
+});
 
 function getMondayOfWeek(dateStr: string): string | null {
   const d = new Date(dateStr + 'T00:00:00');
@@ -15,16 +37,15 @@ function getMondayOfWeek(dateStr: string): string | null {
 }
 
 // GET /api/weekly-report?week=YYYY-MM-DD — own report for the week
-export async function GET(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = route(async (req: Request) => {
+  const session = await requireSession();
 
   const { searchParams } = new URL(req.url);
   const weekParam = searchParams.get('week');
-  if (!weekParam) return NextResponse.json({ error: 'week required' }, { status: 400 });
+  if (!weekParam) throw badRequest('week required');
 
   const weekStart = getMondayOfWeek(weekParam);
-  if (!weekStart) return NextResponse.json({ error: 'week must be a Monday (YYYY-MM-DD)' }, { status: 400 });
+  if (!weekStart) throw badRequest('week must be a Monday (YYYY-MM-DD)');
 
   const admin = createAdminClient();
   const { data: report } = await admin
@@ -47,23 +68,15 @@ export async function GET(req: Request) {
     } : null,
     user: { id: session.id, name: session.name },
   });
-}
+});
 
 // POST /api/weekly-report — upsert own report
-export async function POST(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const body = await req.json() as {
-    weekStart: string;
-    clientEngagements?: Array<{ activity: string; date: string; details: string }>;
-    risks?: Array<{ description: string; resolution: string; escalation: string }>;
-    meetings?: Array<{ title: string; date: string; participants: string; notes: string }>;
-    ideas?: string;
-  };
+export const POST = route(async (req: Request) => {
+  const session = await requireSession();
+  const body = await parseBody(req, weeklyReportSchema);
 
   const weekStart = getMondayOfWeek(body.weekStart ?? '');
-  if (!weekStart) return NextResponse.json({ error: 'weekStart must be a Monday (YYYY-MM-DD)' }, { status: 400 });
+  if (!weekStart) throw badRequest('weekStart must be a Monday (YYYY-MM-DD)');
 
   const now = new Date().toISOString();
   const payload = {
@@ -90,4 +103,4 @@ export async function POST(req: Request) {
 
   await admin.from('weekly_reports').insert({ user_id: session.id, week_start: weekStart, ...payload });
   return NextResponse.json({ success: true, action: 'created' });
-}
+});

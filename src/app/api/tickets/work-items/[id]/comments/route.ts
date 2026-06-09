@@ -1,40 +1,40 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
+import { z } from 'zod';
 import { getWorkItemDetail, getComments, createComment, logActivity } from '@/lib/tickets';
 import { canCommentOnProject, canViewProject } from '@/lib/permissions';
+import { route, requireSession, parseBody, badRequest, forbidden, notFound } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+const commentSchema = z.object({
+  body: z.string().nullable().optional(),
+});
 
+export const GET = route(async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const session = await requireSession();
   const { id } = await params;
   const detail = await getWorkItemDetail(id);
-  if (!detail) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (!detail) throw notFound();
   if (!(await canViewProject(session, detail.project_id))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    throw forbidden();
   }
   return NextResponse.json(await getComments(id));
-}
+});
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const POST = route(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const session = await requireSession();
 
   const { id } = await params;
   const detail = await getWorkItemDetail(id);
-  if (!detail) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (!detail) throw notFound();
   if (!(await canCommentOnProject(session, detail.project_id))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    throw forbidden();
   }
 
-  let body: { body?: string } = {};
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }); }
+  const body = await parseBody(req, commentSchema);
 
   const trimmed = (body.body ?? '').trim();
-  if (!trimmed) return NextResponse.json({ error: 'body is required' }, { status: 400 });
+  if (!trimmed) throw badRequest('body is required');
 
   try {
     const created = await createComment(id, session.id, trimmed);
@@ -46,4 +46,4 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       { status: 502 },
     );
   }
-}
+});

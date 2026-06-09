@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
+import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clockIn } from '@/lib/presence';
 import { getPhotoResolver } from '@/lib/orgchart';
 import { decideClockInAllowed } from '@/lib/overtime-policy';
 import { weeklySecondsForUser, activeApprovalUntil, enforceUserOpenSession } from '@/lib/overtime-server';
+import { route, requireSession, parseBody, badRequest } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -15,6 +16,11 @@ const DAY_COLS = [
   'thursday_status',
   'friday_status',
 ] as const;
+
+const clockInSchema = z.object({
+  confirmed: z.boolean().optional(),
+  notes: z.string().optional(),
+});
 
 function getWeekMonday(d: Date): string {
   const copy = new Date(d);
@@ -69,19 +75,12 @@ function localDateStr(): string {
   return `${y}-${m}-${day}`;
 }
 
-export async function POST(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  let body: { confirmed?: boolean; notes?: string } = {};
-  try {
-    body = await req.json();
-  } catch {
-    body = {};
-  }
+export const POST = route(async (req: Request) => {
+  const session = await requireSession();
+  const body = await parseBody(req, clockInSchema);
 
   if (!body.confirmed) {
-    return NextResponse.json({ error: 'Clock-in confirmation is required.' }, { status: 400 });
+    throw badRequest('Clock-in confirmation is required.');
   }
 
   const notes = body.notes?.trim() || null;
@@ -178,4 +177,4 @@ export async function POST(req: Request) {
   await autoMarkPresent(session.id);
 
   return NextResponse.json({ timesheetId: inserted.id, clockedInAt: now, weekSecondsBefore, notes, noteSaved });
-}
+});

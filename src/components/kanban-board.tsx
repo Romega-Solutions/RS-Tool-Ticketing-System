@@ -13,7 +13,7 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { Plus, Loader2, X } from 'lucide-react';
+import { AlertTriangle, Plus, Loader2, X } from 'lucide-react';
 import { TaskDetailSheet, type SheetWorkItem } from '@/components/task-detail-sheet';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -63,10 +63,10 @@ function CardContent({ item, overlay = false, onClick }: { item: KanbanItem; ove
   return (
     <div
       onClick={onClick}
-      className={`bg-white rounded-lg border p-3 space-y-2 select-none ${
+      className={`min-h-28 bg-white rounded-lg border p-3 space-y-2 select-none ${
         overlay
-          ? 'border-(--rs-primary-400) shadow-xl rotate-1 cursor-grabbing w-64'
-          : 'border-(--rs-neutral-grey-200) hover:border-(--rs-primary-200) cursor-grab hover:shadow-sm transition-all'
+          ? 'border-(--rs-primary-400) shadow-xl rotate-1 cursor-grabbing w-[min(18rem,82vw)]'
+          : 'border-(--rs-neutral-grey-200) hover:border-(--rs-primary-200) cursor-pointer sm:cursor-grab hover:shadow-sm transition-all'
       }`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -83,8 +83,8 @@ function CardContent({ item, overlay = false, onClick }: { item: KanbanItem; ove
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
         {item.target_date && (
-          <span className={`text-xs ${isOverdue ? 'text-red-500 font-medium' : 'text-(--rs-neutral-grey-400)'}`}>
-            {isOverdue ? '⚠ ' : ''}
+          <span className={`inline-flex items-center gap-1 text-xs ${isOverdue ? 'text-red-500 font-medium' : 'text-(--rs-neutral-grey-400)'}`}>
+            {isOverdue && <AlertTriangle className="h-3 w-3" aria-hidden="true" />}
             {new Date(item.target_date + 'T00:00:00').toLocaleDateString('en-US', {
               month: 'short', day: 'numeric',
             })}
@@ -118,7 +118,7 @@ function DraggableCard({ item, isActive, onOpen }: { item: KanbanItem; isActive:
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      style={{ opacity: isActive ? 0.3 : 1, transition: 'opacity 150ms' }}
+      style={{ opacity: isActive ? 0.3 : 1, transition: 'opacity 150ms', touchAction: 'manipulation' }}
     >
       <CardContent item={item} onClick={() => onOpen(item.id)} />
     </div>
@@ -179,7 +179,7 @@ function AddTaskForm({
     return (
       <button
         onClick={openForm}
-        className="w-full flex items-center gap-1.5 px-2 py-1.5 text-xs text-(--rs-neutral-grey-400) hover:text-(--rs-neutral-grey-700) hover:bg-(--rs-neutral-grey-50) rounded-md transition-colors"
+        className="flex min-h-10 w-full items-center gap-1.5 rounded-md px-2 py-2 text-xs text-(--rs-neutral-grey-400) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-700)"
       >
         <Plus className="w-3.5 h-3.5" /> Add task
       </button>
@@ -202,7 +202,7 @@ function AddTaskForm({
         <button
           type="submit"
           disabled={loading || !value.trim()}
-          className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-md font-medium text-white disabled:opacity-50 transition-opacity"
+          className="flex min-h-9 items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium text-white transition-opacity disabled:opacity-50"
           style={{ background: 'var(--rs-primary-500)' }}
         >
           {loading && <Loader2 className="w-3 h-3 animate-spin" />}
@@ -240,7 +240,7 @@ function KanbanColumn({
   const { setNodeRef, isOver } = useDroppable({ id: state.id });
 
   return (
-    <div className="shrink-0 w-64 flex flex-col">
+    <div className="flex w-[82vw] max-w-[18rem] shrink-0 snap-start flex-col sm:w-72 sm:max-w-none">
       {/* Header */}
       <div
         className="flex items-center gap-2 px-3 py-2 rounded-t-lg font-semibold text-sm text-white"
@@ -255,7 +255,7 @@ function KanbanColumn({
       {/* Drop zone */}
       <div
         ref={setNodeRef}
-        className="flex-1 min-h-28 rounded-b-lg border border-t-0 transition-colors"
+        className="flex-1 min-h-32 rounded-b-lg border border-t-0 transition-colors"
         style={{
           borderColor: isOver ? 'var(--rs-primary-300)' : 'var(--rs-neutral-grey-200)',
           backgroundColor: isOver ? 'var(--rs-primary-50)' : 'var(--rs-neutral-grey-50)',
@@ -477,13 +477,13 @@ export function KanbanBoard({
   };
 
   return (
-    <div>
+    <div className="max-w-full overflow-hidden">
       {/* Filter bar */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
+      <div className="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-2 sm:mx-0 sm:flex-wrap sm:px-0">
         <select
           value={filters.assignee}
           onChange={e => setFilters(f => ({ ...f, assignee: e.target.value }))}
-          className="text-xs px-2.5 py-1.5 border border-(--rs-neutral-grey-200) rounded-md bg-white"
+          className="min-h-10 min-w-36 flex-none rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-xs"
         >
           <option value="">All assignees</option>
           {members.map(m => (
@@ -494,7 +494,7 @@ export function KanbanBoard({
         <select
           value={filters.label}
           onChange={e => setFilters(f => ({ ...f, label: e.target.value }))}
-          className="text-xs px-2.5 py-1.5 border border-(--rs-neutral-grey-200) rounded-md bg-white"
+          className="min-h-10 min-w-32 flex-none rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-xs"
         >
           <option value="">All labels</option>
           {labels.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -503,7 +503,7 @@ export function KanbanBoard({
         <select
           value={filters.priority}
           onChange={e => setFilters(f => ({ ...f, priority: e.target.value }))}
-          className="text-xs px-2.5 py-1.5 border border-(--rs-neutral-grey-200) rounded-md bg-white"
+          className="min-h-10 min-w-32 flex-none rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-xs"
         >
           <option value="">Any priority</option>
           <option value="urgent">Urgent</option>
@@ -517,7 +517,7 @@ export function KanbanBoard({
           <select
             value={filters.cycle}
             onChange={e => setFilters(f => ({ ...f, cycle: e.target.value }))}
-            className="text-xs px-2.5 py-1.5 border border-(--rs-neutral-grey-200) rounded-md bg-white"
+            className="min-h-10 min-w-32 flex-none rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-xs"
           >
             <option value="">All cycles</option>
             {cycles.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -538,7 +538,7 @@ export function KanbanBoard({
         {activeFilterCount > 0 && (
           <button
             onClick={clearFilters}
-            className="ml-1 flex items-center gap-1 text-xs text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-800)"
+            className="ml-1 flex min-h-10 flex-none items-center gap-1 rounded-md px-2 text-xs text-(--rs-neutral-grey-500) hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-800)"
           >
             <X className="w-3 h-3" /> Clear ({activeFilterCount})
           </button>
@@ -548,7 +548,13 @@ export function KanbanBoard({
       {dragError && (
         <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg flex items-center justify-between gap-2">
           <span>{dragError}</span>
-          <button onClick={() => setDragError('')} className="text-red-400 hover:text-red-600 font-bold text-lg leading-none">×</button>
+          <button
+            onClick={() => setDragError('')}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-red-400 hover:bg-red-100 hover:text-red-600"
+            aria-label="Dismiss move error"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
       )}
 
@@ -558,8 +564,8 @@ export function KanbanBoard({
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="overflow-x-auto pb-1 -mx-1 px-1">
-        <div className="flex gap-4 pb-4 items-start min-w-max">
+        <div className="-mx-4 overflow-x-auto overscroll-x-contain px-4 pb-2 sm:-mx-1 sm:px-1">
+        <div className="flex min-w-max snap-x snap-mandatory items-start gap-4 pb-4">
           {states.map(state => (
             <KanbanColumn
               key={state.id}
@@ -637,7 +643,7 @@ function Toggle({ on, label, onChange }: { on: boolean; label: string; onChange:
   return (
     <button
       onClick={() => onChange(!on)}
-      className={`text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
+      className={`min-h-10 flex-none rounded-md border px-3 py-2 text-xs transition-colors ${
         on
           ? 'bg-(--rs-primary-50) border-(--rs-primary-300) text-(--rs-primary-800)'
           : 'bg-white border-(--rs-neutral-grey-200) text-(--rs-neutral-grey-600) hover:border-(--rs-neutral-grey-300)'

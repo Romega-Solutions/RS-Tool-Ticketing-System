@@ -1,34 +1,34 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
+import { z } from 'zod';
 import { getLabels, createLabel } from '@/lib/tickets';
 import { canViewProject, canManageProject } from '@/lib/permissions';
+import { route, requireSession, parseBody, badRequest, forbidden } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
-export async function GET(_req: Request, { params }: { params: Promise<{ projectId: string }> }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+const labelSchema = z.object({
+  name: z.string().nullable().optional(),
+  color: z.string().optional(),
+});
 
+export const GET = route(async (_req: Request, { params }: { params: Promise<{ projectId: string }> }) => {
+  const session = await requireSession();
   const { projectId } = await params;
   if (!(await canViewProject(session, Number(projectId)))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    throw forbidden();
   }
   return NextResponse.json(await getLabels(projectId));
-}
+});
 
-export async function POST(req: Request, { params }: { params: Promise<{ projectId: string }> }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const POST = route(async (req: Request, { params }: { params: Promise<{ projectId: string }> }) => {
+  const session = await requireSession();
   if (!canManageProject(session)) {
-    return NextResponse.json({ error: 'Lead+ only' }, { status: 403 });
+    throw forbidden('Lead+ only');
   }
 
-  let body: { name?: string; color?: string } = {};
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }); }
-
+  const body = await parseBody(req, labelSchema);
   const name = (body.name ?? '').trim();
-  if (!name) return NextResponse.json({ error: 'name is required' }, { status: 400 });
+  if (!name) throw badRequest('name is required');
 
   const { projectId } = await params;
   try {
@@ -39,4 +39,4 @@ export async function POST(req: Request, { params }: { params: Promise<{ project
       { status: 502 },
     );
   }
-}
+});

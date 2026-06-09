@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
+import { z } from 'zod';
 import {
   getWorkItemDetail,
   patchWorkItem,
@@ -9,39 +9,49 @@ import {
   type WorkItemPatch,
 } from '@/lib/tickets';
 import { canEditWorkItem, canArchiveWorkItem, canViewProject } from '@/lib/permissions';
+import { route, requireSession, parseBody, forbidden, notFound } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
+const idParam = z.union([z.string(), z.number()]).transform((v) => String(v));
+
+const patchSchema = z.object({
+  state: idParam.optional(),
+  priority: z.string().optional(),
+  name: z.string().optional(),
+  description: z.string().nullable().optional(),
+  target_date: z.string().nullable().optional(),
+  cycle_id: z.number().nullable().optional(),
+  parent_id: z.number().nullable().optional(),
+  assigneeUserIds: z.array(z.number()).optional(),
+});
+
 // GET /api/tickets/work-items/[id] — full detail with comments + activity not included.
 // Use the dedicated /comments and /activity routes for those.
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = route(async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const session = await requireSession();
 
   const { id } = await params;
   const detail = await getWorkItemDetail(id);
-  if (!detail) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (!detail) throw notFound();
   if (!(await canViewProject(session, detail.project_id))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    throw forbidden();
   }
   return NextResponse.json(detail);
-}
+});
 
 // PATCH /api/tickets/work-items/[id] — full edit (any field, including assignees)
-export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const PATCH = route(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const session = await requireSession();
 
   const { id } = await params;
   const before = await getWorkItemDetail(id);
-  if (!before) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (!before) throw notFound();
   if (!(await canEditWorkItem(session, { id: before.id, projectId: before.project_id }))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    throw forbidden();
   }
 
-  let patch: WorkItemPatch = {};
-  try { patch = (await req.json()) as WorkItemPatch; }
-  catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }); }
+  const patch: WorkItemPatch = await parseBody(req, patchSchema);
 
   try {
     await patchWorkItem(id, patch);
@@ -56,14 +66,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       { status: 502 },
     );
   }
-}
+});
 
 // DELETE /api/tickets/work-items/[id] — soft delete (archive flag). Admin only.
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const DELETE = route(async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const session = await requireSession();
   if (!canArchiveWorkItem(session)) {
-    return NextResponse.json({ error: 'Admin only' }, { status: 403 });
+    throw forbidden('Admin only');
   }
   const { id } = await params;
   try {
@@ -76,4 +85,4 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
       { status: 502 },
     );
   }
-}
+});

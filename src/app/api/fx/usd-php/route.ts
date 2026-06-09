@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
+import { route, requireSession } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -79,9 +79,8 @@ async function fetchRate(): Promise<FxCache> {
   return await fetchFromFallback();
 }
 
-export async function GET() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = route(async () => {
+  await requireSession();
 
   const fresh = cache && Date.now() - cache.fetchedAt < TTL_MS;
 
@@ -112,4 +111,4 @@ export async function GET() {
     source: cache!.source,
     stale: false,
   });
-}
+});

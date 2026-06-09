@@ -1,9 +1,9 @@
-import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { subscribe, unsubscribe, getOnline, seedUsers, type PresenceUser } from '@/lib/presence';
 import { getPhotoResolver } from '@/lib/orgchart';
 import { weeklySecondsForUsers } from '@/lib/overtime-server';
 import type { AppRole } from '@/lib/rbac';
+import { route, optionalSession } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -51,8 +51,8 @@ async function hydrateFromDB(): Promise<void> {
   }
 }
 
-export async function GET() {
-  const session = await getSession();
+export const GET = route(async () => {
+  const session = await optionalSession();
   if (!session) return new Response('Unauthorized', { status: 401 });
 
   const enc = new TextEncoder();
@@ -82,4 +82,4 @@ export async function GET() {
       'X-Accel-Buffering': 'no',
     },
   });
-}
+});

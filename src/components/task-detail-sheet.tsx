@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Loader2, MessageSquare, Activity as ActivityIcon, FileText, Save, Trash2, X } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { extractTaskDescriptionImageUrls } from '@/lib/task-description-images';
 
 // ── Shape we get from /api/tickets/work-items/[id] ─────────────────────────
 export interface SheetWorkItem {
@@ -109,6 +110,7 @@ export function TaskDetailSheet({
   const [postingComment, setPostingComment] = useState(false);
 
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const descriptionImageUrls = extractTaskDescriptionImageUrls(description);
 
   const refresh = useCallback(async (id: string) => {
     setLoading(true); setError('');
@@ -289,7 +291,7 @@ export function TaskDetailSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-xl flex flex-col gap-0 p-0">
+      <SheetContent side="right" className="w-full max-w-full sm:max-w-2xl flex flex-col gap-0 p-0">
         <SheetHeader className="border-b border-(--rs-neutral-grey-100) px-5 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
@@ -304,7 +306,7 @@ export function TaskDetailSheet({
         </SheetHeader>
 
         {/* Tabs */}
-        <div className="flex border-b border-(--rs-neutral-grey-100) px-5">
+        <div className="flex overflow-x-auto border-b border-(--rs-neutral-grey-100) px-4 sm:px-5">
           {[
             { key: 'details',  label: 'Details',  icon: FileText },
             { key: 'comments', label: 'Comments', icon: MessageSquare },
@@ -313,7 +315,7 @@ export function TaskDetailSheet({
             <button
               key={key}
               onClick={() => setTab(key as typeof tab)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              className={`flex min-h-11 flex-none items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors -mb-px ${
                 tab === key
                   ? 'border-(--rs-primary-500) text-(--rs-primary-700)'
                   : 'border-transparent text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-800)'
@@ -330,7 +332,7 @@ export function TaskDetailSheet({
           ))}
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
           {loading && (
             <div className="flex items-center gap-2 text-sm text-(--rs-neutral-grey-500) py-4">
               <Loader2 className="w-4 h-4 animate-spin" /> Loading…
@@ -348,7 +350,7 @@ export function TaskDetailSheet({
                 <input
                   value={name}
                   onChange={e => setName(e.target.value)}
-                  className="w-full text-sm px-3 py-2 border border-(--rs-neutral-grey-200) rounded-md bg-white focus:outline-none focus:border-(--rs-primary-400)"
+                  className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none"
                 />
               </Field>
 
@@ -358,16 +360,37 @@ export function TaskDetailSheet({
                   onChange={e => setDescription(e.target.value)}
                   rows={4}
                   placeholder="Add a description…"
-                  className="w-full text-sm px-3 py-2 border border-(--rs-neutral-grey-200) rounded-md bg-white focus:outline-none focus:border-(--rs-primary-400) resize-y"
+                  className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm resize-y focus:border-(--rs-primary-400) focus:outline-none"
                 />
+                {descriptionImageUrls.length > 0 && (
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {descriptionImageUrls.map((url, index) => (
+                      <a
+                        key={url}
+                        href={url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="group block overflow-hidden rounded-md border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) transition-colors hover:border-(--rs-primary-300) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300)"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element -- Task descriptions can reference arbitrary external image URLs. */}
+                        <img
+                          src={url}
+                          alt={`Task description screenshot ${index + 1}`}
+                          className="aspect-video w-full object-cover transition-transform group-hover:scale-[1.02]"
+                          loading="lazy"
+                        />
+                      </a>
+                    ))}
+                  </div>
+                )}
               </Field>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field label="State">
                   <select
                     value={stateId}
                     onChange={e => setStateId(e.target.value)}
-                    className="w-full text-sm px-2.5 py-2 border border-(--rs-neutral-grey-200) rounded-md bg-white focus:outline-none focus:border-(--rs-primary-400)"
+                    className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none"
                   >
                     {states.map(s => (
                       <option key={s.id} value={s.id}>{s.name}</option>
@@ -379,7 +402,7 @@ export function TaskDetailSheet({
                   <select
                     value={priority}
                     onChange={e => setPriority(e.target.value as SheetWorkItem['priority'])}
-                    className="w-full text-sm px-2.5 py-2 border border-(--rs-neutral-grey-200) rounded-md bg-white focus:outline-none focus:border-(--rs-primary-400)"
+                    className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none"
                   >
                     {PRIORITIES.map(p => (
                       <option key={p.value} value={p.value}>{p.label}</option>
@@ -392,7 +415,7 @@ export function TaskDetailSheet({
                     type="date"
                     value={targetDate ?? ''}
                     onChange={e => setTargetDate(e.target.value)}
-                    className="w-full text-sm px-2.5 py-2 border border-(--rs-neutral-grey-200) rounded-md bg-white focus:outline-none focus:border-(--rs-primary-400)"
+                    className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none"
                   />
                 </Field>
 
@@ -400,7 +423,7 @@ export function TaskDetailSheet({
                   <select
                     value={cycleId}
                     onChange={e => setCycleId(e.target.value)}
-                    className="w-full text-sm px-2.5 py-2 border border-(--rs-neutral-grey-200) rounded-md bg-white"
+                    className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-sm"
                   >
                     <option value="">No cycle</option>
                     {projectCycles.map(c => (
@@ -428,7 +451,7 @@ export function TaskDetailSheet({
                         <button
                           key={m.user_id}
                           onClick={() => toggleAssignee(m.user_id)}
-                          className={`text-xs px-2 py-1 rounded-full border transition-colors ${
+                          className={`min-h-9 rounded-full border px-3 py-1 text-xs transition-colors ${
                             on
                               ? 'bg-(--rs-primary-50) border-(--rs-primary-300) text-(--rs-primary-800)'
                               : 'bg-white border-(--rs-neutral-grey-200) text-(--rs-neutral-grey-600) hover:border-(--rs-neutral-grey-400)'
@@ -455,7 +478,7 @@ export function TaskDetailSheet({
                         <button
                           key={l.id}
                           onClick={() => toggleLabel(l.id)}
-                          className={`text-xs px-2 py-0.5 rounded-full border transition-opacity ${
+                          className={`min-h-8 rounded-full border px-3 py-1 text-xs transition-opacity ${
                             applied ? 'text-white' : 'text-(--rs-neutral-grey-600) bg-white opacity-60 hover:opacity-100'
                           }`}
                           style={applied
@@ -497,18 +520,18 @@ export function TaskDetailSheet({
                     ))}
                   </div>
                 )}
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <input
                     value={newSub}
                     onChange={e => setNewSub(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && addSubIssue()}
                     placeholder="Add a sub-issue…"
-                    className="flex-1 text-xs px-2.5 py-1.5 border border-(--rs-neutral-grey-200) rounded-md bg-white focus:outline-none focus:border-(--rs-primary-400)"
+                    className="min-h-10 flex-1 rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-xs focus:border-(--rs-primary-400) focus:outline-none"
                   />
                   <button
                     onClick={addSubIssue}
                     disabled={addingSub || !newSub.trim()}
-                    className="flex items-center gap-1 text-xs font-medium text-white px-2.5 py-1.5 rounded-md disabled:opacity-50"
+                    className="flex min-h-10 items-center justify-center gap-1 rounded-md px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
                     style={{ background: 'var(--rs-primary-500)' }}
                   >
                     {addingSub ? <Loader2 className="w-3 h-3 animate-spin" /> : <FileText className="w-3 h-3" />}
@@ -517,12 +540,12 @@ export function TaskDetailSheet({
                 </div>
               </Field>
 
-              <div className="flex items-center justify-between pt-2 border-t border-(--rs-neutral-grey-100)">
-                <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-3 border-t border-(--rs-neutral-grey-100) pt-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={handleSave}
                     disabled={saving || !name.trim()}
-                    className="flex items-center gap-1.5 text-sm font-medium text-white px-3 py-1.5 rounded-md disabled:opacity-50"
+                    className="flex min-h-10 items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                     style={{ background: 'var(--rs-primary-500)' }}
                   >
                     {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
@@ -535,7 +558,7 @@ export function TaskDetailSheet({
                 {isAdmin && (
                   <button
                     onClick={handleArchive}
-                    className="flex items-center gap-1.5 text-xs text-red-500 hover:text-red-700"
+                    className="flex min-h-10 items-center justify-center gap-1.5 rounded-md px-2 text-xs text-red-500 hover:bg-red-50 hover:text-red-700 sm:justify-start"
                   >
                     <Trash2 className="w-3 h-3" /> Archive
                   </button>
@@ -561,7 +584,7 @@ export function TaskDetailSheet({
                       {(c.author_id === currentUserId || isAdmin) && (
                         <button
                           onClick={() => handleDeleteComment(c.id)}
-                          className="text-(--rs-neutral-grey-400) hover:text-red-500"
+                          className="flex h-8 w-8 items-center justify-center rounded-md text-(--rs-neutral-grey-400) hover:bg-red-50 hover:text-red-500"
                           title="Delete"
                         >
                           <X className="w-3 h-3" />
@@ -579,12 +602,12 @@ export function TaskDetailSheet({
                   onChange={e => setNewComment(e.target.value)}
                   rows={3}
                   placeholder="Write a comment…"
-                  className="w-full text-sm px-3 py-2 border border-(--rs-neutral-grey-200) rounded-md bg-white focus:outline-none focus:border-(--rs-primary-400) resize-y"
+                  className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm resize-y focus:border-(--rs-primary-400) focus:outline-none"
                 />
                 <button
                   onClick={handlePostComment}
                   disabled={postingComment || !newComment.trim()}
-                  className="flex items-center gap-1.5 text-sm font-medium text-white px-3 py-1.5 rounded-md disabled:opacity-50"
+                  className="flex min-h-10 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                   style={{ background: 'var(--rs-primary-500)' }}
                 >
                   {postingComment && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
@@ -600,9 +623,9 @@ export function TaskDetailSheet({
                 <p className="text-sm text-(--rs-neutral-grey-400) italic">No activity yet.</p>
               )}
               {activity.map(a => (
-                <div key={a.id} className="text-xs text-(--rs-neutral-grey-600) flex items-start gap-2 py-1">
-                  <span className="text-(--rs-neutral-grey-400) shrink-0 w-24">{fmt(a.created_at)}</span>
-                  <span className="font-medium text-(--rs-neutral-grey-800) shrink-0">{a.actor_name}</span>
+                <div key={a.id} className="grid gap-1 py-2 text-xs text-(--rs-neutral-grey-600) sm:flex sm:items-start sm:gap-2 sm:py-1">
+                  <span className="text-(--rs-neutral-grey-400) sm:w-24 sm:shrink-0">{fmt(a.created_at)}</span>
+                  <span className="font-medium text-(--rs-neutral-grey-800) sm:shrink-0">{a.actor_name}</span>
                   <span className="text-(--rs-neutral-grey-500)">
                     {describeActivity(a)}
                   </span>

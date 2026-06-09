@@ -45,6 +45,10 @@ export async function requireSession(): Promise<SessionUser> {
   return assertSession(await getSession());
 }
 
+export async function optionalSession(): Promise<SessionUser | null> {
+  return getSession();
+}
+
 export async function requireAdmin(): Promise<SessionUser> {
   return assertAdmin(await getSession());
 }

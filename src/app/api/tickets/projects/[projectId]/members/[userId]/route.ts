@@ -1,21 +1,19 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
 import { removeProjectMember } from '@/lib/tickets';
 import { canManageProject } from '@/lib/permissions';
+import { route, requireSession, forbidden } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
-export async function DELETE(
-  _req: Request,
-  { params }: { params: Promise<{ projectId: string; userId: string }> },
-) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+type MemberCtx = { params: Promise<{ projectId: string; userId: string }> };
+
+export const DELETE = route(async (_req: Request, ctx: MemberCtx) => {
+  const session = await requireSession();
   if (!canManageProject(session)) {
-    return NextResponse.json({ error: 'Lead+ only' }, { status: 403 });
+    throw forbidden('Lead+ only');
   }
 
-  const { projectId, userId } = await params;
+  const { projectId, userId } = await ctx.params;
   try {
     await removeProjectMember(projectId, Number(userId));
     return NextResponse.json({ ok: true });
@@ -25,4 +23,4 @@ export async function DELETE(
       { status: 502 },
     );
   }
-}
+});

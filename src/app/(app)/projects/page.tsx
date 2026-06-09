@@ -54,28 +54,28 @@ export default async function ProjectsPage({
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
+    <div className="space-y-6 overflow-x-hidden">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-2xl font-serif font-bold text-(--rs-neutral-grey-900)">Projects</h1>
-          <p className="text-(--rs-neutral-grey-500) text-sm mt-1">
+          <p className="text-(--rs-neutral-grey-500) text-sm mt-1 max-w-2xl">
             {effectiveTeam
               ? `Showing ${effectiveTeam} team projects.`
               : 'All active projects in the Romega Solutions workspace.'}
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end sm:flex-wrap">
           {showToggle && (
-            <div className="inline-flex border border-(--rs-neutral-grey-200) rounded-md overflow-hidden text-xs">
+            <div className="grid grid-cols-2 overflow-hidden rounded-md border border-(--rs-neutral-grey-200) text-xs sm:inline-flex">
               <Link
                 href="/projects"
-                className={`px-3 py-1.5 ${onMyTeam ? 'bg-(--rs-primary-500) text-white' : 'bg-white text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-50)'}`}
+                className={`flex min-h-10 items-center justify-center px-3 py-2 text-center transition-colors ${onMyTeam ? 'bg-(--rs-primary-500) text-white' : 'bg-white text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-50)'}`}
               >
                 My team ({session!.team})
               </Link>
               <Link
                 href="/projects?team=all"
-                className={`px-3 py-1.5 border-l border-(--rs-neutral-grey-200) ${!onMyTeam ? 'bg-(--rs-primary-500) text-white' : 'bg-white text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-50)'}`}
+                className={`flex min-h-10 items-center justify-center border-l border-(--rs-neutral-grey-200) px-3 py-2 text-center transition-colors ${!onMyTeam ? 'bg-(--rs-primary-500) text-white' : 'bg-white text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-50)'}`}
               >
                 All teams
               </Link>
@@ -100,19 +100,19 @@ export default async function ProjectsPage({
         <p className="text-(--rs-neutral-grey-500) italic text-sm">No projects found in workspace.</p>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {projects.map(p => {
           const s = stats[p.id] ?? { total: 0, open: 0, done: 0 };
           const pct = s.total > 0 ? Math.round((s.done / s.total) * 100) : 0;
           return (
-            <Link key={p.id} href={`/projects/${p.id}`}>
-              <Card className="hover:border-(--rs-primary-300) transition-colors cursor-pointer border-t-4 border-t-(--rs-primary-500) h-full">
+            <Link key={p.id} href={`/projects/${p.id}`} className="block h-full min-w-0">
+              <Card className="h-full cursor-pointer border-t-4 border-t-(--rs-primary-500) transition-colors hover:border-(--rs-primary-300)">
                 <CardHeader className="pb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center justify-center w-8 h-8 rounded bg-(--rs-primary-100) text-(--rs-primary-700) text-xs font-bold shrink-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded bg-(--rs-primary-100) text-xs font-bold text-(--rs-primary-700)">
                       {p.identifier}
                     </span>
-                    <CardTitle className="text-base font-bold text-(--rs-neutral-grey-900) leading-tight">
+                    <CardTitle className="min-w-0 text-base font-bold leading-tight text-(--rs-neutral-grey-900)">
                       {p.name}
                     </CardTitle>
                   </div>
@@ -121,7 +121,7 @@ export default async function ProjectsPage({
                   {p.description && (
                     <p className="text-xs text-(--rs-neutral-grey-500) line-clamp-2">{p.description}</p>
                   )}
-                  <div className="flex items-center gap-4 text-sm">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
                     <span className="text-(--rs-neutral-grey-500)">
                       <span className="font-semibold text-(--rs-neutral-grey-900)">{s.total}</span> tasks
                     </span>

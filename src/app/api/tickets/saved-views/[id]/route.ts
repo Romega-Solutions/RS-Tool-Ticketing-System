@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
 import { deleteSavedView } from '@/lib/tickets';
+import { route, requireSession } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const DELETE = route(async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const session = await requireSession();
   const { id } = await params;
   try {
     await deleteSavedView(id, session.id);
@@ -17,4 +16,4 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
       { status: 502 },
     );
   }
-}
+});

@@ -1,14 +1,26 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
+import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { canAccessReports, canAccessAdmin } from '@/lib/rbac';
 import { getPhotoResolver } from '@/lib/orgchart';
+import { route, requireAdmin, requireReports, parseBody, badRequest } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
 const VALID_STATUSES = new Set(['present', 'absent', 'wfh', 'leave', '']);
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
 const DAY_COLS = ['monday_status', 'tuesday_status', 'wednesday_status', 'thursday_status', 'friday_status', 'saturday_status', 'sunday_status'] as const;
+
+const attendancePostSchema = z.object({
+  weekStart: z.string().optional(),
+  monday: z.unknown().optional(),
+  tuesday: z.unknown().optional(),
+  wednesday: z.unknown().optional(),
+  thursday: z.unknown().optional(),
+  friday: z.unknown().optional(),
+  saturday: z.unknown().optional(),
+  sunday: z.unknown().optional(),
+  notes: z.string().optional(),
+});
 
 function toLocalISO(d: Date): string {
   const y = d.getFullYear();
@@ -82,10 +94,8 @@ type AttendanceRow = {
   submitted_at: string | null;
 };
 
-export async function GET(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!canAccessReports(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+export const GET = route(async (req: Request) => {
+  const session = await requireReports();
 
   const { searchParams } = new URL(req.url);
   const admin = createAdminClient();
@@ -175,10 +185,10 @@ export async function GET(req: Request) {
   }
 
   const weekParam = searchParams.get('week');
-  if (!weekParam) return NextResponse.json({ error: 'week or month parameter required' }, { status: 400 });
+  if (!weekParam) throw badRequest('week or month parameter required');
 
   const weekStart = getMondayOfWeek(weekParam);
-  if (!weekStart) return NextResponse.json({ error: 'week must be a Monday date (YYYY-MM-DD)' }, { status: 400 });
+  if (!weekStart) throw badRequest('week must be a Monday date (YYYY-MM-DD)');
 
   const { data: rawRecordsData } = await admin
     .from('attendance')
@@ -242,31 +252,27 @@ export async function GET(req: Request) {
     }));
 
   return NextResponse.json({ weekStart, records, users: usersOut, timesheetsByDay });
-}
+});
 
 // Attendance edits are admin-only. This legacy self-submit path has no UI caller;
 // the live edit surface is PATCH /api/admin/attendance. Gating it to admins keeps
 // the "edits come from Admin" model intact and closes the only un-gated write path.
-export async function POST(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!canAccessAdmin(session.role)) return NextResponse.json({ error: 'Admins only' }, { status: 403 });
-
-  const body = await req.json() as {
-    weekStart: string;
-    monday?: string; tuesday?: string; wednesday?: string; thursday?: string; friday?: string;
-    saturday?: string; sunday?: string;
-    notes?: string;
-  };
+export const POST = route(async (req: Request) => {
+  const session = await requireAdmin();
+  const body = await parseBody(req, attendancePostSchema);
 
   const weekStart = getMondayOfWeek(body.weekStart ?? '');
-  if (!weekStart) return NextResponse.json({ error: 'weekStart must be a Monday (YYYY-MM-DD)' }, { status: 400 });
+  if (!weekStart) throw badRequest('weekStart must be a Monday (YYYY-MM-DD)');
 
   const dayValues: Record<string, string | null> = {};
   for (const day of DAYS) {
-    const val = (body[day] ?? '').toLowerCase();
+    const raw = body[day];
+    if (raw !== undefined && typeof raw !== 'string') {
+      throw badRequest(`Invalid status for ${day}`);
+    }
+    const val = (raw ?? '').toLowerCase();
     if (!VALID_STATUSES.has(val)) {
-      return NextResponse.json({ error: `Invalid status for ${day}` }, { status: 400 });
+      throw badRequest(`Invalid status for ${day}`);
     }
     dayValues[day] = val || null;
   }
@@ -300,4 +306,4 @@ export async function POST(req: Request) {
 
   await admin.from('attendance').insert({ user_id: session.id, week_start: weekStart, ...payload });
   return NextResponse.json({ success: true, action: 'created' });
-}
+});

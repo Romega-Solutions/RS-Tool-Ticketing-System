@@ -45,21 +45,21 @@ export default async function ProjectBoardPage({
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
+    <div className="space-y-5 overflow-x-hidden">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-2xl font-serif font-bold text-(--rs-neutral-grey-900)">
             {projectName || 'Project Board'}
           </h1>
-          <p className="text-(--rs-neutral-grey-500) text-sm mt-1">
+          <p className="text-(--rs-neutral-grey-500) text-sm mt-1 max-w-2xl">
             {items.length} work item{items.length !== 1 ? 's' : ''}
-            {!loadError && ' · Drag cards to move between states · Click + to add a task'}
+            {!loadError && ' · Scroll sideways to review states · Drag cards to move them'}
           </p>
         </div>
         {canManageProject(session) && (
           <Link
             href={`/projects/${id}/settings`}
-            className="flex items-center gap-1.5 text-sm text-(--rs-neutral-grey-600) hover:text-(--rs-primary-700) px-3 py-1.5 rounded-md border border-(--rs-neutral-grey-200) hover:border-(--rs-primary-300) bg-white"
+            className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm text-(--rs-neutral-grey-600) transition-colors hover:border-(--rs-primary-300) hover:text-(--rs-primary-700)"
           >
             <Settings className="w-3.5 h-3.5" /> Settings
           </Link>
@@ -80,7 +80,7 @@ export default async function ProjectBoardPage({
       )}
 
       {states.length > 0 && (
-        <div className="overflow-x-auto pb-2">
+        <div className="max-w-full overflow-hidden">
           <KanbanBoard
             states={states}
             initialItems={items}

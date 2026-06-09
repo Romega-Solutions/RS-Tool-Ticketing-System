@@ -1,16 +1,15 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getOnline, getMyEntry, clockIn } from '@/lib/presence';
 import { getPhotoResolver } from '@/lib/orgchart';
 import { weeklySecondsForUser, enforceUserOpenSession, maybeSweepOpenSessions } from '@/lib/overtime-server';
 import type { AppRole } from '@/lib/rbac';
+import { route, requireSession } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
-export async function GET() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = route(async () => {
+  const session = await requireSession();
 
   const admin = createAdminClient();
   const now = new Date();
@@ -57,4 +56,4 @@ export async function GET() {
   }
 
   return NextResponse.json({ online, openSession, weekSecondsBefore });
-}
+});

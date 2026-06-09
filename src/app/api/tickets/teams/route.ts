@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
 import { getCanonicalTeams, mapOrgDeptToAppTeam } from '@/lib/orgchart';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { route, requireSession } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -10,9 +10,8 @@ export const runtime = 'nodejs';
 // of truth), merged with any team values currently present on active users
 // or projects so the dropdown can still represent legacy values until those
 // rows are migrated.
-export async function GET() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = route(async () => {
+  await requireSession();
 
   const canonical = await getCanonicalTeams();
   const set = new Set<string>(canonical);
@@ -31,4 +30,4 @@ export async function GET() {
   }
 
   return NextResponse.json([...set].sort((a, b) => a.localeCompare(b)));
-}
+});

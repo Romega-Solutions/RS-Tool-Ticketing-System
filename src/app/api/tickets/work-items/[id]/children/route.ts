@@ -1,19 +1,18 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
 import { getChildren, getWorkItemDetail } from '@/lib/tickets';
 import { canViewProject } from '@/lib/permissions';
+import { route, requireSession, forbidden, notFound } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = route(async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
+  const session = await requireSession();
 
   const { id } = await params;
   const parent = await getWorkItemDetail(id);
-  if (!parent) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (!parent) throw notFound();
   if (!(await canViewProject(session, parent.project_id))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    throw forbidden();
   }
   return NextResponse.json(await getChildren(id));
-}
+});

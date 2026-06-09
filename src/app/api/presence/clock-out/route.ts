@@ -1,15 +1,14 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clockOut } from '@/lib/presence';
 import { computeOvertime } from '@/lib/utils';
 import { weeklySecondsForUser } from '@/lib/overtime-server';
+import { route, requireSession, badRequest } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
-export async function POST() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const POST = route(async () => {
+  const session = await requireSession();
 
   const admin = createAdminClient();
   const { data: open } = await admin
@@ -20,7 +19,7 @@ export async function POST() {
     .maybeSingle();
 
   if (!open) {
-    return NextResponse.json({ error: 'No open clock-in session found' }, { status: 400 });
+    throw badRequest('No open clock-in session found');
   }
 
   const nowDate = new Date();
@@ -44,4 +43,4 @@ export async function POST() {
   clockOut(session.id);
 
   return NextResponse.json({ durationSeconds, clockedOutAt: now, isOvertime, overtimeSeconds });
-}
+});

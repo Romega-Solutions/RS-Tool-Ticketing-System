@@ -1,14 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
-import { canAccessReports } from '@/lib/rbac';
 import { getWorkspaceMembers } from '@/lib/tickets';
+import { route, requireReports } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
-export async function GET() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!canAccessReports(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+export const GET = route(async () => {
+  await requireReports();
 
   try {
     const members = await getWorkspaceMembers();
@@ -19,4 +16,4 @@ export async function GET() {
       { status: 500 },
     );
   }
-}
+});

@@ -1,27 +1,31 @@
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { route, parseBody, badRequest, unauthorized } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
-export async function POST(req: Request) {
+const onboardingSchema = z.object({
+  name: z.string().nullable().optional(),
+  team: z.string().nullable().optional(),
+  jobTitle: z.string().nullable().optional(),
+  role: z.string().nullable().optional(),
+});
+
+export const POST = route(async (req: Request) => {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!user?.email) throw unauthorized();
 
-  const body = await req.json() as {
-    name?: string;
-    team?: string;
-    jobTitle?: string;
-    role?: string;
-  };
+  const body = await parseBody(req, onboardingSchema);
 
   const name     = body.name?.trim() ?? '';
   const team     = body.team?.trim() || null;
   const jobTitle = body.jobTitle?.trim() || null;
   const role     = body.role?.trim() || 'ic';
 
-  if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+  if (!name) throw badRequest('Name is required');
 
   const email = user.email;
 
@@ -73,4 +77,4 @@ export async function POST(req: Request) {
   }
 
   return NextResponse.json({ success: true });
-}
+});

@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildStateLookup,
+  describeDashboardActivity,
   enrichWorkItems,
   getStateGroup,
   isActiveGroup,
   isBacklogGroup,
   isCompletedGroup,
+  type DashboardActivityEntry,
   type PlaneState,
   type PlaneWorkItem,
 } from '@/lib/tickets';
@@ -61,5 +63,55 @@ describe('group predicates', () => {
       state_detail: { id: 's', name: 'D', group: 'Completed', color: '#0' },
       priority: 'none', assignees: [], created_at: '', updated_at: '',
     })).toBe('completed');
+  });
+});
+
+describe('describeDashboardActivity', () => {
+  const baseActivity: DashboardActivityEntry = {
+    id: 1,
+    actor_id: 42,
+    actor_name: 'Ken Patrick Garcia',
+    action: 'created',
+    from_value: null,
+    to_value: '[Workspace - Projects] Activity Feature',
+    created_at: '2026-06-09T08:30:00.000Z',
+    work_item_id: 9,
+    task_sequence_id: 4,
+    task_name: '[Workspace - Projects] Activity Feature',
+    project_id: 3,
+    project_identifier: 'RS',
+    project_name: 'RS Tool Ticketing System',
+    from_state_name: null,
+    to_state_name: null,
+  };
+
+  it('describes a task created activity for the dashboard feed', () => {
+    expect(describeDashboardActivity(baseActivity)).toBe(
+      'created RS-4 [Workspace - Projects] Activity Feature',
+    );
+  });
+
+  it('describes a task movement activity with state names', () => {
+    expect(describeDashboardActivity({
+      ...baseActivity,
+      action: 'state_changed',
+      from_value: '11',
+      to_value: '12',
+      from_state_name: 'To Do',
+      to_state_name: 'In Progress',
+    })).toBe(
+      'moved RS-4 [Workspace - Projects] Activity Feature from To Do to In Progress',
+    );
+  });
+
+  it('falls back to raw state values when state names are unavailable', () => {
+    expect(describeDashboardActivity({
+      ...baseActivity,
+      action: 'state_changed',
+      from_value: '11',
+      to_value: '12',
+    })).toBe(
+      'moved RS-4 [Workspace - Projects] Activity Feature from 11 to 12',
+    );
   });
 });

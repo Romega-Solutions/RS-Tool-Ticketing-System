@@ -1,34 +1,37 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
+import { z } from 'zod';
 import { getCycles, createCycle } from '@/lib/tickets';
 import { canViewProject, canManageProject } from '@/lib/permissions';
+import { route, requireSession, parseBody, badRequest, forbidden } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
-export async function GET(_req: Request, { params }: { params: Promise<{ projectId: string }> }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+const cycleSchema = z.object({
+  name: z.string().nullable().optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+});
+
+export const GET = route(async (_req: Request, { params }: { params: Promise<{ projectId: string }> }) => {
+  const session = await requireSession();
   const { projectId } = await params;
   if (!(await canViewProject(session, Number(projectId)))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    throw forbidden();
   }
   return NextResponse.json(await getCycles(projectId));
-}
+});
 
-export async function POST(req: Request, { params }: { params: Promise<{ projectId: string }> }) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const POST = route(async (req: Request, { params }: { params: Promise<{ projectId: string }> }) => {
+  const session = await requireSession();
   if (!canManageProject(session)) {
-    return NextResponse.json({ error: 'Lead+ only' }, { status: 403 });
+    throw forbidden('Lead+ only');
   }
 
-  let body: { name?: string; startDate?: string; endDate?: string } = {};
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }); }
+  const body = await parseBody(req, cycleSchema);
 
   const name = (body.name ?? '').trim();
   if (!name || !body.startDate || !body.endDate) {
-    return NextResponse.json({ error: 'name, startDate, endDate required' }, { status: 400 });
+    throw badRequest('name, startDate, endDate required');
   }
 
   const { projectId } = await params;
@@ -42,4 +45,4 @@ export async function POST(req: Request, { params }: { params: Promise<{ project
       { status: 502 },
     );
   }
-}
+});

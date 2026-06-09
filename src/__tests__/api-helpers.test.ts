@@ -11,6 +11,7 @@ import {
   assertSession,
   assertAdmin,
   parseBody,
+  parseOptionalBody,
   route,
 } from '@/lib/api';
 import type { SessionUser } from '@/lib/session';
@@ -102,6 +103,23 @@ describe('parseBody', () => {
     await expect(parseBody(reqWith(JSON.stringify({ name: '' })), schema)).rejects.toMatchObject({
       status: 400,
     });
+  });
+});
+
+describe('parseOptionalBody', () => {
+  const schema = z.object({ name: z.string().optional() });
+  const reqWith = (body: string) =>
+    new Request('http://t/x', { method: 'POST', body, headers: { 'content-type': 'application/json' } });
+
+  it('uses the fallback value when the optional body is malformed', async () => {
+    const data = await parseOptionalBody(reqWith('{not json'), schema);
+    expect(data).toEqual({});
+  });
+
+  it('still validates present optional bodies', async () => {
+    await expect(
+      parseOptionalBody(reqWith(JSON.stringify({ name: 123 })), schema),
+    ).rejects.toMatchObject({ status: 400 });
   });
 });
 

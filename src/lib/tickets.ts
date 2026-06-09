@@ -474,6 +474,17 @@ export interface WorkItemActivityEntry {
   created_at: string;
 }
 
+export interface DashboardActivityEntry extends WorkItemActivityEntry {
+  work_item_id: number;
+  task_sequence_id: number;
+  task_name: string;
+  project_id: number;
+  project_identifier: string;
+  project_name: string;
+  from_state_name: string | null;
+  to_state_name: string | null;
+}
+
 export async function logActivity(
   workItemId: number,
   actorId: number,
@@ -507,6 +518,111 @@ export async function getActivity(itemId: string): Promise<WorkItemActivityEntry
     to_value:   (r.to_value as string | null) ?? null,
     created_at: String(r.created_at),
   }));
+}
+
+function firstNestedRow(value: unknown): Row | null {
+  if (Array.isArray(value)) {
+    const first = value[0];
+    return first && typeof first === 'object' ? first as Row : null;
+  }
+  return value && typeof value === 'object' ? value as Row : null;
+}
+
+function normalizeActivityLimit(limit: number): number {
+  if (!Number.isFinite(limit)) return 8;
+  return Math.min(Math.max(Math.trunc(limit), 1), 20);
+}
+
+function collectStateIds(rows: Row[]): number[] {
+  const ids = new Set<number>();
+  for (const row of rows) {
+    if (String(row.action) !== 'state_changed') continue;
+    for (const key of ['from_value', 'to_value']) {
+      const value = row[key];
+      if (typeof value !== 'string' || value.trim() === '') continue;
+      const id = Number(value);
+      if (Number.isFinite(id)) ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
+function mapDashboardActivityRow(
+  row: Row,
+  stateNames: Map<string, string>,
+): DashboardActivityEntry | null {
+  const workItem = firstNestedRow(row.work_items);
+  if (!workItem || Number(workItem.archived ?? 0) === 1) return null;
+
+  const project = firstNestedRow(workItem.projects);
+  if (!project || Number(project.archived ?? 0) === 1) return null;
+
+  const actor = firstNestedRow(row.users);
+  const fromValue = (row.from_value as string | null) ?? null;
+  const toValue = (row.to_value as string | null) ?? null;
+
+  return {
+    id: Number(row.id),
+    actor_id: Number(row.actor_id),
+    actor_name: String(actor?.name ?? 'Unknown'),
+    action: String(row.action),
+    from_value: fromValue,
+    to_value: toValue,
+    created_at: String(row.created_at),
+    work_item_id: Number(row.work_item_id),
+    task_sequence_id: Number(workItem.sequence_id ?? 0),
+    task_name: String(workItem.name ?? ''),
+    project_id: Number(workItem.project_id),
+    project_identifier: String(project.identifier ?? ''),
+    project_name: String(project.name ?? ''),
+    from_state_name: fromValue ? stateNames.get(fromValue) ?? null : null,
+    to_state_name: toValue ? stateNames.get(toValue) ?? null : null,
+  };
+}
+
+export function describeDashboardActivity(a: DashboardActivityEntry): string {
+  const taskRef = `${a.project_identifier}-${a.task_sequence_id}`;
+  const taskLabel = `${taskRef} ${a.task_name}`.trim();
+
+  switch (a.action) {
+    case 'created':
+      return `created ${taskLabel}`;
+    case 'state_changed':
+      return `moved ${taskLabel} from ${a.from_state_name ?? a.from_value ?? 'No state'} to ${a.to_state_name ?? a.to_value ?? 'No state'}`;
+    default:
+      return a.action;
+  }
+}
+
+export async function getDashboardProjectActivity(limit = 8): Promise<DashboardActivityEntry[]> {
+  const sb = createAdminClient();
+  const cappedLimit = normalizeActivityLimit(limit);
+
+  const { data, error } = await sb.from('work_item_activity')
+    .select('id, work_item_id, actor_id, action, from_value, to_value, created_at, users(name), work_items!inner(id, project_id, sequence_id, name, archived, projects(id, name, identifier, archived))')
+    .in('action', ['created', 'state_changed'])
+    .order('created_at', { ascending: false })
+    .limit(cappedLimit * 3);
+  if (error) throw new PlaneApiError(500, 'dashboard-activity');
+
+  const rows = (data ?? []) as Row[];
+  const stateIds = collectStateIds(rows);
+  const stateNames = new Map<string, string>();
+
+  if (stateIds.length > 0) {
+    const { data: states, error: statesError } = await sb.from('project_states')
+      .select('id, name')
+      .in('id', stateIds);
+    if (statesError) throw new PlaneApiError(500, 'dashboard-activity/states');
+    for (const state of (states ?? []) as Row[]) {
+      stateNames.set(String(state.id), String(state.name));
+    }
+  }
+
+  return rows
+    .map(row => mapDashboardActivityRow(row, stateNames))
+    .filter((entry): entry is DashboardActivityEntry => entry !== null)
+    .slice(0, cappedLimit);
 }
 
 /** Diff a WorkItemPatch against the prior detail, returning activity rows to log. */

@@ -1,14 +1,13 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { route, requireSession } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
 // GET /api/tickets/users — list active workspace users for the member picker.
 // Returned shape is intentionally minimal (id, name, email).
-export async function GET() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = route(async () => {
+  await requireSession();
 
   const sb = createAdminClient();
   const { data, error } = await sb.from('users')
@@ -17,4 +16,4 @@ export async function GET() {
     .order('name');
   if (error) return NextResponse.json({ error: 'Failed' }, { status: 500 });
   return NextResponse.json(data ?? []);
-}
+});

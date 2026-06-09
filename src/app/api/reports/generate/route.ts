@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs';
-import { getSession } from '@/lib/session';
+import { z } from 'zod';
 import { canAccessReports } from '@/lib/rbac';
 import {
   getProjects,
@@ -9,8 +9,15 @@ import {
   enrichWorkItems,
   PlaneWorkItem,
 } from '@/lib/tickets';
+import { route, requireSession, parseOptionalBody, badRequest } from '@/lib/api';
 
 export const runtime = 'nodejs';
+
+const generateReportSchema = z.object({
+  targetMemberId: z.string().optional(),
+  targetMemberName: z.string().optional(),
+  week: z.string().optional(),
+});
 
 // ── Styling constants ──────────────────────────────────────────────────────────
 
@@ -271,14 +278,12 @@ function buildSheet(
 
 // ── Route handler ──────────────────────────────────────────────────────────────
 
-export async function POST(req: Request) {
+export const POST = route(async (req: Request) => {
   // Auth
-  const session = await getSession();
-  if (!session) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  const session = await requireSession();
 
   // Body
-  let body: { targetMemberId?: string; targetMemberName?: string; week?: string } = {};
-  try { body = await req.json(); } catch { /* no body */ }
+  const body = await parseOptionalBody(req, generateReportSchema);
 
   // Resolve member: leads/admins pick any member; ICs generate for themselves
   let memberId: string;
@@ -288,7 +293,7 @@ export async function POST(req: Request) {
     memberId = body.targetMemberId?.trim() ?? '';
     memberName = body.targetMemberName?.trim() || 'Unknown';
     if (!memberId) {
-      return Response.json({ error: 'targetMemberId is required.' }, { status: 400 });
+      throw badRequest('targetMemberId is required.');
     }
   } else {
     memberId = String(session.id);
@@ -369,4 +374,4 @@ export async function POST(req: Request) {
       'Content-Disposition': `attachment; filename="${filename}"`,
     },
   });
-}
+});

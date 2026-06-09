@@ -1,10 +1,9 @@
-import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { subscribeToLive, unsubscribeFromLive, getAllOnline, seedUsers, type PresenceUser } from '@/lib/presence';
 import { getPhotoResolver } from '@/lib/orgchart';
 import { weeklySecondsForUsers } from '@/lib/overtime-server';
 import type { AppRole } from '@/lib/rbac';
+import { route, requireSession } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -52,9 +51,8 @@ async function hydrateFromDB(): Promise<void> {
   }
 }
 
-export async function GET() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = route(async () => {
+  const session = await requireSession();
 
   const enc = new TextEncoder();
 
@@ -83,4 +81,4 @@ export async function GET() {
       'X-Accel-Buffering': 'no',
     },
   });
-}
+});

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
 import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems, isCompletedGroup } from '@/lib/tickets';
+import { route, requireSession, badRequest } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -14,14 +14,13 @@ function parseWeekRange(weekStart: string): { start: Date; end: Date } | null {
 
 // GET /api/weekly-report/plane-data?week=YYYY-MM-DD
 // (path kept for backwards compat; data now comes from the internal tickets DB.)
-export async function GET(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = route(async (req: Request) => {
+  const session = await requireSession();
 
   const { searchParams } = new URL(req.url);
   const weekParam = searchParams.get('week') ?? '';
   const range = parseWeekRange(weekParam);
-  if (!range) return NextResponse.json({ error: 'week required (YYYY-MM-DD)' }, { status: 400 });
+  if (!range) throw badRequest('week required (YYYY-MM-DD)');
 
   try {
     const projects = await getProjects();
@@ -68,4 +67,4 @@ export async function GET(req: Request) {
       { status: 502 },
     );
   }
-}
+});

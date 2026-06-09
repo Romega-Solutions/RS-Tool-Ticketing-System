@@ -1,10 +1,19 @@
 import { Suspense } from 'react';
 import { getSession } from '@/lib/session';
-import { getProjects, getProjectStates, getWorkspaceMembers, getWorkItems, buildStateLookup, enrichWorkItems } from '@/lib/tickets';
+import {
+  describeDashboardActivity,
+  getDashboardProjectActivity,
+  getProjects,
+  getProjectStates,
+  getWorkspaceMembers,
+  getWorkItems,
+  buildStateLookup,
+  enrichWorkItems,
+} from '@/lib/tickets';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, Clock, Users, FileText } from "lucide-react";
+import { Activity, AlertCircle, Clock, Users, FileText } from "lucide-react";
 import Link from 'next/link';
 import { HoursChart } from '@/components/hours-chart';
 import { FxRateWidget } from '@/components/fx-rate-widget';
@@ -13,6 +22,18 @@ import { LearningBanner } from '@/components/lms/learning-banner';
 
 function stateGroup(item: { state_detail?: { group?: string } }) {
   return (item.state_detail?.group ?? '').toLowerCase();
+}
+
+function formatActivityTime(ts: string): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 const PRIORITY_ICON: Record<string, string> = {
@@ -300,27 +321,39 @@ type ItemMeta = {
 async function TicketsSection({ userId, userEmail }: { userId: string | null; userEmail: string | null }) {
   let projects: Awaited<ReturnType<typeof getProjects>> = [];
   let members: Awaited<ReturnType<typeof getWorkspaceMembers>> = [];
+  let recentActivity: Awaited<ReturnType<typeof getDashboardProjectActivity>> = [];
   let allItems: ItemMeta[] = [];
   let loadError: string | null = null;
+  let activityError: string | null = null;
 
   try {
     [projects, members] = await Promise.all([getProjects(), getWorkspaceMembers()]);
-    const byProject = await Promise.all(
-      projects.map(async p => {
-        const [items, states] = await Promise.all([
-          getWorkItems(p.id),
-          getProjectStates(p.id),
-        ]);
-        const lookup = buildStateLookup(states);
-        return enrichWorkItems(items, lookup).map(i => ({
-          ...i,
-          _projectId: p.id,
-          _projectName: p.name,
-          _projectIdentifier: p.identifier,
-        }));
-      })
-    );
+    const [byProject, activityRows] = await Promise.all([
+      Promise.all(
+        projects.map(async p => {
+          const [items, states] = await Promise.all([
+            getWorkItems(p.id),
+            getProjectStates(p.id),
+          ]);
+          const lookup = buildStateLookup(states);
+          return enrichWorkItems(items, lookup).map(i => ({
+            ...i,
+            _projectId: p.id,
+            _projectName: p.name,
+            _projectIdentifier: p.identifier,
+          }));
+        }),
+      ),
+      getDashboardProjectActivity(6)
+        .then(rows => ({ rows, error: null as string | null }))
+        .catch(err => ({
+          rows: [],
+          error: err instanceof Error ? err.message : 'Failed to load activity',
+        })),
+    ]);
     allItems = byProject.flat();
+    recentActivity = activityRows.rows;
+    activityError = activityRows.error;
   } catch (err) {
     loadError = err instanceof Error ? err.message : 'Failed to load workspace data';
   }
@@ -424,6 +457,54 @@ async function TicketsSection({ userId, userEmail }: { userId: string | null; us
           </Link>
         ))}
       </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardTitle className="text-lg font-serif flex items-center gap-2">
+            <Activity className="w-5 h-5 text-(--rs-primary-500)" /> Recent Project Activity
+          </CardTitle>
+          <Link href="/projects" className="text-sm text-(--rs-primary-500) hover:text-(--rs-primary-700) font-medium transition-colors">
+            View projects
+          </Link>
+        </CardHeader>
+        <CardContent>
+          {activityError ? (
+            <p className="text-sm text-red-500">Could not load recent activity.</p>
+          ) : recentActivity.length === 0 ? (
+            <p className="text-sm text-(--rs-neutral-grey-400) italic">No recent project activity.</p>
+          ) : (
+            <div className="divide-y divide-(--rs-neutral-grey-100)">
+              {recentActivity.map(entry => (
+                <Link
+                  key={entry.id}
+                  href={`/projects/${entry.project_id}`}
+                  className="flex items-start gap-3 py-3 first:pt-0 last:pb-0 rounded-md transition-colors hover:bg-(--rs-neutral-grey-50) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300)"
+                >
+                  <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-(--rs-primary-50) text-(--rs-primary-600)">
+                    <Activity className="w-4 h-4" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="text-xs font-semibold text-(--rs-neutral-grey-800)">
+                        {entry.actor_name}
+                      </span>
+                      <span className="text-xs text-(--rs-neutral-grey-400)">
+                        {formatActivityTime(entry.created_at)}
+                      </span>
+                    </span>
+                    <span className="block text-sm text-(--rs-neutral-grey-700) leading-snug mt-0.5">
+                      {describeDashboardActivity(entry)}
+                    </span>
+                    <span className="block text-xs text-(--rs-neutral-grey-400) truncate mt-0.5">
+                      {entry.project_identifier} · {entry.project_name}
+                    </span>
+                  </span>
+                </Link>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* My Tasks + Deadlines */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

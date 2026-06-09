@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
 import { lookupPerson } from '@/lib/orgchart';
+import { route, requireSession } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = route(async (request: NextRequest) => {
+  await requireSession();
 
   const email = request.nextUrl.searchParams.get('email')?.trim() ?? '';
   const name  = request.nextUrl.searchParams.get('name')?.trim()  ?? '';
@@ -19,4 +18,4 @@ export async function GET(request: NextRequest) {
   });
 
   return NextResponse.json({ match });
-}
+});
