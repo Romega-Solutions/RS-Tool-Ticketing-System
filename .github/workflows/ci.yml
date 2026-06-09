@@ -1,0 +1,53 @@
+name: CI
+
+# Runs lint, tests, and a production build on every PR into main and on
+# pushes to main. This is the gate the project was missing — nothing ran
+# `npm run verify` / `npm test` automatically before a merge.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel an in-progress run when new commits land on the same ref.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint · Test · Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+        env:
+          # The app is designed to build without live secrets:
+          #   - src/db/index.ts falls back to a placeholder URL when DATABASE_URL is absent
+          #   - src/lib/supabase/config.ts guards missing Supabase config
+          # These browser-safe placeholders keep `next build` deterministic in CI.
+          # If a build step ever needs real values, add them as GitHub repo secrets
+          # and reference them here (e.g. ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}).
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+          NEXT_PUBLIC_BASE_URL: http://localhost:3000
