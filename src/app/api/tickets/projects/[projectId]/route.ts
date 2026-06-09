@@ -11,7 +11,7 @@ import { route, requireSession, parseBody, forbidden } from '@/lib/api';
 export const runtime = 'nodejs';
 
 const patchProjectSchema = z.object({
-  name: z.string().optional(),
+  name: z.string().trim().min(1, 'Project name cannot be blank').optional(),
   description: z.string().nullable().optional(),
   team: z.string().nullable().optional(),
 });

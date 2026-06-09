@@ -1,4 +1,4 @@
-import { Suspense } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { getSession } from '@/lib/session';
 import {
   describeDashboardActivity,
@@ -13,7 +13,7 @@ import {
 import { createAdminClient } from '@/lib/supabase/admin';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Activity, AlertCircle, Clock, Users, FileText } from "lucide-react";
+import { Activity, AlertCircle, ArrowRight, CalendarDays, CheckCircle2, Circle, Clock, FileText, Flag, Users } from "lucide-react";
 import Link from 'next/link';
 import { HoursChart } from '@/components/hours-chart';
 import { FxRateWidget } from '@/components/fx-rate-widget';
@@ -36,8 +36,12 @@ function formatActivityTime(ts: string): string {
   });
 }
 
-const PRIORITY_ICON: Record<string, string> = {
-  urgent: '🔴', high: '🔴', medium: '🟡', low: '🟢', none: '⚪',
+const PRIORITY_TONE: Record<string, { label: string; dot: string; text: string }> = {
+  urgent: { label: 'Urgent', dot: 'bg-red-500', text: 'text-red-600' },
+  high:   { label: 'High', dot: 'bg-orange-500', text: 'text-orange-600' },
+  medium: { label: 'Medium', dot: 'bg-yellow-500', text: 'text-yellow-700' },
+  low:    { label: 'Low', dot: 'bg-green-500', text: 'text-green-600' },
+  none:   { label: 'No priority', dot: 'bg-slate-300', text: 'text-(--rs-neutral-grey-500)' },
 };
 
 function getWeekStart(): string {
@@ -69,7 +73,24 @@ export default async function DashboardPage() {
   const isFriday = new Date().getDay() === 5;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 overflow-x-hidden">
+      <section className="rounded-xl border border-(--rs-neutral-grey-200) bg-white px-4 py-4 sm:px-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-serif font-bold text-(--rs-neutral-grey-900)">Dashboard</h1>
+            <p className="mt-1 max-w-2xl text-sm text-(--rs-neutral-grey-500)">
+              Start with urgent work, then review team health, hours, and workspace activity.
+            </p>
+          </div>
+          <Link
+            href="/projects"
+            className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm font-medium text-(--rs-primary-700) transition-colors hover:border-(--rs-primary-300) hover:bg-(--rs-primary-50)"
+          >
+            Projects <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </div>
+      </section>
+
       {isFriday && (
         <div className="bg-(--rs-accent-100) border border-(--rs-accent-300) text-(--rs-accent-800) px-4 py-3 rounded-lg flex items-center gap-3 font-medium text-sm">
           <AlertCircle className="w-4 h-4 shrink-0" />
@@ -77,20 +98,17 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      <FxRateWidget />
-
-      <WeeklyHoursCard />
-
       <Suspense fallback={null}>
         <LearningBanner />
       </Suspense>
 
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr]">
+        <FxRateWidget />
+        <WeeklyHoursCard />
+      </div>
+
       <Suspense fallback={<SummarySkeleton />}>
         <SummarySection />
-      </Suspense>
-
-      <Suspense fallback={<HoursSkeleton />}>
-        <HoursSection userId={sessionUser?.id ?? null} />
       </Suspense>
 
       <Suspense fallback={<TicketsSkeleton />}>
@@ -98,6 +116,10 @@ export default async function DashboardPage() {
           userId={sessionUser ? String(sessionUser.id) : null}
           userEmail={sessionUser?.email ?? null}
         />
+      </Suspense>
+
+      <Suspense fallback={<HoursSkeleton />}>
+        <HoursSection userId={sessionUser?.id ?? null} />
       </Suspense>
     </div>
   );
@@ -318,6 +340,28 @@ type ItemMeta = {
   _projectIdentifier: string;
 };
 
+function PriorityBadge({ priority }: { priority: string }) {
+  const tone = PRIORITY_TONE[priority] ?? PRIORITY_TONE.none;
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${tone.text}`}>
+      <span className={`h-2 w-2 rounded-full ${tone.dot}`} aria-hidden="true" />
+      {tone.label}
+    </span>
+  );
+}
+
+function SectionHeading({ id, title, description, action }: { id: string; title: string; description: string; action?: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div className="min-w-0">
+        <h2 id={id} className="text-lg font-serif font-semibold text-(--rs-neutral-grey-900)">{title}</h2>
+        <p className="mt-0.5 text-sm text-(--rs-neutral-grey-500)">{description}</p>
+      </div>
+      {action}
+    </div>
+  );
+}
+
 async function TicketsSection({ userId, userEmail }: { userId: string | null; userEmail: string | null }) {
   let projects: Awaited<ReturnType<typeof getProjects>> = [];
   let members: Awaited<ReturnType<typeof getWorkspaceMembers>> = [];
@@ -406,6 +450,10 @@ async function TicketsSection({ userId, userEmail }: { userId: string | null; us
     )
     .slice(0, 4);
 
+  const totalOpen = projectStats.reduce((sum, p) => sum + p.open, 0);
+  const totalBlocked = projectStats.reduce((sum, p) => sum + p.blocked, 0);
+  const activeProjects = projectStats.filter(p => p.open > 0).length;
+
   return (
     <div className="space-y-6">
       {loadError && (
@@ -414,204 +462,309 @@ async function TicketsSection({ userId, userEmail }: { userId: string | null; us
         </div>
       )}
 
-      {/* Project Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {projectStats.length === 0 && !loadError && (
-          <p className="text-(--rs-neutral-grey-500) col-span-4 text-sm italic">No projects found in workspace.</p>
-        )}
-        {projectStats.map(({ project, total, open, done, blocked }) => (
-          <Link key={project.id} href={`/projects/${project.id}`}>
-            <Card className="hover:border-(--rs-primary-300) hover:shadow-md transition-all cursor-pointer border-t-4 border-t-(--rs-primary-500) h-full">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-xs font-bold text-(--rs-neutral-grey-400) uppercase tracking-wide">
-                  {project.identifier}
+      <section className="space-y-3" aria-labelledby="workspace-priorities">
+        <SectionHeading
+          id="workspace-priorities"
+          title="Workspace Priorities"
+          description="Review blockers, assigned work, and deadlines before scanning project health."
+          action={(
+            <Link
+              href="/projects"
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-(--rs-primary-600) transition-colors hover:bg-(--rs-primary-50) hover:text-(--rs-primary-800)"
+            >
+              View projects <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          )}
+        />
+
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Card size="sm" className="border-l-4 border-l-red-400">
+            <CardContent className="flex items-center gap-3">
+              <AlertCircle className="h-5 w-5 shrink-0 text-red-500" aria-hidden="true" />
+              <div>
+                <p className="text-2xl font-bold tabular-nums text-(--rs-neutral-grey-900)">{totalBlocked}</p>
+                <p className="text-xs text-(--rs-neutral-grey-500)">Active blockers</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card size="sm">
+            <CardContent className="flex items-center gap-3">
+              <CheckCircle2 className="h-5 w-5 shrink-0 text-(--rs-primary-500)" aria-hidden="true" />
+              <div>
+                <p className="text-2xl font-bold tabular-nums text-(--rs-neutral-grey-900)">{myTasks.length}</p>
+                <p className="text-xs text-(--rs-neutral-grey-500)">My active tasks</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card size="sm">
+            <CardContent className="flex items-center gap-3">
+              <CalendarDays className="h-5 w-5 shrink-0 text-(--rs-accent-600)" aria-hidden="true" />
+              <div>
+                <p className="text-2xl font-bold tabular-nums text-(--rs-neutral-grey-900)">{deadlines.length}</p>
+                <p className="text-xs text-(--rs-neutral-grey-500)">Due in 14 days</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card size="sm">
+            <CardContent className="flex items-center gap-3">
+              <Flag className="h-5 w-5 shrink-0 text-green-600" aria-hidden="true" />
+              <div>
+                <p className="text-2xl font-bold tabular-nums text-(--rs-neutral-grey-900)">{activeProjects}</p>
+                <p className="text-xs text-(--rs-neutral-grey-500)">{totalOpen} open tasks</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-1">
+            <Card className="border-t-4 border-t-red-400">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="flex items-center gap-2 text-base font-serif text-red-600">
+                  <AlertCircle className="h-4 w-4" aria-hidden="true" /> Active Blockers
                 </CardTitle>
-                <div className="text-base font-bold text-(--rs-neutral-grey-900) leading-tight">{project.name}</div>
+                <Link href="/projects" className="inline-flex items-center gap-1 text-sm font-medium text-(--rs-primary-500) hover:text-(--rs-primary-700)">
+                  Open board <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </Link>
               </CardHeader>
               <CardContent>
-                <div className="flex justify-between items-baseline">
-                  <div>
-                    <span className="text-3xl font-bold tabular-nums text-(--rs-neutral-grey-900)">{open}</span>
-                    <span className="text-xs text-(--rs-neutral-grey-400) ml-1.5">open tasks</span>
+                {blockers.length === 0 ? (
+                  <div className="flex min-h-24 items-center gap-2 rounded-lg border border-green-100 bg-green-50 px-3 text-sm text-green-700">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    No active blockers.
                   </div>
-                  <div className="text-xs text-right space-y-0.5">
-                    <div className="text-green-600 font-medium">{done} done</div>
-                    {blocked > 0 && <div className="text-red-500 font-medium">{blocked} blocked</div>}
+                ) : (
+                  <div className="space-y-2.5">
+                    {blockers.map(b => (
+                      <Link key={b.id} href={`/projects/${b._projectId}`} className="block rounded-lg border border-red-100 bg-red-50 p-3 transition-colors hover:border-red-200">
+                        <div className="font-medium text-red-800 text-sm">{b.name}</div>
+                        <div className="text-xs text-red-500 mt-0.5">
+                          {b._projectIdentifier} · {b._projectName}
+                        </div>
+                      </Link>
+                    ))}
                   </div>
-                </div>
-                {total > 0 && (
-                  <>
-                    <div className="mt-2.5 h-1.5 bg-(--rs-neutral-grey-100) rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-(--rs-primary-400) rounded-full transition-all"
-                        style={{ width: `${Math.round((done / total) * 100)}%` }}
-                      />
-                    </div>
-                    <p className="text-[10px] text-(--rs-neutral-grey-400) mt-1 text-right">
-                      {Math.round((done / total) * 100)}% complete
-                    </p>
-                  </>
                 )}
               </CardContent>
             </Card>
-          </Link>
-        ))}
-      </div>
 
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-lg font-serif flex items-center gap-2">
-            <Activity className="w-5 h-5 text-(--rs-primary-500)" /> Recent Project Activity
-          </CardTitle>
-          <Link href="/projects" className="text-sm text-(--rs-primary-500) hover:text-(--rs-primary-700) font-medium transition-colors">
-            View projects
-          </Link>
-        </CardHeader>
-        <CardContent>
-          {activityError ? (
-            <p className="text-sm text-red-500">Could not load recent activity.</p>
-          ) : recentActivity.length === 0 ? (
-            <p className="text-sm text-(--rs-neutral-grey-400) italic">No recent project activity.</p>
-          ) : (
-            <div className="divide-y divide-(--rs-neutral-grey-100)">
-              {recentActivity.map(entry => (
-                <Link
-                  key={entry.id}
-                  href={`/projects/${entry.project_id}`}
-                  className="flex items-start gap-3 py-3 first:pt-0 last:pb-0 rounded-md transition-colors hover:bg-(--rs-neutral-grey-50) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300)"
-                >
-                  <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-(--rs-primary-50) text-(--rs-primary-600)">
-                    <Activity className="w-4 h-4" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                      <span className="text-xs font-semibold text-(--rs-neutral-grey-800)">
-                        {entry.actor_name}
-                      </span>
-                      <span className="text-xs text-(--rs-neutral-grey-400)">
-                        {formatActivityTime(entry.created_at)}
-                      </span>
-                    </span>
-                    <span className="block text-sm text-(--rs-neutral-grey-700) leading-snug mt-0.5">
-                      {describeDashboardActivity(entry)}
-                    </span>
-                    <span className="block text-xs text-(--rs-neutral-grey-400) truncate mt-0.5">
-                      {entry.project_identifier} · {entry.project_name}
-                    </span>
-                  </span>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-base font-serif">My Tasks</CardTitle>
+                <Link href="/my-tasks" className="inline-flex items-center gap-1 text-sm font-medium text-(--rs-primary-500) hover:text-(--rs-primary-700)">
+                  View all <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
                 </Link>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              </CardHeader>
+              <CardContent>
+                {!userId ? (
+                  <p className="text-sm text-(--rs-neutral-grey-500) py-5 text-center">
+                    Sign in to see your tasks.
+                  </p>
+                ) : myTasks.length === 0 ? (
+                  <div className="flex min-h-24 items-center gap-2 rounded-lg border border-(--rs-neutral-grey-100) bg-(--rs-neutral-grey-50) px-3 text-sm text-(--rs-neutral-grey-500)">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" aria-hidden="true" />
+                    No active tasks assigned to you.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {myTasks.map(t => (
+                      <Link
+                        key={t.id}
+                        href={`/projects/${t._projectId}`}
+                        className="flex items-start justify-between rounded-md border border-transparent p-2.5 transition-colors hover:border-(--rs-neutral-grey-100) hover:bg-(--rs-neutral-grey-50)"
+                      >
+                        <div className="flex min-w-0 items-start gap-2.5">
+                          <Circle className="mt-0.5 h-4 w-4 shrink-0 text-(--rs-neutral-grey-300)" aria-hidden="true" />
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-(--rs-neutral-grey-900)">
+                              {t.name}
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                              <PriorityBadge priority={t.priority} />
+                              <span className="text-(--rs-neutral-grey-400)">{t._projectName}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="ml-2 shrink-0 rounded bg-(--rs-neutral-grey-100) px-2 py-0.5 text-xs text-(--rs-neutral-grey-600)">
+                          {t.state_detail?.name ?? 'No state'}
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
 
-      {/* My Tasks + Deadlines */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="border-t-4 border-t-(--rs-accent-500)">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-lg font-serif">My Tasks</CardTitle>
-            <Link href="/my-tasks" className="text-sm text-(--rs-primary-500) hover:text-(--rs-primary-700) font-medium transition-colors">
-              View all →
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {!userId ? (
-              <p className="text-sm text-(--rs-neutral-grey-500) py-5 text-center">
-                Sign in to see your tasks.
-              </p>
-            ) : myTasks.length === 0 ? (
-              <p className="text-sm text-(--rs-neutral-grey-400) italic">No active tasks.</p>
-            ) : (
-              <div className="space-y-2">
-                {myTasks.map(t => (
-                  <div
-                    key={t.id}
-                    className="flex items-start justify-between p-2.5 hover:bg-(--rs-neutral-grey-50) rounded-md border border-transparent hover:border-(--rs-neutral-grey-100) transition-colors"
-                  >
-                    <div className="flex items-start gap-2.5 min-w-0">
-                      <div className="mt-0.5 w-4 h-4 rounded border border-(--rs-neutral-grey-300) bg-white shrink-0" />
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-(--rs-neutral-grey-900) truncate">
-                          {PRIORITY_ICON[t.priority] ?? '⚪'} {t.name}
-                        </div>
-                        <div className="text-xs text-(--rs-neutral-grey-400) mt-0.5">
-                          {t._projectName}
-                          {t.target_date
-                            ? ` · ${new Date(t.target_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
-                            : ''}
-                        </div>
-                      </div>
+          <div className="grid grid-cols-1 gap-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="flex items-center gap-2 text-base font-serif">
+                  <CalendarDays className="h-4 w-4 text-(--rs-accent-500)" aria-hidden="true" /> Upcoming Deadlines
+                </CardTitle>
+                <Link href="/projects" className="inline-flex items-center gap-1 text-sm font-medium text-(--rs-primary-500) hover:text-(--rs-primary-700)">
+                  View all <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </Link>
+              </CardHeader>
+              <CardContent>
+                {deadlines.length === 0 ? (
+                  <p className="rounded-lg border border-(--rs-neutral-grey-100) bg-(--rs-neutral-grey-50) px-3 py-5 text-sm text-(--rs-neutral-grey-500)">
+                    No deadlines in the next 14 days.
+                  </p>
+                ) : (
+                  <div className="space-y-3 pt-1">
+                    {deadlines.map(t => {
+                      const d = new Date(t.target_date!);
+                      return (
+                        <Link key={t.id} href={`/projects/${t._projectId}`} className="flex items-start gap-3 rounded-md p-1.5 transition-colors hover:bg-(--rs-neutral-grey-50)">
+                          <div className="w-11 shrink-0 overflow-hidden rounded-md border border-(--rs-accent-200) bg-(--rs-accent-100) text-center text-(--rs-accent-800)">
+                            <div className="bg-(--rs-accent-200) py-0.5 text-[9px] font-bold uppercase">
+                              {d.toLocaleDateString('en-US', { month: 'short' })}
+                            </div>
+                            <div className="py-1 text-lg font-bold leading-none">{d.getDate()}</div>
+                          </div>
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-(--rs-neutral-grey-900)">{t.name}</div>
+                            <div className="mt-0.5 text-xs text-(--rs-neutral-grey-400)">
+                              {t._projectIdentifier} · {t._projectName}
+                            </div>
+                          </div>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="flex items-center gap-2 text-base font-serif">
+                  <Activity className="h-4 w-4 text-(--rs-primary-500)" aria-hidden="true" /> Recent Activity
+                </CardTitle>
+                <Link href="/projects" className="inline-flex items-center gap-1 text-sm font-medium text-(--rs-primary-500) hover:text-(--rs-primary-700)">
+                  Projects <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </Link>
+              </CardHeader>
+              <CardContent>
+                {activityError ? (
+                  <p className="text-sm text-red-500">Could not load recent activity.</p>
+                ) : recentActivity.length === 0 ? (
+                  <p className="text-sm text-(--rs-neutral-grey-400) italic">No recent project activity.</p>
+                ) : (
+                  <div className="divide-y divide-(--rs-neutral-grey-100)">
+                    {recentActivity.map(entry => (
+                      <Link
+                        key={entry.id}
+                        href={`/projects/${entry.project_id}`}
+                        className="flex items-start gap-3 rounded-md py-3 first:pt-0 last:pb-0 transition-colors hover:bg-(--rs-neutral-grey-50) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300)"
+                      >
+                        <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-(--rs-primary-50) text-(--rs-primary-600)">
+                          <Activity className="w-4 h-4" aria-hidden="true" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                            <span className="text-xs font-semibold text-(--rs-neutral-grey-800)">
+                              {entry.actor_name}
+                            </span>
+                            <span className="text-xs text-(--rs-neutral-grey-400)">
+                              {formatActivityTime(entry.created_at)}
+                            </span>
+                          </span>
+                          <span className="mt-0.5 block text-sm leading-snug text-(--rs-neutral-grey-700)">
+                            {describeDashboardActivity(entry)}
+                          </span>
+                          <span className="mt-0.5 block truncate text-xs text-(--rs-neutral-grey-400)">
+                            {entry.project_identifier} · {entry.project_name}
+                          </span>
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-3" aria-labelledby="project-health">
+        <SectionHeading
+          id="project-health"
+          title="Project Health"
+          description="Open work, completion progress, and blocked counts by project."
+        />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {projectStats.length === 0 && !loadError && (
+            <p className="text-(--rs-neutral-grey-500) col-span-full text-sm italic">No projects found in workspace.</p>
+          )}
+          {projectStats.map(({ project, total, open, done, blocked }) => (
+            <Link key={project.id} href={`/projects/${project.id}`} className="block h-full min-w-0">
+              <Card className="h-full border-t-4 border-t-(--rs-primary-500) transition-colors hover:border-(--rs-primary-300)">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-xs font-bold uppercase text-(--rs-neutral-grey-400)">
+                    {project.identifier}
+                  </CardTitle>
+                  <div className="text-base font-bold leading-tight text-(--rs-neutral-grey-900)">{project.name}</div>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <span className="text-3xl font-bold tabular-nums text-(--rs-neutral-grey-900)">{open}</span>
+                      <span className="ml-1.5 text-xs text-(--rs-neutral-grey-400)">open</span>
                     </div>
-                    <div className="text-xs bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-600) px-2 py-0.5 rounded shrink-0 ml-2">
-                      {t.state_detail?.name ?? '—'}
+                    <div className="space-y-1 text-right text-xs">
+                      <div className="font-medium text-green-600">{done} done</div>
+                      {blocked > 0 && (
+                        <div className="inline-flex items-center gap-1 font-medium text-red-500">
+                          <AlertCircle className="h-3 w-3" aria-hidden="true" /> {blocked} blocked
+                        </div>
+                      )}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-lg font-serif flex items-center gap-2">
-              <Clock className="w-5 h-5 text-(--rs-accent-500)" /> Upcoming Deadlines
-            </CardTitle>
-            <Link href="/projects" className="text-sm text-(--rs-primary-500) hover:text-(--rs-primary-700) font-medium transition-colors">
-              View all →
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {deadlines.length === 0 ? (
-              <p className="text-sm text-(--rs-neutral-grey-400) italic pt-2">No deadlines in the next 14 days.</p>
-            ) : (
-              <div className="space-y-4 pt-1">
-                {deadlines.map(t => {
-                  const d = new Date(t.target_date!);
-                  return (
-                    <div key={t.id} className="flex gap-3 items-start">
-                      <div className="bg-(--rs-accent-100) text-(--rs-accent-800) w-11 text-center rounded-md overflow-hidden shrink-0 border border-(--rs-accent-200)">
-                        <div className="text-[9px] font-bold uppercase bg-(--rs-accent-200) py-0.5 tracking-wide">
-                          {d.toLocaleDateString('en-US', { month: 'short' })}
-                        </div>
-                        <div className="text-lg font-bold py-1 leading-none">{d.getDate()}</div>
+                  {total > 0 && (
+                    <>
+                      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-(--rs-neutral-grey-100)">
+                        <div
+                          className="h-full rounded-full bg-(--rs-primary-400) transition-all"
+                          style={{ width: `${Math.round((done / total) * 100)}%` }}
+                        />
                       </div>
-                      <div className="min-w-0">
-                        <div className="font-medium text-(--rs-neutral-grey-900) text-sm truncate">{t.name}</div>
-                        <div className="text-xs text-(--rs-neutral-grey-400) mt-0.5">
-                          {t._projectIdentifier} · {t._projectName}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Workload + Blockers */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-lg font-serif">Team Workload</CardTitle>
-            <Link href="/weekly-report" className="text-sm text-(--rs-primary-500) hover:text-(--rs-primary-700) font-medium transition-colors">
-              View reports →
+                      <p className="mt-1 text-right text-[10px] text-(--rs-neutral-grey-400)">
+                        {Math.round((done / total) * 100)}% complete
+                      </p>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
             </Link>
-          </CardHeader>
+          ))}
+        </div>
+      </section>
+
+      <section className="space-y-3" aria-labelledby="team-capacity">
+        <SectionHeading
+          id="team-capacity"
+          title="Team Capacity"
+          description="Current open task distribution across workspace members."
+          action={(
+            <Link href="/weekly-report" className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-(--rs-primary-600) transition-colors hover:bg-(--rs-primary-50) hover:text-(--rs-primary-800)">
+              Reports <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          )}
+        />
+        <Card>
           <CardContent>
             {workload.length === 0 ? (
-              <p className="text-sm text-(--rs-neutral-grey-400) italic pt-2">No team data available.</p>
+              <p className="text-sm text-(--rs-neutral-grey-400) italic">No team data available.</p>
             ) : (
-              <div className="space-y-3.5 pt-1">
+              <div className="grid grid-cols-1 gap-x-6 gap-y-3 md:grid-cols-2">
                 {workload.map(({ member, count }) => (
                   <div key={member.id} className="flex items-center gap-3">
-                    <div className="w-20 text-sm font-medium text-right text-(--rs-neutral-grey-600) truncate shrink-0">
+                    <div className="w-24 shrink-0 truncate text-sm font-medium text-(--rs-neutral-grey-600)">
                       {member.display_name.split(' ')[0]}
                     </div>
-                    <div className="flex-1 h-2 bg-(--rs-neutral-grey-100) rounded-full overflow-hidden">
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-(--rs-neutral-grey-100)">
                       <div
                         className={`h-full rounded-full transition-all ${
                           count / maxLoad > 0.8 ? 'bg-amber-400' : 'bg-(--rs-primary-400)'
@@ -619,7 +772,7 @@ async function TicketsSection({ userId, userEmail }: { userId: string | null; us
                         style={{ width: `${(count / maxLoad) * 100}%` }}
                       />
                     </div>
-                    <div className="w-5 text-sm text-(--rs-neutral-grey-500) font-bold tabular-nums text-right shrink-0">
+                    <div className="w-6 shrink-0 text-right text-sm font-bold tabular-nums text-(--rs-neutral-grey-500)">
                       {count}
                     </div>
                   </div>
@@ -628,34 +781,7 @@ async function TicketsSection({ userId, userEmail }: { userId: string | null; us
             )}
           </CardContent>
         </Card>
-
-        <Card className="border-t-4 border-t-red-400">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-lg font-serif flex items-center gap-2 text-red-600">
-              <AlertCircle className="w-4 h-4" /> Active Blockers
-            </CardTitle>
-            <Link href="/projects" className="text-sm text-(--rs-primary-500) hover:text-(--rs-primary-700) font-medium transition-colors">
-              View projects →
-            </Link>
-          </CardHeader>
-          <CardContent>
-            {blockers.length === 0 ? (
-              <p className="text-sm text-(--rs-neutral-grey-400) italic pt-2">No active blockers. 🎉</p>
-            ) : (
-              <div className="space-y-2.5">
-                {blockers.map(b => (
-                  <div key={b.id} className="p-3 bg-red-50 border border-red-100 rounded-lg">
-                    <div className="font-medium text-red-800 text-sm">{b.name}</div>
-                    <div className="text-xs text-red-500 mt-0.5">
-                      {b._projectIdentifier} · {b._projectName}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+      </section>
     </div>
   );
 }

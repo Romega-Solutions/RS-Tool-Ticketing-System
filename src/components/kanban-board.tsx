@@ -1,20 +1,31 @@
 'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useCallback, useState, useRef, useEffect, useMemo } from 'react';
 import {
+  closestCenter,
   DndContext,
   DragOverlay,
+  type Announcements,
+  type CollisionDetection,
   pointerWithin,
+  KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
   useDraggable,
   useDroppable,
+  type DragOverEvent,
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { AlertTriangle, Plus, Loader2, X } from 'lucide-react';
+import { AlertTriangle, GripVertical, Plus, Loader2, X } from 'lucide-react';
 import { TaskDetailSheet, type SheetWorkItem } from '@/components/task-detail-sheet';
+import {
+  getKanbanDragAnnouncement,
+  getKanbanDragHandleLabel,
+  getKanbanTaskAriaLabel,
+  type KanbanTaskDescriptor,
+} from '@/lib/kanban-board-ui';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -52,34 +63,77 @@ const PRIORITY_DOT: Record<string, string> = {
   none:   'bg-slate-300',
 };
 
+const kanbanCollisionDetection: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args);
+  if (args.pointerCoordinates) return pointerCollisions;
+  return closestCenter(args);
+};
+
+function toTaskDescriptor(item: KanbanItem | null): KanbanTaskDescriptor | null {
+  return item
+    ? { id: item.id, sequenceId: item.sequence_id, name: item.name }
+    : null;
+}
+
 // ── Card (used in column + drag overlay) ──────────────────────────────────────
 
-function CardContent({ item, overlay = false, onClick }: { item: KanbanItem; overlay?: boolean; onClick?: () => void }) {
+function CardContent({
+  item,
+  overlay = false,
+  onOpen,
+  dragHandle,
+  isActive = false,
+}: {
+  item: KanbanItem;
+  overlay?: boolean;
+  onOpen?: () => void;
+  dragHandle?: React.ReactNode;
+  isActive?: boolean;
+}) {
   const isOverdue =
     item.target_date &&
     item.state_detail?.group !== 'completed' &&
     new Date(item.target_date + 'T00:00:00') < new Date();
+  const task = toTaskDescriptor(item)!;
+
+  const titleContent = (
+    <>
+      <span className="text-[11px] text-(--rs-neutral-grey-400) font-mono">#{item.sequence_id}</span>
+      <p className="mt-1 text-sm font-medium text-(--rs-neutral-grey-900) leading-snug line-clamp-2">
+        {item.name}
+      </p>
+    </>
+  );
 
   return (
     <div
-      onClick={onClick}
-      className={`min-h-28 bg-white rounded-lg border p-3 space-y-2 select-none ${
+      className={`min-h-28 rounded-lg border bg-white p-3 space-y-2 select-none transition-[background-color,border-color,box-shadow,transform,opacity] duration-150 ${
         overlay
-          ? 'border-(--rs-primary-400) shadow-xl rotate-1 cursor-grabbing w-[min(18rem,82vw)]'
-          : 'border-(--rs-neutral-grey-200) hover:border-(--rs-primary-200) cursor-pointer sm:cursor-grab hover:shadow-sm transition-all'
+          ? 'w-[min(18rem,82vw)] cursor-grabbing border-(--rs-primary-400) shadow-xl'
+          : isActive
+            ? 'border-(--rs-primary-300) bg-(--rs-primary-50) opacity-50 ring-2 ring-(--rs-primary-100)'
+            : 'border-(--rs-neutral-grey-200) hover:border-(--rs-primary-200) hover:shadow-sm motion-safe:hover:-translate-y-0.5'
       }`}
     >
       <div className="flex items-start justify-between gap-2">
-        <span className="text-[11px] text-(--rs-neutral-grey-400) font-mono">#{item.sequence_id}</span>
+        {overlay ? (
+          <div className="min-w-0 flex-1 text-left">{titleContent}</div>
+        ) : (
+          <button
+            type="button"
+            onClick={onOpen}
+            className="min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300) focus-visible:ring-offset-2"
+            aria-label={getKanbanTaskAriaLabel(task)}
+          >
+            {titleContent}
+          </button>
+        )}
         <div
-          className={`w-2 h-2 rounded-full mt-0.5 shrink-0 ${PRIORITY_DOT[item.priority] ?? PRIORITY_DOT.none}`}
+          className={`mt-1 h-2 w-2 shrink-0 rounded-full ${PRIORITY_DOT[item.priority] ?? PRIORITY_DOT.none}`}
           title={item.priority ?? 'none'}
         />
+        {dragHandle}
       </div>
-
-      <p className="text-sm font-medium text-(--rs-neutral-grey-900) leading-snug line-clamp-2">
-        {item.name}
-      </p>
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
         {item.target_date && (
@@ -111,16 +165,41 @@ function CardContent({ item, overlay = false, onClick }: { item: KanbanItem; ove
 // ── Draggable card wrapper ─────────────────────────────────────────────────────
 
 function DraggableCard({ item, isActive, onOpen }: { item: KanbanItem; isActive: boolean; onOpen: (id: string) => void }) {
-  const { attributes, listeners, setNodeRef } = useDraggable({ id: item.id });
+  const { attributes, listeners, setActivatorNodeRef, setNodeRef } = useDraggable({
+    id: item.id,
+    attributes: {
+      roleDescription: 'task move handle',
+    },
+  });
+  const task = toTaskDescriptor(item)!;
 
   return (
     <div
       ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      style={{ opacity: isActive ? 0.3 : 1, transition: 'opacity 150ms', touchAction: 'manipulation' }}
+      style={{ transition: 'opacity 150ms', touchAction: 'manipulation' }}
     >
-      <CardContent item={item} onClick={() => onOpen(item.id)} />
+      <CardContent
+        item={item}
+        isActive={isActive}
+        onOpen={() => onOpen(item.id)}
+        dragHandle={
+          <button
+            ref={setActivatorNodeRef}
+            type="button"
+            {...attributes}
+            {...listeners}
+            aria-label={getKanbanDragHandleLabel(task)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-(--rs-neutral-grey-400) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-primary-700) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300) focus-visible:ring-offset-2"
+            style={{ touchAction: 'none' }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          >
+            <GripVertical className="h-4 w-4" aria-hidden="true" />
+          </button>
+        }
+      />
     </div>
   );
 }
@@ -211,7 +290,7 @@ function AddTaskForm({
         <button
           type="button"
           onClick={close}
-          className="text-xs px-2.5 py-1 text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-800) transition-colors"
+          className="min-h-9 rounded-md px-2.5 py-1 text-xs text-(--rs-neutral-grey-500) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-800)"
         >
           Cancel
         </button>
@@ -240,10 +319,17 @@ function KanbanColumn({
   const { setNodeRef, isOver } = useDroppable({ id: state.id });
 
   return (
-    <div className="flex w-[82vw] max-w-[18rem] shrink-0 snap-start flex-col sm:w-72 sm:max-w-none">
+    <div
+      ref={setNodeRef}
+      className="flex w-[82vw] max-w-[18rem] shrink-0 snap-start flex-col overflow-hidden rounded-lg border bg-white transition-[border-color,box-shadow] duration-150 sm:w-72 sm:max-w-none"
+      style={{
+        borderColor: isOver ? 'var(--rs-primary-300)' : 'var(--rs-neutral-grey-200)',
+        boxShadow: isOver ? '0 0 0 3px var(--rs-primary-100)' : 'none',
+      }}
+    >
       {/* Header */}
       <div
-        className="flex items-center gap-2 px-3 py-2 rounded-t-lg font-semibold text-sm text-white"
+        className="flex min-h-11 items-center gap-2 px-3 py-2 font-semibold text-sm text-white"
         style={{ backgroundColor: state.color || '#64748b' }}
       >
         <span className="flex-1 truncate">{state.name}</span>
@@ -254,15 +340,18 @@ function KanbanColumn({
 
       {/* Drop zone */}
       <div
-        ref={setNodeRef}
-        className="flex-1 min-h-32 rounded-b-lg border border-t-0 transition-colors"
+        className="flex min-h-40 flex-1 flex-col transition-colors"
         style={{
-          borderColor: isOver ? 'var(--rs-primary-300)' : 'var(--rs-neutral-grey-200)',
           backgroundColor: isOver ? 'var(--rs-primary-50)' : 'var(--rs-neutral-grey-50)',
           padding: '8px',
         }}
       >
-        <div className="space-y-2">
+        {isOver && activeId && (
+          <div className="mb-2 flex min-h-10 items-center justify-center rounded-md border border-(--rs-primary-200) bg-white px-3 text-xs font-medium text-(--rs-primary-700)">
+            Release to move here
+          </div>
+        )}
+        <div className="min-h-24 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-0.5 sm:max-h-[calc(100dvh-17rem)]">
           {items.map(item => (
             <DraggableCard
               key={item.id}
@@ -271,15 +360,19 @@ function KanbanColumn({
               onOpen={onOpen}
             />
           ))}
-          {items.length === 0 && !isOver && (
-            <div className="h-14 rounded-md border-2 border-dashed border-(--rs-neutral-grey-200) flex items-center justify-center">
-              <span className="text-xs text-(--rs-neutral-grey-300)">Drop here</span>
+          {items.length === 0 && (
+            <div className={`flex h-20 items-center justify-center rounded-md border-2 border-dashed transition-colors ${
+              isOver
+                ? 'border-(--rs-primary-300) bg-white text-(--rs-primary-700)'
+                : 'border-(--rs-neutral-grey-200) text-(--rs-neutral-grey-300)'
+            }`}>
+              <span className="text-xs">{isOver ? 'Release here' : 'No tasks'}</span>
             </div>
           )}
         </div>
 
         {/* Add task */}
-        <div className="mt-2">
+        <div className="mt-2 border-t border-(--rs-neutral-grey-200) pt-2">
           <AddTaskForm stateId={state.id} projectId={projectId} onAdd={onAdd} />
         </div>
       </div>
@@ -324,6 +417,8 @@ export function KanbanBoard({
 
   const [activeItem, setActiveItem] = useState<KanbanItem | null>(null);
   const [dragError, setDragError] = useState('');
+  const [moveNotice, setMoveNotice] = useState<{ tone: 'info' | 'success'; message: string } | null>(null);
+  const [movingItemId, setMovingItemId] = useState<string | null>(null);
   const [openItemId, setOpenItemId] = useState<string | null>(null);
 
   // ── Filter state (URL-synced via window.location, optional for SSR safety) ──
@@ -372,6 +467,12 @@ export function KanbanBoard({
       .then(r => r.ok ? r.json() : []).then(setMembers).catch(() => {});
   }, [projectId]);
 
+  useEffect(() => {
+    if (moveNotice?.tone !== 'success') return;
+    const timeout = window.setTimeout(() => setMoveNotice(null), 2800);
+    return () => window.clearTimeout(timeout);
+  }, [moveNotice]);
+
   // Build the lookup keys for the "Mine only" filter — match against either
   // the assignee email (assignees[]) or numeric user id (assignee_ids[]).
   const myKeys = useMemo(() => {
@@ -404,33 +505,94 @@ export function KanbanBoard({
   const clearFilters = () =>
     setFilters({ assignee: '', label: '', priority: '', cycle: '', dueSoon: false, mine: false });
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-  );
-
-  const findItemAndState = (itemId: string): [KanbanItem | null, string] => {
+  const findItemAndState = useCallback((itemId: string): [KanbanItem | null, string] => {
     for (const [sid, items] of itemsByState) {
       const found = items.find(i => i.id === itemId);
       if (found) return [found, sid];
     }
     return [null, ''];
-  };
+  }, [itemsByState]);
+
+  const stateNameById = useMemo(() => new Map(states.map(s => [s.id, s.name])), [states]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor),
+  );
+
+  const accessibility = useMemo<{ announcements: Announcements; screenReaderInstructions: { draggable: string } }>(() => ({
+    announcements: {
+      onDragStart: ({ active }) => {
+        const [item] = findItemAndState(String(active.id));
+        return getKanbanDragAnnouncement({ type: 'start', task: toTaskDescriptor(item) });
+      },
+      onDragOver: ({ active, over }) => {
+        const [item] = findItemAndState(String(active.id));
+        return getKanbanDragAnnouncement({
+          type: 'over',
+          task: toTaskDescriptor(item),
+          targetStateName: over ? stateNameById.get(String(over.id)) : null,
+        });
+      },
+      onDragEnd: ({ active, over }) => {
+        const [item] = findItemAndState(String(active.id));
+        return getKanbanDragAnnouncement({
+          type: 'end',
+          task: toTaskDescriptor(item),
+          targetStateName: over ? stateNameById.get(String(over.id)) : null,
+        });
+      },
+      onDragCancel: ({ active }) => {
+        const [item] = findItemAndState(String(active.id));
+        return getKanbanDragAnnouncement({ type: 'cancel', task: toTaskDescriptor(item) });
+      },
+    },
+    screenReaderInstructions: {
+      draggable: 'Press Enter or Space on a task move handle to pick it up. Use arrow keys to move between columns. Press Enter or Space again to drop it, or Escape to cancel.',
+    },
+  }), [findItemAndState, stateNameById]);
 
   const handleDragStart = ({ active }: DragStartEvent) => {
     const [item] = findItemAndState(active.id as string);
     setActiveItem(item);
     setDragError('');
+    setMoveNotice(null);
+  };
+
+  const handleDragOver = ({ active, over }: DragOverEvent) => {
+    const [item] = findItemAndState(active.id as string);
+    const targetName = over ? stateNameById.get(String(over.id)) : null;
+    if (!item || !targetName) return;
+    setMoveNotice({
+      tone: 'info',
+      message: getKanbanDragAnnouncement({
+        type: 'over',
+        task: toTaskDescriptor(item),
+        targetStateName: targetName,
+      }) ?? '',
+    });
+  };
+
+  const handleDragCancel = () => {
+    setActiveItem(null);
+    setMoveNotice(null);
   };
 
   const handleDragEnd = async ({ active, over }: DragEndEvent) => {
     setActiveItem(null);
-    if (!over) return;
+    if (!over) {
+      setMoveNotice(null);
+      return;
+    }
 
     const draggedId = active.id as string;
     const targetStateId = over.id as string;
     const [draggedItem, sourceStateId] = findItemAndState(draggedId);
 
-    if (!draggedItem || sourceStateId === targetStateId) return;
+    if (!draggedItem || sourceStateId === targetStateId) {
+      setMoveNotice(null);
+      return;
+    }
 
     // Snapshot for revert
     const snapshot = new Map(
@@ -439,6 +601,7 @@ export function KanbanBoard({
 
     // Build updated item with new state_detail
     const targetState = states.find(s => s.id === targetStateId);
+    const taskDescriptor = toTaskDescriptor(draggedItem);
     const updatedItem: KanbanItem = {
       ...draggedItem,
       state_detail: targetState
@@ -453,19 +616,46 @@ export function KanbanBoard({
       next.set(targetStateId, [...(next.get(targetStateId) ?? []), updatedItem]);
       return next;
     });
-
-    // API call
-    const res = await fetch('/api/tickets/work-items', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId, itemId: draggedId, state: targetStateId }),
+    setMovingItemId(draggedId);
+    setMoveNotice({
+      tone: 'info',
+      message: targetState
+        ? `Saving move to ${targetState.name}...`
+        : 'Saving move...',
     });
+
+    let res: Response;
+    try {
+      res = await fetch('/api/tickets/work-items', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, itemId: draggedId, state: targetStateId }),
+      });
+    } catch {
+      setItemsByState(snapshot);
+      setDragError('Request failed. Please try again.');
+      setMoveNotice(null);
+      setMovingItemId(null);
+      return;
+    }
 
     if (!res.ok) {
       setItemsByState(snapshot);
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       setDragError(data.error ?? 'Failed to move task. Please try again.');
+      setMoveNotice(null);
+      setMovingItemId(null);
+      return;
     }
+    setMoveNotice({
+      tone: 'success',
+      message: getKanbanDragAnnouncement({
+        type: 'end',
+        task: taskDescriptor,
+        targetStateName: targetState?.name,
+      }) ?? 'Task moved.',
+    });
+    setMovingItemId(null);
   };
 
   const handleTaskAdded = (stateId: string, item: KanbanItem) => {
@@ -477,10 +667,11 @@ export function KanbanBoard({
   };
 
   return (
-    <div className="max-w-full overflow-hidden">
+    <div className="max-w-full overflow-hidden" role="region" aria-label="Project Kanban board">
       {/* Filter bar */}
       <div className="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-2 sm:mx-0 sm:flex-wrap sm:px-0">
         <select
+          aria-label="Filter tasks by assignee"
           value={filters.assignee}
           onChange={e => setFilters(f => ({ ...f, assignee: e.target.value }))}
           className="min-h-10 min-w-36 flex-none rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-xs"
@@ -492,6 +683,7 @@ export function KanbanBoard({
         </select>
 
         <select
+          aria-label="Filter tasks by label"
           value={filters.label}
           onChange={e => setFilters(f => ({ ...f, label: e.target.value }))}
           className="min-h-10 min-w-32 flex-none rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-xs"
@@ -501,6 +693,7 @@ export function KanbanBoard({
         </select>
 
         <select
+          aria-label="Filter tasks by priority"
           value={filters.priority}
           onChange={e => setFilters(f => ({ ...f, priority: e.target.value }))}
           className="min-h-10 min-w-32 flex-none rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-xs"
@@ -515,6 +708,7 @@ export function KanbanBoard({
 
         {cycles.length > 0 && (
           <select
+            aria-label="Filter tasks by cycle"
             value={filters.cycle}
             onChange={e => setFilters(f => ({ ...f, cycle: e.target.value }))}
             className="min-h-10 min-w-32 flex-none rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-xs"
@@ -538,6 +732,7 @@ export function KanbanBoard({
         {activeFilterCount > 0 && (
           <button
             onClick={clearFilters}
+            aria-label={`Clear ${activeFilterCount} active task filter${activeFilterCount === 1 ? '' : 's'}`}
             className="ml-1 flex min-h-10 flex-none items-center gap-1 rounded-md px-2 text-xs text-(--rs-neutral-grey-500) hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-800)"
           >
             <X className="w-3 h-3" /> Clear ({activeFilterCount})
@@ -545,8 +740,22 @@ export function KanbanBoard({
         )}
       </div>
 
+      {moveNotice && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`mb-3 flex min-h-10 items-center rounded-lg border px-3 text-sm ${
+            moveNotice.tone === 'success'
+              ? 'border-green-200 bg-green-50 text-green-700'
+              : 'border-(--rs-primary-200) bg-(--rs-primary-50) text-(--rs-primary-800)'
+          }`}
+        >
+          {moveNotice.message}
+        </div>
+      )}
+
       {dragError && (
-        <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg flex items-center justify-between gap-2">
+        <div role="alert" className="mb-4 px-3 py-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg flex items-center justify-between gap-2">
           <span>{dragError}</span>
           <button
             onClick={() => setDragError('')}
@@ -560,24 +769,27 @@ export function KanbanBoard({
 
       <DndContext
         sensors={sensors}
-        collisionDetection={pointerWithin}
+        accessibility={accessibility}
+        collisionDetection={kanbanCollisionDetection}
         onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
       >
         <div className="-mx-4 overflow-x-auto overscroll-x-contain px-4 pb-2 sm:-mx-1 sm:px-1">
-        <div className="flex min-w-max snap-x snap-mandatory items-start gap-4 pb-4">
-          {states.map(state => (
-            <KanbanColumn
-              key={state.id}
-              state={state}
-              items={(itemsByState.get(state.id) ?? []).filter(filterMatch)}
-              activeId={activeItem?.id ?? null}
-              projectId={projectId}
-              onAdd={handleTaskAdded}
-              onOpen={setOpenItemId}
-            />
-          ))}
-        </div>
+          <div className="flex min-w-max snap-x snap-mandatory items-start gap-4 pb-4">
+            {states.map(state => (
+              <KanbanColumn
+                key={state.id}
+                state={state}
+                items={(itemsByState.get(state.id) ?? []).filter(filterMatch)}
+                activeId={activeItem?.id ?? movingItemId}
+                projectId={projectId}
+                onAdd={handleTaskAdded}
+                onOpen={setOpenItemId}
+              />
+            ))}
+          </div>
         </div>
 
         <DragOverlay dropAnimation={{ duration: 150, easing: 'ease' }}>
@@ -643,6 +855,7 @@ function Toggle({ on, label, onChange }: { on: boolean; label: string; onChange:
   return (
     <button
       onClick={() => onChange(!on)}
+      aria-pressed={on}
       className={`min-h-10 flex-none rounded-md border px-3 py-2 text-xs transition-colors ${
         on
           ? 'bg-(--rs-primary-50) border-(--rs-primary-300) text-(--rs-primary-800)'

@@ -1,4 +1,5 @@
 import type { AppRole } from './rbac';
+import { normalizePingMessage } from './presence-ping';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -19,13 +20,30 @@ type Subscriber = {
   team:   string | null;
 };
 
+export type PresencePingActor = {
+  userId:   number;
+  name:     string;
+  role:     AppRole;
+  team:     string | null;
+  photoUrl?: string | null;
+};
+
+export type PresencePingEvent = {
+  type:      'user_ping';
+  id:        string;
+  from:      PresencePingActor;
+  toUserId:  number;
+  message:   string;
+  createdAt: string;
+};
+
 // ── In-memory store ────────────────────────────────────────────────────────────
 // Resets on server restart — acceptable for a small internal tool.
 
 const online:    Map<number, PresenceUser>                          = new Map();
 const subs:      Map<number, Subscriber>                            = new Map();
 // Live subscribers see ALL clock events regardless of role/team.
-const liveSubs:  Map<number, ReadableStreamDefaultController>       = new Map();
+const liveSubs:  Map<number, Set<ReadableStreamDefaultController>>  = new Map();
 const enc = new TextEncoder();
 
 // ── Visibility check ───────────────────────────────────────────────────────────
@@ -57,6 +75,10 @@ type PresenceEvent =
   | { type: 'clock_in';  user: PresenceUser }
   | { type: 'clock_out'; userId: number };
 
+type PingResult =
+  | { ok: true; event: PresencePingEvent }
+  | { ok: false; reason: 'self' | 'not_online' | 'not_connected' };
+
 function broadcast(event: PresenceEvent) {
   for (const [, sub] of subs) {
     const target: PresenceUser | undefined =
@@ -70,8 +92,10 @@ function broadcast(event: PresenceEvent) {
 }
 
 function broadcastToLive(event: PresenceEvent) {
-  for (const [, ctrl] of liveSubs) {
-    sendEvent(ctrl, event);
+  for (const [, ctrls] of liveSubs) {
+    for (const ctrl of ctrls) {
+      sendEvent(ctrl, event);
+    }
   }
 }
 
@@ -118,11 +142,52 @@ export function getAllOnline(): PresenceUser[] {
 }
 
 export function subscribeToLive(userId: number, ctrl: ReadableStreamDefaultController): void {
-  liveSubs.set(userId, ctrl);
+  const ctrls = liveSubs.get(userId) ?? new Set<ReadableStreamDefaultController>();
+  ctrls.add(ctrl);
+  liveSubs.set(userId, ctrls);
 }
 
-export function unsubscribeFromLive(userId: number): void {
-  liveSubs.delete(userId);
+export function unsubscribeFromLive(userId: number, ctrl?: ReadableStreamDefaultController): void {
+  if (!ctrl) {
+    liveSubs.delete(userId);
+    return;
+  }
+
+  const ctrls = liveSubs.get(userId);
+  if (!ctrls) return;
+  ctrls.delete(ctrl);
+  if (ctrls.size === 0) liveSubs.delete(userId);
+}
+
+export function sendPresencePing({
+  from,
+  toUserId,
+  message,
+  createdAt = new Date().toISOString(),
+}: {
+  from: PresencePingActor;
+  toUserId: number;
+  message?: string | null;
+  createdAt?: string;
+}): PingResult {
+  if (from.userId === toUserId) return { ok: false, reason: 'self' };
+  if (!online.has(toUserId)) return { ok: false, reason: 'not_online' };
+
+  const targets = liveSubs.get(toUserId);
+  if (!targets?.size) return { ok: false, reason: 'not_connected' };
+
+  const event: PresencePingEvent = {
+    type: 'user_ping',
+    id: `${createdAt}-${from.userId}-${toUserId}`,
+    from,
+    toUserId,
+    message: normalizePingMessage(message),
+    createdAt,
+  };
+  for (const target of targets) {
+    sendEvent(target, event);
+  }
+  return { ok: true, event };
 }
 
 /** Seed users from DB without broadcasting. Used for post-restart hydration. */
@@ -132,4 +197,10 @@ export function seedUsers(users: PresenceUser[]): void {
       online.set(u.userId, u);
     }
   }
+}
+
+export function __resetPresenceForTests(): void {
+  online.clear();
+  subs.clear();
+  liveSubs.clear();
 }

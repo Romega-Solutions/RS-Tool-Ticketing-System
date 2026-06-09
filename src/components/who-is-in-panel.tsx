@@ -1,9 +1,11 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { LogOut, Loader2, X } from 'lucide-react';
+import { BellRing, LogOut, Loader2, MessageCircle, Send, X } from 'lucide-react';
 import { isOvertime } from '@/lib/utils';
 import { PersonAvatar } from '@/components/person-avatar';
+import { normalizePingMessage } from '@/lib/presence-ping';
+import { playRomegaNotificationSound, unlockNotificationSound } from '@/lib/notification-sound';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -20,7 +22,23 @@ type PresenceUser = {
 type SSEEvent =
   | { type: 'snapshot'; online: PresenceUser[] }
   | { type: 'clock_in';  user: PresenceUser }
-  | { type: 'clock_out'; userId: number };
+  | { type: 'clock_out'; userId: number }
+  | {
+      type: 'user_ping';
+      id: string;
+      from: {
+        userId: number;
+        name: string;
+        role: string;
+        team: string | null;
+        photoUrl?: string | null;
+      };
+      toUserId: number;
+      message: string;
+      createdAt: string;
+    };
+
+type IncomingPing = Extract<SSEEvent, { type: 'user_ping' }>;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -58,14 +76,30 @@ function LiveDuration({ clockedInAt, weekSecondsBefore = 0 }: { clockedInAt: str
 function PanelContent({
   sorted,
   connected,
+  currentUserId,
   isAdmin,
   pendingId,
+  pingTargetId,
+  pingDraft,
+  pingingId,
+  pingStatus,
+  setPingTargetId,
+  setPingDraft,
+  sendPing,
   forceClockOut,
 }: {
   sorted: PresenceUser[];
   connected: boolean;
+  currentUserId: number;
   isAdmin: boolean;
   pendingId: number | null;
+  pingTargetId: number | null;
+  pingDraft: string;
+  pingingId: number | null;
+  pingStatus: { tone: 'success' | 'error'; message: string } | null;
+  setPingTargetId: (id: number | null) => void;
+  setPingDraft: (message: string) => void;
+  sendPing: (user: PresenceUser) => void;
   forceClockOut: (user: PresenceUser) => void;
 }) {
   return (
@@ -99,46 +133,103 @@ function PanelContent({
           <div className="divide-y divide-(--rs-neutral-grey-100)">
             {sorted.map(user => {
               const busy = pendingId === user.userId;
+              const pinging = pingingId === user.userId;
+              const showingPingForm = pingTargetId === user.userId;
+              const canPing = user.userId !== currentUserId;
               return (
-                <div key={user.userId} className="group flex items-center gap-3 px-4 py-3 hover:bg-(--rs-neutral-grey-50)">
-                  {/* Avatar */}
-                  <div className="relative shrink-0">
-                    <PersonAvatar name={user.name} photoUrl={user.photoUrl} size={36} />
-                    <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-green-400 border-2 border-white">
-                      <span className="absolute inset-0 rounded-full bg-green-400 animate-ping opacity-60" />
-                    </span>
-                  </div>
+                <div key={user.userId} className="hover:bg-(--rs-neutral-grey-50)">
+                  <div className="group flex items-center gap-3 px-4 py-3">
+                    {/* Avatar */}
+                    <div className="relative shrink-0">
+                      <PersonAvatar name={user.name} photoUrl={user.photoUrl} size={36} />
+                      <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-green-400 border-2 border-white">
+                        <span className="absolute inset-0 rounded-full bg-green-400 animate-ping opacity-60" />
+                      </span>
+                    </div>
 
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-(--rs-neutral-grey-900) truncate">{user.name}</p>
-                    {user.team && (
-                      <p className="text-xs text-(--rs-neutral-grey-400) truncate">{user.team}</p>
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-(--rs-neutral-grey-900) truncate">{user.name}</p>
+                      {user.team && (
+                        <p className="text-xs text-(--rs-neutral-grey-400) truncate">{user.team}</p>
+                      )}
+                    </div>
+
+                    {/* Time */}
+                    <div className="shrink-0 text-right">
+                      <p className="text-xs font-semibold tabular-nums">
+                        <LiveDuration clockedInAt={user.clockedInAt} weekSecondsBefore={user.weekSecondsBefore} />
+                      </p>
+                      <p className="text-[10px] text-(--rs-neutral-grey-400)">since {sinceLabel(user.clockedInAt)}</p>
+                    </div>
+
+                    {canPing && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPingTargetId(showingPingForm ? null : user.userId);
+                          setPingDraft('');
+                        }}
+                        title={`Ping ${user.name}`}
+                        aria-label={`Ping ${user.name}`}
+                        className={`shrink-0 rounded-md p-1.5 transition-colors ${
+                          showingPingForm
+                            ? 'bg-(--rs-primary-50) text-(--rs-primary-700)'
+                            : 'text-(--rs-neutral-grey-400) hover:bg-(--rs-primary-50) hover:text-(--rs-primary-700)'
+                        }`}
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
+                    {/* Admin: force clock-out */}
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => forceClockOut(user)}
+                        disabled={busy}
+                        title={`Force clock-out ${user.name}`}
+                        aria-label={`Force clock-out ${user.name}`}
+                        className="shrink-0 rounded p-1.5 text-orange-500 hover:bg-orange-50 hover:text-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {busy
+                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          : <LogOut className="w-3.5 h-3.5" />}
+                      </button>
                     )}
                   </div>
 
-                  {/* Time */}
-                  <div className="shrink-0 text-right">
-                    <p className="text-xs font-semibold tabular-nums">
-                      <LiveDuration clockedInAt={user.clockedInAt} weekSecondsBefore={user.weekSecondsBefore} />
-                    </p>
-                    <p className="text-[10px] text-(--rs-neutral-grey-400)">since {sinceLabel(user.clockedInAt)}</p>
-                  </div>
-
-                  {/* Admin: force clock-out */}
-                  {isAdmin && (
-                    <button
-                      type="button"
-                      onClick={() => forceClockOut(user)}
-                      disabled={busy}
-                      title={`Force clock-out ${user.name}`}
-                      aria-label={`Force clock-out ${user.name}`}
-                      className="shrink-0 rounded p-1.5 text-orange-500 hover:bg-orange-50 hover:text-orange-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                      {busy
-                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        : <LogOut className="w-3.5 h-3.5" />}
-                    </button>
+                  {showingPingForm && (
+                    <div className="px-4 pb-3">
+                      <div className="flex gap-2 rounded-lg border border-(--rs-neutral-grey-200) bg-white p-2">
+                        <input
+                          value={pingDraft}
+                          onChange={e => setPingDraft(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') sendPing(user);
+                            if (e.key === 'Escape') setPingTargetId(null);
+                          }}
+                          placeholder="Are you online?"
+                          maxLength={160}
+                          className="min-h-9 min-w-0 flex-1 rounded-md border border-transparent px-2 text-xs focus:border-(--rs-primary-300) focus:outline-none"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => sendPing(user)}
+                          disabled={pinging}
+                          className="inline-flex min-h-9 items-center gap-1 rounded-md bg-(--rs-primary-500) px-3 text-xs font-medium text-white disabled:opacity-50"
+                        >
+                          {pinging ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                          Send
+                        </button>
+                      </div>
+                      {pingStatus && (
+                        <p className={`mt-1 text-xs ${pingStatus.tone === 'success' ? 'text-green-600' : 'text-red-500'}`}>
+                          {pingStatus.message}
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               );
@@ -152,11 +243,16 @@ function PanelContent({
 
 // ── Topbar button + slide-over panel ──────────────────────────────────────────
 
-export function WhoIsInPanel({ isAdmin = false }: { isAdmin?: boolean }) {
+export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId: number; isAdmin?: boolean }) {
   const [open, setOpen]           = useState(false);
   const [online, setOnline]       = useState<PresenceUser[]>([]);
   const [connected, setConnected] = useState(false);
   const [pendingId, setPendingId] = useState<number | null>(null);
+  const [pingTargetId, setPingTargetId] = useState<number | null>(null);
+  const [pingDraft, setPingDraft] = useState('');
+  const [pingingId, setPingingId] = useState<number | null>(null);
+  const [pingStatus, setPingStatus] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
+  const [incomingPings, setIncomingPings] = useState<IncomingPing[]>([]);
   const esRef = useRef<EventSource | null>(null);
 
   async function forceClockOut(user: PresenceUser) {
@@ -175,6 +271,32 @@ export function WhoIsInPanel({ isAdmin = false }: { isAdmin?: boolean }) {
       alert(err instanceof Error ? err.message : 'Force clock-out failed');
     } finally {
       setPendingId(null);
+    }
+  }
+
+  async function sendPing(user: PresenceUser) {
+    setPingingId(user.userId);
+    setPingStatus(null);
+    await unlockNotificationSound();
+    try {
+      const message = normalizePingMessage(pingDraft);
+      const res = await fetch('/api/presence/ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ toUserId: user.userId, message }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Ping failed');
+      setPingStatus({ tone: 'success', message: `Ping sent to ${user.name}` });
+      setPingDraft('');
+      window.setTimeout(() => {
+        setPingTargetId(null);
+        setPingStatus(null);
+      }, 1600);
+    } catch (err) {
+      setPingStatus({ tone: 'error', message: err instanceof Error ? err.message : 'Ping failed' });
+    } finally {
+      setPingingId(null);
     }
   }
 
@@ -200,6 +322,12 @@ export function WhoIsInPanel({ isAdmin = false }: { isAdmin?: boolean }) {
         });
       } else if (event.type === 'clock_out') {
         setOnline(prev => prev.filter(u => u.userId !== event.userId));
+      } else if (event.type === 'user_ping') {
+        setIncomingPings(prev => [event, ...prev.filter(p => p.id !== event.id)].slice(0, 3));
+        playRomegaNotificationSound();
+        window.setTimeout(() => {
+          setIncomingPings(prev => prev.filter(p => p.id !== event.id));
+        }, 9000);
       }
     };
 
@@ -223,7 +351,10 @@ export function WhoIsInPanel({ isAdmin = false }: { isAdmin?: boolean }) {
     <>
       {/* Topbar button */}
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={() => {
+          void unlockNotificationSound();
+          setOpen(o => !o);
+        }}
         className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors ${
           open
             ? 'bg-(--rs-primary-50) border-(--rs-primary-300) text-(--rs-primary-700)'
@@ -242,6 +373,30 @@ export function WhoIsInPanel({ isAdmin = false }: { isAdmin?: boolean }) {
           </span>
         )}
       </button>
+
+      {incomingPings.length > 0 && (
+        <div className="fixed right-4 top-20 z-[60] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2">
+          {incomingPings.map(ping => (
+            <button
+              key={ping.id}
+              type="button"
+              onClick={() => {
+                setOpen(true);
+                setIncomingPings(prev => prev.filter(p => p.id !== ping.id));
+              }}
+              className="flex items-start gap-3 rounded-lg border border-(--rs-primary-200) bg-white p-3 text-left shadow-xl transition-colors hover:border-(--rs-primary-300)"
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-(--rs-primary-50) text-(--rs-primary-700)">
+                <BellRing className="h-4 w-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-(--rs-neutral-grey-900)">Ping from {ping.from.name}</span>
+                <span className="mt-0.5 line-clamp-2 block text-xs text-(--rs-neutral-grey-600)">{ping.message}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Backdrop */}
       {open && (
@@ -274,8 +429,16 @@ export function WhoIsInPanel({ isAdmin = false }: { isAdmin?: boolean }) {
           <PanelContent
             sorted={sorted}
             connected={connected}
+            currentUserId={currentUserId}
             isAdmin={isAdmin}
             pendingId={pendingId}
+            pingTargetId={pingTargetId}
+            pingDraft={pingDraft}
+            pingingId={pingingId}
+            pingStatus={pingStatus}
+            setPingTargetId={setPingTargetId}
+            setPingDraft={setPingDraft}
+            sendPing={sendPing}
             forceClockOut={forceClockOut}
           />
         )}

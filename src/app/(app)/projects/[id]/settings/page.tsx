@@ -1,7 +1,7 @@
 import { redirect, notFound } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { getProjects, getLabels, getProjectMembers, getCycles } from '@/lib/tickets';
-import { canManageProject } from '@/lib/permissions';
+import { canManageProject, canReteamProject } from '@/lib/permissions';
 import { ProjectSettingsClient } from '@/components/project-settings-client';
 
 export default async function ProjectSettingsPage({
@@ -31,12 +31,18 @@ export default async function ProjectSettingsPage({
           {project.name} — Settings
         </h1>
         <p className="text-(--rs-neutral-grey-500) text-sm mt-1">
-          Manage labels, members, and cycles for this project.
+          Manage project details, labels, members, and cycles.
         </p>
       </div>
 
       <ProjectSettingsClient
         projectId={id}
+        initialProject={{
+          name: project.name,
+          description: project.description,
+          team: project.team,
+        }}
+        canReteam={canReteamProject(session)}
         initialLabels={labels}
         initialMembers={members}
         initialCycles={cycles}

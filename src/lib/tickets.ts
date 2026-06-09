@@ -56,6 +56,13 @@ export class PlaneApiError extends Error {
   }
 }
 
+export type ProjectPatch = {
+  name?: string;
+  description?: string | null;
+  team?: string | null;
+  archived?: number;
+};
+
 type Row = Record<string, unknown>;
 
 function mapProject(r: Row): PlaneProject {
@@ -67,6 +74,32 @@ function mapProject(r: Row): PlaneProject {
     network: Number(r.network ?? 2),
     team: r.team ? String(r.team) : null,
   };
+}
+
+export function normalizeProjectPatch(patch: ProjectPatch): ProjectPatch {
+  const normalized: ProjectPatch = {};
+
+  if (patch.name !== undefined) {
+    const name = patch.name.trim();
+    if (!name) throw new Error('Project name cannot be blank');
+    normalized.name = name;
+  }
+
+  if (patch.description !== undefined) {
+    const description = patch.description?.trim() ?? '';
+    normalized.description = description || null;
+  }
+
+  if (patch.team !== undefined) {
+    const team = patch.team?.trim() ?? '';
+    normalized.team = team || null;
+  }
+
+  if (patch.archived !== undefined) {
+    normalized.archived = patch.archived;
+  }
+
+  return normalized;
 }
 
 function mapState(r: Row): PlaneState {
@@ -1000,14 +1033,15 @@ export async function createProject(input: {
 
 export async function updateProject(
   projectId: string,
-  patch: { name?: string; description?: string | null; team?: string | null; archived?: number },
+  patch: ProjectPatch,
 ): Promise<void> {
   const sb = createAdminClient();
+  const normalized = normalizeProjectPatch(patch);
   const update: Row = { updated_at: new Date().toISOString() };
-  if (patch.name !== undefined)        update.name = patch.name.trim();
-  if (patch.description !== undefined) update.description = patch.description;
-  if (patch.team !== undefined)        update.team = patch.team ? mapOrgDeptToAppTeam(patch.team) : null;
-  if (patch.archived !== undefined)    update.archived = patch.archived;
+  if (normalized.name !== undefined)        update.name = normalized.name;
+  if (normalized.description !== undefined) update.description = normalized.description;
+  if (normalized.team !== undefined)        update.team = normalized.team ? mapOrgDeptToAppTeam(normalized.team) : null;
+  if (normalized.archived !== undefined)    update.archived = normalized.archived;
   if (Object.keys(update).length === 1) return; // only updated_at — skip
   const { error } = await sb.from('projects')
     .update(update).eq('id', Number(projectId));

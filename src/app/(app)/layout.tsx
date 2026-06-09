@@ -110,7 +110,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 <LiveClock />
               </div>
               <div className="flex items-center gap-2 rounded-2xl border border-(--rs-neutral-grey-200) bg-white/92 px-2 py-2 shadow-sm">
-                <WhoIsInPanel isAdmin={session.role === 'admin'} />
+                <WhoIsInPanel currentUserId={session.id} isAdmin={session.role === 'admin'} />
                 <ClockWidget variant="topbar" isExempt={session.role === 'admin'} />
               </div>
             </div>

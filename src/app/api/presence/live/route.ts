@@ -55,9 +55,11 @@ export const GET = route(async () => {
   const session = await requireSession();
 
   const enc = new TextEncoder();
+  let streamCtrl: ReadableStreamDefaultController | null = null;
 
   const stream = new ReadableStream({
     async start(ctrl) {
+      streamCtrl = ctrl;
       subscribeToLive(session.id, ctrl);
 
       // Seed in-memory store from DB so users with open sessions survive server restarts
@@ -69,7 +71,11 @@ export const GET = route(async () => {
       } catch { /* client already gone */ }
     },
     cancel() {
-      unsubscribeFromLive(session.id);
+      if (streamCtrl) {
+        unsubscribeFromLive(session.id, streamCtrl);
+      } else {
+        unsubscribeFromLive(session.id);
+      }
     },
   });
 

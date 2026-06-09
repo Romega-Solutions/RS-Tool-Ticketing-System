@@ -1,26 +1,33 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2, Plus, X, Trash2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Check, Edit3, Loader2, Plus, X, Trash2 } from 'lucide-react';
 
 interface Label   { id: number; project_id: number; name: string; color: string }
 interface Member  { id: number; project_id: number; user_id: number; name: string; email: string; role: string }
 interface Cycle   { id: number; project_id: number; name: string; start_date: string; end_date: string; archived: number }
 interface UserRow { id: number; name: string; email: string }
+interface ProjectDetails { name: string; description: string; team: string | null }
 
 const LABEL_COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899','#6b7280'];
 
 export function ProjectSettingsClient({
   projectId,
+  initialProject,
+  canReteam,
   initialLabels,
   initialMembers,
   initialCycles,
 }: {
   projectId: string;
+  initialProject: ProjectDetails;
+  canReteam: boolean;
   initialLabels: Label[];
   initialMembers: Member[];
   initialCycles: Cycle[];
 }) {
+  const [project, setProject] = useState<ProjectDetails>(initialProject);
   const [labels, setLabels]   = useState<Label[]>(initialLabels);
   const [members, setMembers] = useState<Member[]>(initialMembers);
   const [cycles, setCycles]   = useState<Cycle[]>(initialCycles);
@@ -33,10 +40,191 @@ export function ProjectSettingsClient({
 
   return (
     <div className="space-y-6">
+      <ProjectDetailsSection
+        projectId={projectId}
+        project={project}
+        setProject={setProject}
+        canReteam={canReteam}
+      />
       <LabelsSection projectId={projectId} labels={labels} setLabels={setLabels} />
       <MembersSection projectId={projectId} members={members} setMembers={setMembers} allUsers={allUsers} />
       <CyclesSection projectId={projectId} cycles={cycles} setCycles={setCycles} />
     </div>
+  );
+}
+
+// ── Project details ─────────────────────────────────────────────────────
+
+function ProjectDetailsSection({
+  projectId,
+  project,
+  setProject,
+  canReteam,
+}: {
+  projectId: string;
+  project: ProjectDetails;
+  setProject: (project: ProjectDetails) => void;
+  canReteam: boolean;
+}) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(project.name);
+  const [description, setDescription] = useState(project.description);
+  const [team, setTeam] = useState(project.team ?? '');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const resetForm = () => {
+    setName(project.name);
+    setDescription(project.description);
+    setTeam(project.team ?? '');
+    setMessage('');
+    setError('');
+  };
+
+  const cancel = () => {
+    resetForm();
+    setEditing(false);
+  };
+
+  const save = async () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError('Project name cannot be blank');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const body: { name: string; description: string | null; team?: string | null } = {
+        name: trimmedName,
+        description: description.trim() || null,
+      };
+      if (canReteam) body.team = team.trim() || null;
+
+      const res = await fetch(`/api/tickets/projects/${projectId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setError(data.error ?? 'Failed to update project');
+        return;
+      }
+
+      const nextProject = {
+        name: trimmedName,
+        description: description.trim(),
+        team: canReteam ? (team.trim() || null) : project.team,
+      };
+      setProject(nextProject);
+      setMessage('Project details updated');
+      setEditing(false);
+      router.refresh();
+    } catch {
+      setError('Request failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card
+      title="Project details"
+      action={!editing && (
+        <button
+          type="button"
+          onClick={() => { resetForm(); setEditing(true); }}
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-1.5 text-xs font-medium text-(--rs-neutral-grey-600) transition-colors hover:border-(--rs-primary-300) hover:text-(--rs-primary-700)"
+        >
+          <Edit3 className="h-3.5 w-3.5" />
+          Edit
+        </button>
+      )}
+    >
+      {!editing ? (
+        <div className="space-y-3">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-(--rs-neutral-grey-400)">Name</p>
+            <p className="mt-1 text-sm font-semibold text-(--rs-neutral-grey-900)">{project.name}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-(--rs-neutral-grey-400)">Description</p>
+            <p className="mt-1 text-sm text-(--rs-neutral-grey-600)">
+              {project.description || <span className="italic text-(--rs-neutral-grey-400)">No description yet.</span>}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-(--rs-neutral-grey-400)">Team</p>
+            <p className="mt-1 text-sm text-(--rs-neutral-grey-600)">
+              {project.team || <span className="italic text-(--rs-neutral-grey-400)">No team assigned.</span>}
+            </p>
+          </div>
+          {message && (
+            <p className="inline-flex items-center gap-1.5 text-xs font-medium text-green-600">
+              <Check className="h-3.5 w-3.5" />
+              {message}
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <label className="block">
+            <span className="text-xs font-medium text-(--rs-neutral-grey-600)">Project name</span>
+            <input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              className="mt-1 min-h-10 w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium text-(--rs-neutral-grey-600)">Description</span>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={3}
+              className="mt-1 w-full resize-y rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none"
+            />
+          </label>
+          {canReteam && (
+            <label className="block">
+              <span className="text-xs font-medium text-(--rs-neutral-grey-600)">Team</span>
+              <input
+                value={team}
+                onChange={e => setTeam(e.target.value)}
+                placeholder="Team name"
+                className="mt-1 min-h-10 w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none"
+              />
+            </label>
+          )}
+          {error && <p className="text-xs text-red-500">{error}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={save}
+              disabled={saving || !name.trim()}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              style={{ background: 'var(--rs-primary-500)' }}
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={cancel}
+              disabled={saving}
+              className="inline-flex min-h-10 items-center rounded-md px-3 py-2 text-sm text-(--rs-neutral-grey-500) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-800) disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -272,10 +460,13 @@ function CyclesSection({
 
 // ── Card wrapper ───────────────────────────────────────────────────────
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="border border-(--rs-neutral-grey-100) bg-white rounded-xl p-5">
-      <h2 className="text-base font-serif font-semibold text-(--rs-neutral-grey-900) mb-3">{title}</h2>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="text-base font-serif font-semibold text-(--rs-neutral-grey-900)">{title}</h2>
+        {action}
+      </div>
       {children}
     </section>
   );
