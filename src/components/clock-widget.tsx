@@ -10,6 +10,23 @@ import { OvertimeStatusBanner } from '@/components/overtime-status-banner';
 type WidgetState = 'loading' | 'out' | 'in';
 type PendingAction = 'clock-in' | 'clock-out' | null;
 
+// Remembers (per browser session) that the "you're over the weekly limit"
+// prompt was dismissed for the current week, so it doesn't re-pop on every
+// page navigation.
+const OVERCAP_ACK_KEY = 'rs-overcap-ack';
+
+// Monday (local) of the current week as YYYY-MM-DD.
+function currentWeekKey(): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  const dow = d.getDay();
+  d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function ClockConfirmDialog({
   action,
   noteDraft,
@@ -162,6 +179,7 @@ export function ClockWidget({
   const [overtimeApproved, setOvertimeApproved] = useState(false);
   const [limitDialogVisible, setLimitDialogVisible] = useState(false);
   const [limitWeekTotal, setLimitWeekTotal] = useState(0);
+  const [dialogVariant, setDialogVariant] = useState<'crossed' | 'on-open'>('crossed');
   const [otRequestState, setOtRequestState] = useState<'idle' | 'sending' | 'pending' | 'error'>('idle');
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedRef = useRef(0);
@@ -215,6 +233,35 @@ export function ClockWidget({
           setState('in');
         } else {
           setState('out');
+          // Opened the app already over the 15h cap — close-on-read clocked them
+          // out server-side. Surface the request-overtime prompt (once per week,
+          // per browser session) unless they already have an open request.
+          if (!isExempt && wsb >= WEEKLY_CAP_SECONDS) {
+            let acked = false;
+            try { acked = sessionStorage.getItem(OVERCAP_ACK_KEY) === currentWeekKey(); } catch { /* no sessionStorage */ }
+            if (!acked) {
+              const showOnOpenPrompt = () => {
+                if (cancelled) return;
+                setLimitWeekTotal(wsb);
+                setDialogVariant('on-open');
+                setOtRequestState('idle');
+                setLimitDialogVisible(true);
+              };
+              fetch('/api/presence/overtime-request')
+                .then(r => r.json())
+                .then((d: { request?: { status: string; approved_until: string | null } | null }) => {
+                  if (cancelled) return;
+                  const req = d.request;
+                  const pending = req?.status === 'pending';
+                  const approved = !!req && req.status === 'approved' && !!req.approved_until
+                    && new Date(req.approved_until).getTime() > Date.now();
+                  // Already requested or actively approved → no prompt needed.
+                  if (pending || approved) return;
+                  showOnOpenPrompt();
+                })
+                .catch(showOnOpenPrompt);
+            }
+          }
         }
       })
       .catch(() => { if (!cancelled) setState('out'); });
@@ -222,6 +269,8 @@ export function ClockWidget({
       cancelled = true;
       if (timerRef.current) clearInterval(timerRef.current);
     };
+    // isExempt is a stable role-derived prop; the mount fetch needn't re-run on it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -267,6 +316,7 @@ export function ClockWidget({
       if (approved) { setOvertimeApproved(true); return; }
 
       setLimitWeekTotal(weekBeforeRef.current + elapsedRef.current);
+      setDialogVariant('crossed');
       setLimitDialogVisible(true);
       void confirmClockOut();
     };
@@ -294,6 +344,15 @@ export function ClockWidget({
 
   function dismissReminder() {
     setReminderVisible(false);
+  }
+
+  function dismissLimitDialog() {
+    // Remember dismissal for this week so the on-open prompt doesn't nag on every
+    // navigation. The mid-session ('crossed') alert is not remembered.
+    if (dialogVariant === 'on-open') {
+      try { sessionStorage.setItem(OVERCAP_ACK_KEY, currentWeekKey()); } catch { /* no sessionStorage */ }
+    }
+    setLimitDialogVisible(false);
   }
 
   function openClockInConfirm() {
@@ -402,8 +461,9 @@ export function ClockWidget({
         <OvertimeGuardrailDialog
           weekSecondsTotal={limitWeekTotal}
           requestState={otRequestState}
+          variant={dialogVariant}
           onRequest={requestOvertime}
-          onClose={() => setLimitDialogVisible(false)}
+          onClose={dismissLimitDialog}
         />
       )}
     </>
