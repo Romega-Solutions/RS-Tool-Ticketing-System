@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
-import { canAccessAdmin } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { route, requireAdmin } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -25,10 +24,8 @@ function getMondayOfWeek(dateStr: string): string | null {
 // PATCH /api/admin/attendance
 // Admin-only — overwrite weekly attendance status + notes for ANY user.
 // Body: { userId, weekStart, monday?..sunday?, notes? }
-export async function PATCH(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!canAccessAdmin(session.role)) return NextResponse.json({ error: 'Admins only' }, { status: 403 });
+export const PATCH = route(async (req: Request) => {
+  await requireAdmin();
 
   let body: {
     userId?: number;
@@ -107,4 +104,4 @@ export async function PATCH(req: Request) {
   if (error) return NextResponse.json({ error: `Insert failed: ${error.message}` }, { status: 500 });
 
   return NextResponse.json({ success: true, action: 'created' });
-}
+});

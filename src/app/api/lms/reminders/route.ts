@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { decideReminder, type ReminderDecision } from '@/lib/lms-reminders';
+import { route, requireBearer } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -9,14 +10,8 @@ export const runtime = 'nodejs';
 // completed the course, POSTs each to the n8n webhook, and updates
 // last_reminded_at. Pair this with an n8n schedule trigger every hour or
 // once per morning.
-export async function GET(req: Request) {
-  const expected = process.env.CRON_SECRET;
-  if (!expected) {
-    return NextResponse.json({ error: 'CRON_SECRET is not configured' }, { status: 500 });
-  }
-  if ((req.headers.get('authorization') ?? '') !== `Bearer ${expected}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+export const GET = route(async (req: Request) => {
+  requireBearer(req, process.env.CRON_SECRET);
 
   const webhook = process.env.N8N_LMS_REMINDER_WEBHOOK_URL;
   const now = new Date();
@@ -97,4 +92,4 @@ export async function GET(req: Request) {
   }
 
   return NextResponse.json({ ranAt: now.toISOString(), sent, skipped });
-}
+});

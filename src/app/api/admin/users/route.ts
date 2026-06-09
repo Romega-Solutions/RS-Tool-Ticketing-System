@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
-import { canAccessAdmin } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { hash } from 'bcryptjs';
+import { route, requireAdmin } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -29,15 +28,8 @@ function parseHourlyRate(
   return { ok: true, value: Math.round(n * 100) / 100 };
 }
 
-async function requireAdmin() {
-  const session = await getSession();
-  if (!session || !canAccessAdmin(session.role)) return null;
-  return session;
-}
-
-export async function GET() {
-  const session = await requireAdmin();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = route(async () => {
+  await requireAdmin();
 
   const admin = createAdminClient();
   const { data } = await admin
@@ -60,12 +52,11 @@ export async function GET() {
   }));
 
   return NextResponse.json({ users: mapped });
-}
+});
 
 // POST — create a new user in Supabase Auth + public.users
-export async function POST(req: Request) {
-  const session = await requireAdmin();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const POST = route(async (req: Request) => {
+  await requireAdmin();
 
   let body: {
     email?: string;
@@ -184,11 +175,10 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ error: 'Failed to create user in database' }, { status: 500 });
   }
-}
+});
 
-export async function PATCH(req: Request) {
+export const PATCH = route(async (req: Request) => {
   const session = await requireAdmin();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   let body: {
     id?: number;
@@ -259,4 +249,4 @@ export async function PATCH(req: Request) {
       isActive:      Boolean(updated.is_active),
     },
   });
-}
+});

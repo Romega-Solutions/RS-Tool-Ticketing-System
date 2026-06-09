@@ -1,20 +1,17 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
-import { canAccessAdmin } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clockOut } from '@/lib/presence';
 import { computeOvertime } from '@/lib/utils';
 import { weeklySecondsForUser } from '@/lib/overtime-server';
+import { route, requireAdmin } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
 // POST /api/admin/timesheets/force-clock-out
 // Admin-only — clock out a specific user's open session.
 // Body: { userId: number, clockedOutAt?: ISO string }   // default: now
-export async function POST(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!canAccessAdmin(session.role)) return NextResponse.json({ error: 'Admins only' }, { status: 403 });
+export const POST = route(async (req: Request) => {
+  await requireAdmin();
 
   let body: { userId?: number; clockedOutAt?: string };
   try {
@@ -83,4 +80,4 @@ export async function POST(req: Request) {
     isOvertime,
     overtimeSeconds,
   });
-}
+});

@@ -4,20 +4,12 @@ import {
   currentWeekStartPht,
   previousWeekStartPht,
 } from '@/lib/status-drafter';
+import { route, requireBearer } from '@/lib/api';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: NextRequest) {
-  const expected = process.env.N8N_BRIEFING_SECRET;
-  if (!expected) {
-    return NextResponse.json({ error: 'Server not configured' }, { status: 500 });
-  }
-
-  const auth = req.headers.get('authorization') ?? '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (!token || token !== expected) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+export const POST = route(async (req: NextRequest) => {
+  requireBearer(req, process.env.N8N_BRIEFING_SECRET);
 
   const url = new URL(req.url);
   const week = url.searchParams.get('week') ?? 'current';
@@ -44,4 +36,4 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   }
-}
+});

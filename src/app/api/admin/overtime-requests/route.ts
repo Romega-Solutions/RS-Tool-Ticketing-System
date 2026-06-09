@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { canAccessAdmin } from '@/lib/rbac';
+import { route, requireAdmin } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -27,10 +26,8 @@ function endOfManilaDay(now: Date): string {
 }
 
 // GET — pending requests first, plus recently decided ones, with user names.
-export async function GET() {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!canAccessAdmin(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+export const GET = route(async () => {
+  await requireAdmin();
 
   const admin = createAdminClient();
   const { data, error } = await admin
@@ -61,13 +58,11 @@ export async function GET() {
     });
 
   return NextResponse.json({ requests });
-}
+});
 
 // POST — approve or deny a request. { id, action: 'approve' | 'deny' }.
-export async function POST(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!canAccessAdmin(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+export const POST = route(async (req: Request) => {
+  const session = await requireAdmin();
 
   let body: { id?: number; action?: string } = {};
   try { body = await req.json(); } catch { body = {}; }
@@ -91,4 +86,4 @@ export async function POST(req: Request) {
 
   if (error) return NextResponse.json({ error: `Update failed: ${error.message}` }, { status: 500 });
   return NextResponse.json({ request: data });
-}
+});

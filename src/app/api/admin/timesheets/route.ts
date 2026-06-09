@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
-import { canAccessReports, canAccessAdmin } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { computeOvertime } from '@/lib/utils';
 import { weeklySecondsForUser } from '@/lib/overtime-server';
+import { route, requireAdmin, requireReports } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -24,10 +23,8 @@ function toLocalISO(d: Date): string {
 // GET /api/admin/timesheets?userId=X&week=YYYY-MM-DD
 // Returns all clock-in/out sessions for a specific user for that week.
 // Lead can only view their own team; admin can view anyone.
-export async function GET(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!canAccessReports(session.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+export const GET = route(async (req: Request) => {
+  const session = await requireReports();
 
   const { searchParams } = new URL(req.url);
   const userIdParam = searchParams.get('userId');
@@ -95,16 +92,14 @@ export async function GET(req: Request) {
   }));
 
   return NextResponse.json({ userId, weekStart, timesheets });
-}
+});
 
 // PATCH /api/admin/timesheets — admin-only edit of a specific session's
 // clock-in / clock-out times. Recomputes duration + overtime.
 //
 // Body: { id: number, clockedInAt?: ISO, clockedOutAt?: ISO | null }
-export async function PATCH(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!canAccessAdmin(session.role)) return NextResponse.json({ error: 'Admins only' }, { status: 403 });
+export const PATCH = route(async (req: Request) => {
+  await requireAdmin();
 
   let body: { id?: number; clockedInAt?: string | null; clockedOutAt?: string | null };
   try {
@@ -174,13 +169,11 @@ export async function PATCH(req: Request) {
   }
 
   return NextResponse.json({ success: true });
-}
+});
 
 // DELETE /api/admin/timesheets?id=N — admin-only removal of a session entry.
-export async function DELETE(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!canAccessAdmin(session.role)) return NextResponse.json({ error: 'Admins only' }, { status: 403 });
+export const DELETE = route(async (req: Request) => {
+  await requireAdmin();
 
   const { searchParams } = new URL(req.url);
   const id = parseInt(searchParams.get('id') ?? '', 10);
@@ -195,4 +188,4 @@ export async function DELETE(req: Request) {
   }
 
   return NextResponse.json({ success: true });
-}
+});

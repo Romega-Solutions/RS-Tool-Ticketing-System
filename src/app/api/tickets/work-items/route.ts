@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
+import { z } from 'zod';
 import {
   createWorkItem,
   patchWorkItem,
@@ -9,21 +9,39 @@ import {
   logActivity,
 } from '@/lib/tickets';
 import { canEditWorkItem, canViewProject } from '@/lib/permissions';
+import { route, requireSession, parseBody, badRequest, forbidden, notFound } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
+// projectId / itemId arrive as strings from the client but tolerate numbers.
+const idParam = z.union([z.string().min(1), z.number()]).transform((v) => String(v));
+
+const createSchema = z.object({
+  projectId: idParam,
+  name: z.string().trim().min(1, 'name is required'),
+  state: z.string().optional(),
+  priority: z.string().optional(),
+});
+
+const patchSchema = z.object({
+  projectId: idParam,
+  itemId: idParam,
+  state: z.string().optional(),
+  priority: z.string().optional(),
+  name: z.string().optional(),
+  description: z.string().nullable().optional(),
+  target_date: z.string().nullable().optional(),
+  assigneeUserIds: z.array(z.number()).optional(),
+});
+
 // GET /api/tickets/work-items?projectId=123
-export async function GET(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = route(async (req: Request) => {
+  const session = await requireSession();
 
   const projectId = new URL(req.url).searchParams.get('projectId');
-  if (!projectId) {
-    return NextResponse.json({ error: 'projectId is required' }, { status: 400 });
-  }
-  if (!(await canViewProject(session, Number(projectId)))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
+  if (!projectId) throw badRequest('projectId is required');
+  if (!(await canViewProject(session, Number(projectId)))) throw forbidden();
+
   try {
     return NextResponse.json(await getWorkItems(projectId));
   } catch (err) {
@@ -32,28 +50,18 @@ export async function GET(req: Request) {
       { status: 502 },
     );
   }
-}
+});
 
 // POST /api/tickets/work-items  { projectId, name, state?, priority? }
-export async function POST(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const POST = route(async (req: Request) => {
+  const session = await requireSession();
 
-  let body: { projectId?: string; name?: string; state?: string; priority?: string } = {};
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }); }
-
-  const { projectId, name, ...rest } = body;
-  if (!projectId || !name?.trim()) {
-    return NextResponse.json({ error: 'projectId and name are required' }, { status: 400 });
-  }
-  if (!(await canViewProject(session, Number(projectId)))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
+  const { projectId, name, state, priority } = await parseBody(req, createSchema);
+  if (!(await canViewProject(session, Number(projectId)))) throw forbidden();
 
   try {
-    const created = await createWorkItem(projectId, { name: name.trim(), ...rest });
-    await logActivity(Number(created.id), session.id, 'created', null, name.trim());
+    const created = await createWorkItem(projectId, { name, state, priority });
+    await logActivity(Number(created.id), session.id, 'created', null, name);
     return NextResponse.json(created);
   } catch (err) {
     return NextResponse.json(
@@ -61,37 +69,20 @@ export async function POST(req: Request) {
       { status: 502 },
     );
   }
-}
+});
 
 // PATCH /api/tickets/work-items  { projectId, itemId, state?, priority?, name?, target_date? }
 // Kept as a body-shaped endpoint so the Kanban board's drag handler can swap
 // the URL and keep its payload exactly the same as /api/plane/work-items.
-export async function PATCH(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const PATCH = route(async (req: Request) => {
+  const session = await requireSession();
 
-  let body: {
-    projectId?: string;
-    itemId?: string;
-    state?: string;
-    priority?: string;
-    name?: string;
-    description?: string | null;
-    target_date?: string | null;
-    assigneeUserIds?: number[];
-  } = {};
-  try { body = await req.json(); }
-  catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }); }
-
-  const { projectId, itemId, ...patch } = body;
-  if (!projectId || !itemId) {
-    return NextResponse.json({ error: 'projectId and itemId are required' }, { status: 400 });
-  }
+  const { projectId, itemId, ...patch } = await parseBody(req, patchSchema);
 
   const before = await getWorkItemDetail(itemId);
-  if (!before) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (!before) throw notFound();
   if (!(await canEditWorkItem(session, { id: before.id, projectId: before.project_id }))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    throw forbidden();
   }
 
   try {
@@ -111,4 +102,4 @@ export async function PATCH(req: Request) {
       { status: 502 },
     );
   }
-}
+});

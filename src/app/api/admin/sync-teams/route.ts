@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/session';
-import { canAccessAdmin } from '@/lib/rbac';
+import { route, requireAdmin } from '@/lib/api';
 import { syncUserTeamsFromOrgChart } from '@/lib/orgchart';
 
 export const runtime = 'nodejs';
@@ -11,12 +10,8 @@ export const runtime = 'nodejs';
 // Admin-only. Pulls every active user's department from the org-chart API
 // (single source of truth) and updates users.team in place. Returns a per-user
 // diff so the admin can see what changed and which accounts didn't match.
-export async function POST(req: Request) {
-  const session = await getSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!canAccessAdmin(session.role)) {
-    return NextResponse.json({ error: 'Admin only' }, { status: 403 });
-  }
+export const POST = route(async (req: Request) => {
+  await requireAdmin();
 
   const dryRun = new URL(req.url).searchParams.get('dry') === '1';
 
@@ -29,4 +24,4 @@ export async function POST(req: Request) {
       { status: 502 },
     );
   }
-}
+});
