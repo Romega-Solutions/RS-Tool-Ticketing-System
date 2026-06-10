@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { route, parseBody, badRequest, unauthorized } from '@/lib/api';
+import { lookupOrgAuthProfileByEmail } from '@/lib/orgchart';
+import { route, parseBody, badRequest, unauthorized, forbidden } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -23,21 +24,13 @@ export const POST = route(async (req: Request) => {
   const name     = body.name?.trim() ?? '';
   const team     = body.team?.trim() || null;
   const jobTitle = body.jobTitle?.trim() || null;
-  const role     = body.role?.trim() || 'ic';
 
   if (!name) throw badRequest('Name is required');
 
   const email = user.email;
-
-  // Only the Romega org domain can self-assign roles. Public domains like
-  // gmail.com are forced to IC — an admin can promote them afterwards.
-  // Without this, any random gmail signup could pick "ceo" and gain admin.
-  const domain = email.split('@')[1] ?? '';
-  const isTrusted = domain === 'romega-solutions.com';
-  const selfAssignableRole = isTrusted && ['intern', 'ic', 'lead', 'ceo'].includes(role) ? role : 'ic';
+  const orgProfile = await lookupOrgAuthProfileByEmail(email);
 
   const now = new Date().toISOString();
-  const emailPrefix = email.split('@')[0].replace(/[^a-z0-9_]/gi, '_').toLowerCase();
 
   const admin = createAdminClient();
   const { data: existing } = await admin
@@ -46,30 +39,39 @@ export const POST = route(async (req: Request) => {
     .eq('email', email)
     .maybeSingle();
 
+  if (!existing && !orgProfile) {
+    throw forbidden('Your email is not listed in the Romega org chart.');
+  }
+
   if (existing) {
-    // Preserve role if they're already admin/ceo — never self-downgrade
-    const protectedRoles = ['admin', 'ceo', 'owner', 'superadmin'];
+    // Preserve elevated roles already assigned by an admin. New account role
+    // comes from org chart only, so a submitted payload cannot self-promote.
+    const protectedRoles = ['admin', 'ceo', 'owner', 'superadmin', 'lead'];
     const finalRole = protectedRoles.includes((existing.role as string).toLowerCase())
       ? existing.role
-      : selfAssignableRole;
+      : orgProfile?.role ?? existing.role ?? 'ic';
 
     await admin.from('users').update({
-      name,
-      team,
-      job_title: jobTitle,
+      name: orgProfile?.name ?? name,
+      team: orgProfile?.team ?? team,
+      job_title: orgProfile?.jobTitle ?? jobTitle,
       role: finalRole,
       updated_at: now,
     }).eq('id', existing.id);
   } else {
-    // First time — create the row (fallback if callback didn't create it)
+    // First time — create the row (fallback if callback did not create it).
+    // The org chart is the source of truth for role/team/title.
+    const profile = orgProfile;
+    if (!profile) throw forbidden('Your email is not listed in the Romega org chart.');
+
     await admin.from('users').upsert({
-      username:      emailPrefix,
+      username:      profile.username,
       password_hash: '',
-      name,
-      email,
-      role:          selfAssignableRole,
-      team,
-      job_title:     jobTitle,
+      name:          profile.name,
+      email:         profile.email,
+      role:          profile.role,
+      team:          profile.team,
+      job_title:     profile.jobTitle,
       is_active:     1,
       created_at:    now,
       updated_at:    now,

@@ -9,7 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, Loader2, LogIn, UserPlus, MailCheck, CheckSquare, Clock, FileText, BarChart2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
-const TRUSTED_DOMAINS_LABEL = '@romega-solutions.com';
+const ORG_CHART_ACCESS_LABEL = 'Romega Org Chart';
 const SHOW_DEMO = process.env.NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS === 'true';
 
 const demoUsers = [
@@ -55,6 +55,7 @@ function LoginContent() {
   const [serverError, setServerError] = useState(() => {
     if (authError === 'auth_failed')   return 'Email confirmation failed. Please try again.';
     if (authError === 'signup_failed') return 'Account setup failed. Please contact your admin.';
+    if (authError === 'not_allowed')   return 'This Google email is not listed in the Romega Org Chart. Please ask an admin to add it first.';
     if (isStale && staleReason === 'inactive') {
       return 'Your account is inactive. Please contact your admin to re-activate it.';
     }
@@ -324,7 +325,8 @@ function LoginContent() {
                   )}
 
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
-                    Anyone can create an account. <strong>{TRUSTED_DOMAINS_LABEL}</strong> can choose their role; others are assigned IC.
+                    Account activation is limited to emails listed in the <strong>{ORG_CHART_ACCESS_LABEL}</strong>,
+                    including approved @romega-solutions.com and Gmail addresses.
                   </div>
 
                   <Field label="Full Name" htmlFor="su-name" error={signUpForm.formState.errors.name?.message}>
@@ -335,7 +337,7 @@ function LoginContent() {
                       className={inputCls(!!signUpForm.formState.errors.name)} />
                   </Field>
 
-                  <Field label="Work Email" htmlFor="su-email" error={signUpForm.formState.errors.email?.message}>
+                  <Field label="Org Chart Email" htmlFor="su-email" error={signUpForm.formState.errors.email?.message}>
                     <input id="su-email" type="email" autoComplete="email"
                       disabled={signUpForm.formState.isSubmitting}
                       {...signUpForm.register('email')}

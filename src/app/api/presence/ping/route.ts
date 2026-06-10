@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { route, requireSession, parseBody } from '@/lib/api';
 import { sendPresencePing } from '@/lib/presence';
+import { hydrateOpenPresenceFromDB } from '@/lib/presence-hydration';
 
 export const runtime = 'nodejs';
 
@@ -19,6 +20,7 @@ const errorByReason: Record<'self' | 'not_online' | 'not_connected', { status: n
 export const POST = route(async (req: Request) => {
   const session = await requireSession();
   const body = await parseBody(req, pingSchema);
+  await hydrateOpenPresenceFromDB();
 
   const result = sendPresencePing({
     from: {

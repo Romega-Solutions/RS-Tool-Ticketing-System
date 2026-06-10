@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { lookupPerson } from '@/lib/orgchart';
+import { lookupOrgAuthProfileByEmail } from '@/lib/orgchart';
 
 export const runtime = 'nodejs';
 
@@ -44,6 +44,7 @@ export async function GET(request: NextRequest) {
   const email    = authUser.email!;
 
   const admin = createAdminClient();
+  const orgProfile = await lookupOrgAuthProfileByEmail(email);
 
   // Create public.users row if this is a fresh sign-up
   const { data: existing } = await admin
@@ -54,20 +55,18 @@ export async function GET(request: NextRequest) {
 
   let isNewUser = false;
   if (!existing) {
-    const emailPrefix = email.split('@')[0].replace(/[^a-z0-9_]/gi, '_').toLowerCase();
-    const name = (
-      (authUser.user_metadata?.full_name as string | undefined) ||
-      (authUser.user_metadata?.name as string | undefined)
-    )?.trim() || emailPrefix;
+    if (!orgProfile) {
+      return NextResponse.redirect(new URL('/login?error=not_allowed', request.url));
+    }
     const now = new Date().toISOString();
     const { error: insertError } = await admin.from('users').upsert({
-      username:      emailPrefix,
+      username:      orgProfile.username,
       password_hash: '',
-      name,
-      email,
-      role:          'ic',
-      team:          null,
-      job_title:     null,
+      name:          orgProfile.name,
+      email:         orgProfile.email,
+      role:          orgProfile.role,
+      team:          orgProfile.team,
+      job_title:     orgProfile.jobTitle,
       is_active:     1,
       created_at:    now,
       updated_at:    now,
@@ -88,23 +87,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL('/login?error=signup_failed', request.url));
     }
     isNewUser = true;
-
-    // Enrich new user from org chart (silent fail — never blocks auth)
-    try {
-      // Email is the primary key; name is the fallback
-      const orgMatch = await lookupPerson({ email, name });
-      if (orgMatch) {
-        await admin.from('users').update({
-          team:      orgMatch.department,
-          job_title: orgMatch.title,
-          updated_at: new Date().toISOString(),
-        }).eq('email', email);
-      }
-    } catch { /* org chart unavailable — proceed normally */ }
+  } else if (orgProfile) {
+    await admin.from('users').update({
+      name:       orgProfile.name,
+      team:       orgProfile.team,
+      job_title:  orgProfile.jobTitle,
+      updated_at: new Date().toISOString(),
+    }).eq('email', email);
   }
 
   // Send new users to onboarding to complete their profile
-  if (isNewUser || !existing?.team) {
+  if (isNewUser || !(orgProfile?.team ?? existing?.team)) {
     response.headers.set('location', new URL('/onboarding', origin).toString());
   }
 

@@ -6,31 +6,25 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { Loader2, ArrowRight, Lock, CheckCircle2, User, Users2, Briefcase, GraduationCap, Building2, X, Sparkles } from 'lucide-react';
+import { Loader2, ArrowRight, Lock, CheckCircle2, User, Briefcase, GraduationCap, X, Sparkles } from 'lucide-react';
 import type { OrgPerson } from '@/lib/orgchart';
 import { createClient } from '@/lib/supabase/client';
 
-const TRUSTED_DOMAINS = ['romega-solutions.com'];
-
 const DEPARTMENTS = [
+  'Technical',
   'AI & Technology',
   'Design',
   'Social Media',
   'Marketing & Brand Content',
   'Sales & Account Management',
   'Recruitment',
+  'HR/Finance',
   'Human Resources',
   'Finance & Bookkeeping',
+  'Market Intelligence',
   'Market Research & Analytics',
   'Executive & Admin',
 ];
-
-const ROLE_OPTS = [
-  { value: 'intern', label: 'Intern',      desc: 'My Tasks · Projects · Weekly Report', icon: GraduationCap },
-  { value: 'ic',     label: 'IC',          desc: 'My Tasks · Projects · Weekly Report', icon: User          },
-  { value: 'lead',   label: 'IC Lead',     desc: 'All above + Attendance · Reports',    icon: Users2        },
-  { value: 'ceo',    label: 'CEO',         desc: 'Full access to all features',         icon: Building2     },
-] as const;
 
 const onboardingSchema = z.object({
   name:     z.string().min(2, 'Full name must be at least 2 characters'),
@@ -47,11 +41,15 @@ const STEPS = [
   { n: 3, label: 'Department',  desc: 'Routes reports to the right team'    },
 ] as const;
 
+function roleFromTitle(title: string | null | undefined): 'intern' | 'ic' {
+  return /\b(intern|ojt|trainee|apprentice)\b/i.test(title ?? '') ? 'intern' : 'ic';
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
 
-  const [domainLoading, setDomainLoading]   = useState(true);
-  const [isTrusted, setIsTrusted]           = useState(false);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [isOrgListed, setIsOrgListed]       = useState(false);
   const [submitted, setSubmitted]           = useState(false);
   const [serverError, setServerError]       = useState('');
   const [errorKey, setErrorKey]             = useState(0);
@@ -74,10 +72,7 @@ export default function OnboardingPage() {
     const supabase = createClient();
     supabase.auth.getUser().then(async ({ data }) => {
       const email   = data.user?.email ?? '';
-      const domain  = email.split('@')[1] ?? '';
-      const trusted = TRUSTED_DOMAINS.includes(domain);
-      setIsTrusted(trusted);
-      if (!trusted) setValue('role', 'ic');
+      setValue('role', 'ic');
 
       // Pre-fill name from Google OAuth (full_name) or email sign-up (name)
       const oauthName = (
@@ -85,8 +80,6 @@ export default function OnboardingPage() {
         (data.user?.user_metadata?.name as string | undefined)
       )?.trim();
       if (oauthName) setValue('name', oauthName);
-
-      setDomainLoading(false);
 
       // Org chart lookup — email is primary, name is fallback
       if (email || (oauthName && oauthName.length >= 2)) {
@@ -99,12 +92,15 @@ export default function OnboardingPage() {
             const { match } = await res.json() as { match: OrgPerson | null };
             if (match) {
               setOrgMatch(match);
+              setIsOrgListed(true);
+              setValue('role', roleFromTitle(match.title), { shouldValidate: true });
               setValue('team', match.department, { shouldValidate: true });
               setValue('jobTitle', match.title);
             }
           }
         } catch { /* org chart unavailable — no pre-fill */ }
       }
+      setProfileLoading(false);
     });
   }, [setValue]);
 
@@ -305,38 +301,26 @@ export default function OnboardingPage() {
                 <label className="text-sm font-semibold text-(--rs-neutral-grey-800)">Your Role</label>
               </div>
 
-              {domainLoading ? (
+              {profileLoading ? (
                 <div className="h-[120px] rounded-xl bg-(--rs-neutral-grey-100) animate-pulse" aria-hidden="true" />
-              ) : isTrusted ? (
+              ) : isOrgListed ? (
                 <div className="space-y-2">
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {ROLE_OPTS.map(opt => {
-                      const selected = roleValue === opt.value;
-                      const Icon = opt.icon;
-                      return (
-                        <button key={opt.value} type="button"
-                          onClick={() => setValue('role', opt.value, { shouldValidate: true })}
-                          className={`group rounded-xl border-2 px-3.5 py-3 text-left cursor-pointer transition-all duration-150 ${
-                            selected
-                              ? 'border-(--rs-primary-500) bg-(--rs-primary-50) animate-card-select'
-                              : 'border-(--rs-neutral-grey-200) hover:border-(--rs-primary-300) hover:bg-(--rs-primary-50)'
-                          }`}>
-                          <div className="flex items-center gap-2 mb-1">
-                            <Icon className={`w-3.5 h-3.5 shrink-0 ${selected ? 'text-(--rs-primary-500)' : 'text-(--rs-neutral-grey-400)'}`} />
-                            <span className={`text-sm font-semibold ${selected ? 'text-(--rs-primary-700)' : 'text-(--rs-neutral-grey-700)'}`}>
-                              {opt.label}
-                            </span>
-                          </div>
-                          <p className={`text-[11px] leading-snug ${selected ? 'text-(--rs-primary-500)' : 'text-(--rs-neutral-grey-400)'}`}>
-                            {opt.desc}
-                          </p>
-                        </button>
-                      );
-                    })}
+                  <div className="rounded-xl border-2 border-(--rs-primary-500) bg-(--rs-primary-50) px-4 py-3 animate-card-select">
+                    <div className="flex items-center gap-2">
+                      {roleValue === 'intern'
+                        ? <GraduationCap className="w-4 h-4 text-(--rs-primary-500)" />
+                        : <User className="w-4 h-4 text-(--rs-primary-500)" />}
+                      <span className="text-sm font-semibold text-(--rs-primary-700)">
+                        {roleValue === 'intern' ? 'Intern' : 'Individual Contributor'}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs leading-snug text-(--rs-primary-500)">
+                      Role is inferred from your org-chart title{orgMatch?.title ? `: ${orgMatch.title}` : ''}.
+                    </p>
                   </div>
                   <p className="text-xs text-(--rs-neutral-grey-400) flex items-center gap-1">
                     <Lock className="w-3 h-3 shrink-0" />
-                    Admin role is assigned by your administrator.
+                    Admin or lead access is assigned by an administrator.
                   </p>
                 </div>
               ) : (
@@ -347,7 +331,7 @@ export default function OnboardingPage() {
                   <div>
                     <p className="text-sm font-semibold text-(--rs-neutral-grey-700)">Individual Contributor (IC)</p>
                     <p className="text-xs text-(--rs-neutral-grey-400) mt-0.5">
-                      Your email domain is not in the trusted list. Your admin can update your role.
+                      Your exact Google email must be listed in the Romega Org Chart before access is activated.
                     </p>
                   </div>
                 </div>

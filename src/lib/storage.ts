@@ -3,10 +3,12 @@
 // (server-side only) — public URLs are always signed, never exposed directly.
 
 import { createAdminClient } from '@/lib/supabase/admin';
+import { isAllowedTaskImageUpload, taskImageExtension } from '@/lib/task-image-uploads';
 
 const BUCKET           = process.env.SUPABASE_RESUMES_BUCKET   ?? 'candidate-resumes';
 const ONBOARDER_BUCKET = process.env.SUPABASE_ONBOARDER_BUCKET ?? 'onboarder-docs';
 const LEARNING_BUCKET  = process.env.SUPABASE_LEARNING_BUCKET  ?? 'learning-content';
+const TASK_IMAGE_BUCKET = process.env.SUPABASE_TASK_IMAGES_BUCKET ?? 'task-images';
 
 // 1y — long enough that the signed URL doesn't expire mid-pipeline. Recruiters
 // who want to share externally should re-sign just before sharing.
@@ -199,4 +201,56 @@ export async function refreshLessonVideoSignedUrl(path: string): Promise<string>
     throw new Error(`Lesson video re-sign failed: ${error?.message ?? 'unknown'}`);
   }
   return data.signedUrl;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Task images — JPG/PNG screenshots attached to work-item descriptions.
+// Bucket is private; we return a signed URL that the description preview can
+// render just like externally-hosted image URLs.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type TaskImageUpload = {
+  path: string;
+  signedUrl: string;
+  mimeType: string;
+  sizeBytes: number;
+};
+
+export async function uploadTaskImageToStorage(args: {
+  workItemId: number;
+  file: File;
+}): Promise<TaskImageUpload> {
+  if (!isAllowedTaskImageUpload(args.file)) {
+    throw new Error('Only JPG and PNG images are accepted.');
+  }
+
+  const ext = taskImageExtension(args.file.name);
+  const name = args.file.name.replace(/\.[^.]+$/, '') || 'image';
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const path = `work-items/${args.workItemId}/${slugify(name)}-${stamp}.${ext}`;
+
+  const admin = createAdminClient();
+  const bytes = new Uint8Array(await args.file.arrayBuffer());
+
+  const { error: uploadError } = await admin.storage.from(TASK_IMAGE_BUCKET).upload(path, bytes, {
+    contentType: args.file.type,
+    upsert: false,
+  });
+  if (uploadError) {
+    throw new Error(`Task image upload failed: ${uploadError.message}`);
+  }
+
+  const { data: signed, error: signError } = await admin.storage
+    .from(TASK_IMAGE_BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+  if (signError || !signed) {
+    throw new Error(`Task image signing failed: ${signError?.message ?? 'unknown'}`);
+  }
+
+  return {
+    path,
+    signedUrl: signed.signedUrl,
+    mimeType: args.file.type,
+    sizeBytes: args.file.size,
+  };
 }

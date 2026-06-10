@@ -1,3 +1,5 @@
+import type { AppRole } from '@/lib/rbac';
+
 // The org chart app is deployed at /org-chart sub-path
 const ORG_CHART_BASE = 'https://tools.romega-solutions.com/org-chart';
 
@@ -25,6 +27,17 @@ type RawPerson = {
   isActive: boolean | number;
 };
 
+export type OrgAuthProfile = {
+  email: string;
+  name: string;
+  role: AppRole;
+  team: string;
+  jobTitle: string | null;
+  username: string;
+};
+
+const ORG_AUTH_EMAIL_DOMAINS = new Set(['romega-solutions.com', 'gmail.com']);
+
 function resolvePhotoUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   if (url.startsWith('http')) return url;
@@ -32,13 +45,17 @@ function resolvePhotoUrl(url: string | null | undefined): string | null {
 }
 
 export const APP_DEPARTMENTS = [
+  'Technical',
+  'AI & Technology',
   'Design',
   'Social Media',
   'Marketing & Brand Content',
   'Sales & Account Management',
   'Recruitment',
+  'HR/Finance',
   'Human Resources',
   'Finance & Bookkeeping',
+  'Market Intelligence',
   'Market Research & Analytics',
   'Executive & Admin',
 ] as const;
@@ -80,6 +97,59 @@ export function mapOrgDeptToAppTeam(orgDeptName: string): string {
     d => normalizeStr(d).includes(norm) || norm.includes(normalizeStr(d))
   );
   return contains ?? orgDeptName;
+}
+
+export function isAllowedOrgAuthEmail(email: string | null | undefined): boolean {
+  const domain = String(email ?? '').trim().toLowerCase().split('@')[1] ?? '';
+  return ORG_AUTH_EMAIL_DOMAINS.has(domain);
+}
+
+export function roleFromOrgTitle(title: string | null | undefined): AppRole {
+  return /\b(intern|ojt|trainee|apprentice)\b/i.test(String(title ?? '')) ? 'intern' : 'ic';
+}
+
+function usernameFromEmail(email: string): string {
+  return email
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'user';
+}
+
+export function buildOrgAuthProfile(person: RawPerson): OrgAuthProfile | null {
+  if (person.isActive === false || person.isActive === 0) return null;
+  const email = person.email?.trim().toLowerCase() ?? '';
+  if (!email || !isAllowedOrgAuthEmail(email)) return null;
+
+  return {
+    email,
+    name: person.name.trim(),
+    role: roleFromOrgTitle(person.title),
+    team: mapOrgDeptToAppTeam(person.departmentName ?? ''),
+    jobTitle: person.title?.trim() || null,
+    username: usernameFromEmail(email),
+  };
+}
+
+export async function lookupOrgAuthProfileByEmail(email: string): Promise<OrgAuthProfile | null> {
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!isAllowedOrgAuthEmail(normalizedEmail)) return null;
+
+  const people = await fetchPeople();
+  const match = people.find(
+    p => p.isActive !== false
+      && p.isActive !== 0
+      && p.email?.trim().toLowerCase() === normalizedEmail,
+  );
+  return match ? buildOrgAuthProfile(match) : null;
+}
+
+export async function listOrgAuthProfiles(role?: AppRole): Promise<OrgAuthProfile[]> {
+  const people = await fetchPeople();
+  return people
+    .map(buildOrgAuthProfile)
+    .filter((profile): profile is OrgAuthProfile => Boolean(profile))
+    .filter(profile => !role || profile.role === role);
 }
 
 export async function fetchPeople(): Promise<RawPerson[]> {

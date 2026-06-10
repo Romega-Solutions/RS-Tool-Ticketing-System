@@ -1,9 +1,16 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Loader2, MessageSquare, Activity as ActivityIcon, FileText, Save, Trash2, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, MessageSquare, Activity as ActivityIcon, FileText, ImagePlus, Save, Trash2, X } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { extractTaskDescriptionImageUrls } from '@/lib/task-description-images';
+import {
+  appendTaskDetailCrumb,
+  popTaskDetailCrumb,
+  taskDetailCrumbLabel,
+  type TaskDetailCrumb,
+} from '@/lib/task-detail-navigation';
+import { isAllowedTaskImageUpload } from '@/lib/task-image-uploads';
 
 // ── Shape we get from /api/tickets/work-items/[id] ─────────────────────────
 export interface SheetWorkItem {
@@ -84,7 +91,12 @@ export function TaskDetailSheet({
 }) {
   const [tab, setTab] = useState<'details' | 'comments' | 'activity'>('details');
   const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('Loading task...');
   const [error, setError] = useState('');
+  const [navigationTrail, setNavigationTrail] = useState<TaskDetailCrumb[]>([]);
+  const [navigationError, setNavigationError] = useState('');
+  const [openingChildId, setOpeningChildId] = useState<number | null>(null);
+  const [backLoading, setBackLoading] = useState(false);
 
   const [item, setItem] = useState<SheetWorkItem | null>(null);
   const [members, setMembers] = useState<ProjectMember[]>([]);
@@ -104,6 +116,8 @@ export function TaskDetailSheet({
   const [assigneeIds, setAssigneeIds] = useState<number[]>([]);
 
   const [saving, setSaving] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState('');
 
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
@@ -112,8 +126,26 @@ export function TaskDetailSheet({
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const descriptionImageUrls = extractTaskDescriptionImageUrls(description);
 
-  const refresh = useCallback(async (id: string) => {
-    setLoading(true); setError('');
+  function imageAltFromFilename(filename: string): string {
+    return filename
+      .replace(/\.[^.]+$/, '')
+      .replace(/[[\]()]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim() || 'task image';
+  }
+
+  function appendImageToDescription(url: string, filename: string) {
+    const line = `![${imageAltFromFilename(filename)}](${url})`;
+    setDescription(prev => `${prev.trimEnd()}${prev.trim() ? '\n\n' : ''}${line}`);
+  }
+
+  const refresh = useCallback(async (
+    id: string,
+    options: { loadingMessage?: string; surfaceError?: boolean } = {},
+  ): Promise<{ ok: true } | { ok: false; message: string }> => {
+    setLoadingMessage(options.loadingMessage ?? 'Loading task...');
+    setLoading(true);
+    if (options.surfaceError !== false) setError('');
     try {
       const [detRes, comRes, actRes] = await Promise.all([
         fetch(`/api/tickets/work-items/${id}`),
@@ -142,12 +174,18 @@ export function TaskDetailSheet({
         fetch(`/api/tickets/projects/${detail.project_id}/cycles`),
         fetch(`/api/tickets/work-items/${id}/children`),
       ]);
-      if (memRes.ok) setMembers((await memRes.json()) as ProjectMember[]);
-      if (labRes.ok) setProjectLabels((await labRes.json()) as Array<{ id: number; name: string; color: string }>);
-      if (cycRes.ok) setProjectCycles((await cycRes.json()) as CycleRow[]);
-      if (kidRes.ok) setChildren((await kidRes.json()) as SubIssueRow[]);
+      setMembers(memRes.ok ? ((await memRes.json()) as ProjectMember[]) : []);
+      setProjectLabels(labRes.ok ? ((await labRes.json()) as Array<{ id: number; name: string; color: string }>) : []);
+      setProjectCycles(cycRes.ok ? ((await cycRes.json()) as CycleRow[]) : []);
+      setChildren(kidRes.ok ? ((await kidRes.json()) as SubIssueRow[]) : []);
+      setNewSub('');
+      setNewComment('');
+      setImageUploadError('');
+      return { ok: true };
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed');
+      const message = e instanceof Error ? e.message : 'Failed';
+      if (options.surfaceError !== false) setError(message);
+      return { ok: false, message };
     } finally {
       setLoading(false);
     }
@@ -157,7 +195,11 @@ export function TaskDetailSheet({
     if (!open || !itemId) return;
 
     const timeoutId = window.setTimeout(() => {
-      void refresh(itemId);
+      setNavigationTrail([]);
+      setNavigationError('');
+      setOpeningChildId(null);
+      setBackLoading(false);
+      void refresh(itemId, { loadingMessage: 'Loading task...' });
     }, 0);
 
     return () => window.clearTimeout(timeoutId);
@@ -247,6 +289,38 @@ export function TaskDetailSheet({
     );
   };
 
+  const handleImageUpload = async (files: FileList | null) => {
+    if (!item || !files?.length) return;
+    const selected = Array.from(files);
+    const invalid = selected.find(file => !isAllowedTaskImageUpload(file));
+    if (invalid) {
+      setImageUploadError('Only JPG and PNG images are accepted.');
+      return;
+    }
+
+    setImageUploading(true);
+    setImageUploadError('');
+    try {
+      for (const file of selected) {
+        const body = new FormData();
+        body.append('file', file, file.name);
+        const res = await fetch(`/api/tickets/work-items/${item.id}/images`, {
+          method: 'POST',
+          body,
+        });
+        const data = await res.json().catch(() => ({})) as { url?: string; name?: string; error?: string };
+        if (!res.ok || !data.url) {
+          throw new Error(data.error ?? `Failed to upload ${file.name}`);
+        }
+        appendImageToDescription(data.url, data.name ?? file.name);
+      }
+    } catch (e) {
+      setImageUploadError(e instanceof Error ? e.message : 'Image upload failed');
+    } finally {
+      setImageUploading(false);
+    }
+  };
+
   const toggleLabel = async (labelId: number) => {
     if (!item) return;
     const applied = item.labels.some(l => l.id === labelId);
@@ -288,6 +362,60 @@ export function TaskDetailSheet({
       setAddingSub(false);
     }
   };
+
+  const openSubIssue = async (child: SubIssueRow) => {
+    if (!item || loading || backLoading) return;
+
+    const currentCrumb: TaskDetailCrumb = {
+      id: item.id,
+      sequenceId: item.sequence_id,
+      name: item.name,
+    };
+
+    setOpeningChildId(child.id);
+    setNavigationError('');
+
+    const result = await refresh(String(child.id), {
+      loadingMessage: `Opening sub-issue #${child.sequence_id}...`,
+      surfaceError: false,
+    });
+
+    if (result.ok) {
+      setNavigationTrail(prev => appendTaskDetailCrumb(prev, currentCrumb));
+      setTab('details');
+    } else {
+      setNavigationError(`Could not open sub-issue #${child.sequence_id}: ${result.message}`);
+    }
+
+    setOpeningChildId(null);
+  };
+
+  const handleBackNavigation = async () => {
+    if (loading || backLoading) return;
+
+    const { previous, trail } = popTaskDetailCrumb(navigationTrail);
+    if (!previous) return;
+
+    setBackLoading(true);
+    setNavigationError('');
+
+    const previousLabel = taskDetailCrumbLabel(previous);
+    const result = await refresh(previous.id, {
+      loadingMessage: `Returning to ${previousLabel}...`,
+      surfaceError: false,
+    });
+
+    if (result.ok) {
+      setNavigationTrail(trail);
+      setTab('details');
+    } else {
+      setNavigationError(`Could not return to ${previousLabel}: ${result.message}`);
+    }
+
+    setBackLoading(false);
+  };
+
+  const navigationBackTarget = navigationTrail[navigationTrail.length - 1] ?? null;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -332,15 +460,38 @@ export function TaskDetailSheet({
           ))}
         </div>
 
+        {navigationBackTarget && (
+          <div className="border-b border-(--rs-neutral-grey-100) px-4 py-2 sm:px-5">
+            <button
+              type="button"
+              onClick={() => void handleBackNavigation()}
+              disabled={loading || backLoading}
+              className="flex min-h-9 max-w-full items-center gap-1.5 rounded-md px-2 text-xs font-medium text-(--rs-neutral-grey-600) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-900) disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {backLoading ? (
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+              ) : (
+                <ChevronLeft className="h-3.5 w-3.5 shrink-0" />
+              )}
+              <span className="truncate">Back to {taskDetailCrumbLabel(navigationBackTarget)}</span>
+            </button>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
           {loading && (
             <div className="flex items-center gap-2 text-sm text-(--rs-neutral-grey-500) py-4">
-              <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+              <Loader2 className="w-4 h-4 animate-spin" /> {loadingMessage}
             </div>
           )}
           {error && (
             <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
               {error}
+            </div>
+          )}
+          {navigationError && (
+            <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {navigationError}
             </div>
           )}
 
@@ -383,6 +534,44 @@ export function TaskDetailSheet({
                     ))}
                   </div>
                 )}
+              </Field>
+
+              <Field label="Images">
+                <div className="rounded-md border border-dashed border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-3 py-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-(--rs-neutral-grey-800)">Upload task images</p>
+                      <p className="text-xs text-(--rs-neutral-grey-500)">JPG and PNG files only.</p>
+                    </div>
+                    <label className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-(--rs-primary-200) bg-white px-3 text-xs font-medium text-(--rs-primary-700) transition-colors hover:bg-(--rs-primary-50)">
+                      {imageUploading ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <ImagePlus className="h-3.5 w-3.5" />
+                      )}
+                      {imageUploading ? 'Uploading...' : 'Choose images'}
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+                        multiple
+                        disabled={imageUploading}
+                        onChange={e => {
+                          void handleImageUpload(e.target.files);
+                          e.currentTarget.value = '';
+                        }}
+                        className="sr-only"
+                      />
+                    </label>
+                  </div>
+                  {imageUploadError && (
+                    <p className="mt-2 text-xs text-red-600">{imageUploadError}</p>
+                  )}
+                  {descriptionImageUrls.length > 0 && (
+                    <p className="mt-2 text-xs text-(--rs-neutral-grey-500)">
+                      Uploaded images are inserted into the description and saved with the task.
+                    </p>
+                  )}
+                </div>
               </Field>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -496,28 +685,44 @@ export function TaskDetailSheet({
               <Field label={`Sub-issues${children.length > 0 ? ` (${children.length})` : ''}`}>
                 {children.length > 0 && (
                   <div className="space-y-1 mb-2">
-                    {children.map(c => (
-                      <div key={c.id} className="flex items-center gap-2 text-xs">
-                        <span className="font-mono text-(--rs-neutral-grey-400)">#{c.sequence_id}</span>
-                        <span
-                          className={`flex-1 truncate ${
-                            c.state_group === 'completed'
-                              ? 'line-through text-(--rs-neutral-grey-400)'
-                              : 'text-(--rs-neutral-grey-800)'
-                          }`}
+                    {children.map(c => {
+                      const opening = openingChildId === c.id;
+
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => void openSubIssue(c)}
+                          disabled={loading || backLoading || openingChildId !== null}
+                          aria-label={`Open sub-issue #${c.sequence_id}: ${c.name}`}
+                          className="group flex min-h-10 w-full items-center gap-2 rounded-md border border-transparent px-2 text-left text-xs transition-colors hover:border-(--rs-neutral-grey-200) hover:bg-(--rs-neutral-grey-50) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300) disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          {c.name}
-                        </span>
-                        {c.state_name && (
+                          <span className="shrink-0 font-mono text-(--rs-neutral-grey-400)">#{c.sequence_id}</span>
                           <span
-                            className="text-[10px] px-1.5 py-0.5 rounded text-white"
-                            style={{ background: c.state_color ?? '#64748b' }}
+                            className={`min-w-0 flex-1 truncate ${
+                              c.state_group === 'completed'
+                                ? 'line-through text-(--rs-neutral-grey-400)'
+                                : 'text-(--rs-neutral-grey-800)'
+                            }`}
                           >
-                            {c.state_name}
+                            {c.name}
                           </span>
-                        )}
-                      </div>
-                    ))}
+                          {c.state_name && (
+                            <span
+                              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-white"
+                              style={{ background: c.state_color ?? '#64748b' }}
+                            >
+                              {c.state_name}
+                            </span>
+                          )}
+                          {opening ? (
+                            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-(--rs-primary-500)" />
+                          ) : (
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-(--rs-neutral-grey-300) transition-colors group-hover:text-(--rs-neutral-grey-600)" />
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
                 <div className="flex flex-col gap-2 sm:flex-row">
