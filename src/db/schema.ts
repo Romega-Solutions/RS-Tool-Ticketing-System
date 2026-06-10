@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean, index } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id:            serial('id').primaryKey(),
@@ -48,6 +48,28 @@ export const overtimeRequests = pgTable('overtime_requests', {
   decidedAt:     text('decided_at'),
   approvedUntil: text('approved_until'),
 });
+
+export const presencePings = pgTable('presence_pings', {
+  id:              text('id').primaryKey(),
+  fromUserId:      integer('from_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  fromName:        text('from_name').notNull(),
+  fromRole:        text('from_role').notNull(),
+  fromTeam:        text('from_team'),
+  fromPhotoUrl:    text('from_photo_url'),
+  toUserId:        integer('to_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  message:         text('message').notNull(),
+  responseMessage: text('response_message'),
+  status:          text('status').notNull().default('pending'),
+  createdAt:       text('created_at').notNull(),
+  deadlineAt:      text('deadline_at').notNull(),
+  acknowledgedAt:  text('acknowledged_at'),
+  missedAt:        text('missed_at'),
+  updatedAt:       text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  index('presence_pings_from_created_idx').on(t.fromUserId, t.createdAt),
+  index('presence_pings_to_created_idx').on(t.toUserId, t.createdAt),
+  index('presence_pings_status_deadline_idx').on(t.status, t.deadlineAt),
+]);
 
 export const weeklyReports = pgTable('weekly_reports', {
   id:                serial('id').primaryKey(),

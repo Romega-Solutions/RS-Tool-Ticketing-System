@@ -1,5 +1,5 @@
 import type { AppRole } from './rbac';
-import { normalizePingMessage } from './presence-ping';
+import { normalizePingMessage, normalizePingReply } from './presence-ping';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -44,8 +44,20 @@ export type PresencePingRecord = PresencePingEvent & {
   senderId: number;
   targetUserId: number;
   status: PresencePingStatus;
+  replyMessage: string | null;
   acknowledgedAt: string | null;
   missedAt: string | null;
+};
+
+export type PresencePingReplyEvent = {
+  type: 'user_ping_reply';
+  id: string;
+  pingId: string;
+  fromUserId: number;
+  toUserId: number;
+  responderName: string;
+  replyMessage: string;
+  acknowledgedAt: string;
 };
 
 export type PresencePingUserSummary = {
@@ -128,6 +140,14 @@ function broadcastToLive(event: PresenceEvent) {
     for (const ctrl of ctrls) {
       sendEvent(ctrl, event);
     }
+  }
+}
+
+function sendToLiveUser(userId: number, event: unknown) {
+  const ctrls = liveSubs.get(userId);
+  if (!ctrls?.size) return;
+  for (const ctrl of ctrls) {
+    sendEvent(ctrl, event);
   }
 }
 
@@ -267,24 +287,25 @@ export function sendPresencePing({
     senderId: from.userId,
     targetUserId: toUserId,
     status: 'pending',
+    replyMessage: null,
     acknowledgedAt: null,
     missedAt: null,
   };
   presencePings.set(id, record);
 
-  for (const target of targets) {
-    sendEvent(target, event);
-  }
+  for (const target of targets) sendEvent(target, event);
   return { ok: true, event, record };
 }
 
 export function acknowledgePresencePing({
   eventId,
   userId,
+  replyMessage,
   now = new Date(),
 }: {
   eventId: string;
   userId: number;
+  replyMessage?: string | null;
   now?: Date;
 }): { ok: true; record: PresencePingRecord } | { ok: false; reason: 'not_found' | 'forbidden' | 'expired'; record?: PresencePingRecord } {
   const record = presencePings.get(eventId);
@@ -296,13 +317,38 @@ export function acknowledgePresencePing({
   if (record.status === 'acknowledged') return { ok: true, record };
 
   record.status = 'acknowledged';
+  record.replyMessage = normalizePingReply(replyMessage);
   record.acknowledgedAt = now.toISOString();
   return { ok: true, record };
 }
 
-export function getPresencePingSnapshotForUser(userId: number, now = new Date()): PresencePingSnapshot {
-  markExpiredPresencePings(now);
+export function sendPresencePingReply({
+  record,
+  responderName,
+}: {
+  record: PresencePingRecord;
+  responderName: string;
+}): PresencePingReplyEvent {
+  const event: PresencePingReplyEvent = {
+    type: 'user_ping_reply',
+    id: `${record.id}-reply`,
+    pingId: record.id,
+    fromUserId: record.targetUserId,
+    toUserId: record.senderId,
+    responderName,
+    replyMessage: normalizePingReply(record.replyMessage),
+    acknowledgedAt: record.acknowledgedAt ?? new Date().toISOString(),
+  };
+  sendToLiveUser(record.senderId, event);
+  return event;
+}
 
+export function createPresencePingSnapshotFromRecords(
+  records: PresencePingRecord[],
+  userId: number,
+  now = new Date(),
+): PresencePingSnapshot {
+  const nowMs = now.getTime();
   const sent: PresencePingRecord[] = [];
   const received: PresencePingRecord[] = [];
   const byUserId: Record<number, PresencePingUserSummary> = {};
@@ -312,7 +358,12 @@ export function getPresencePingSnapshotForUser(userId: number, now = new Date())
     return byUserId[id];
   }
 
-  for (const record of presencePings.values()) {
+  for (const record of records) {
+    if (record.status === 'pending' && Date.parse(record.deadlineAt) <= nowMs) {
+      record.status = 'missed';
+      record.missedAt = now.toISOString();
+    }
+
     if (record.senderId === userId) {
       sent.push(record);
       const summary = summaryFor(record.targetUserId);
@@ -348,6 +399,11 @@ export function getPresencePingSnapshotForUser(userId: number, now = new Date())
     sent: sent.sort(newestFirst),
     received: received.sort(newestFirst),
   };
+}
+
+export function getPresencePingSnapshotForUser(userId: number, now = new Date()): PresencePingSnapshot {
+  markExpiredPresencePings(now);
+  return createPresencePingSnapshotFromRecords([...presencePings.values()], userId, now);
 }
 
 /** Seed users from DB without broadcasting. Used for post-restart hydration. */

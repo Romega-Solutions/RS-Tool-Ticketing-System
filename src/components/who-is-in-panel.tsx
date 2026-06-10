@@ -37,9 +37,20 @@ type SSEEvent =
       message: string;
       createdAt: string;
       deadlineAt: string;
+    }
+  | {
+      type: 'user_ping_reply';
+      id: string;
+      pingId: string;
+      fromUserId: number;
+      toUserId: number;
+      responderName: string;
+      replyMessage: string;
+      acknowledgedAt: string;
     };
 
 type IncomingPing = Extract<SSEEvent, { type: 'user_ping' }>;
+type IncomingPingReply = Extract<SSEEvent, { type: 'user_ping_reply' }>;
 
 type PresencePingStatus = 'pending' | 'acknowledged' | 'missed';
 
@@ -117,8 +128,10 @@ function PanelContent({
   pingStatus,
   pingSnapshot,
   acknowledgingPingId,
+  replyDraftByPingId,
   setPingTargetId,
   setPingDraft,
+  setReplyDraftForPing,
   sendPing,
   acknowledgePing,
   forceClockOut,
@@ -134,10 +147,12 @@ function PanelContent({
   pingStatus: { tone: 'success' | 'error'; message: string } | null;
   pingSnapshot: PresencePingSnapshot;
   acknowledgingPingId: string | null;
+  replyDraftByPingId: Record<string, string>;
   setPingTargetId: (id: number | null) => void;
   setPingDraft: (message: string) => void;
+  setReplyDraftForPing: (id: string, message: string) => void;
   sendPing: (user: PresenceUser) => void;
-  acknowledgePing: (ping: IncomingPing | PresencePingRecord) => void;
+  acknowledgePing: (ping: IncomingPing | PresencePingRecord, replyMessage?: string) => void;
   forceClockOut: (user: PresenceUser) => void;
 }) {
   const pendingReplies = pingSnapshot.received.filter(p => p.status === 'pending');
@@ -168,22 +183,34 @@ function PanelContent({
         <div className="space-y-2 border-b border-(--rs-neutral-grey-100) bg-(--rs-neutral-grey-50) px-4 py-3">
           {pendingReplies.map(ping => (
             <div key={ping.id} className="rounded-lg border border-(--rs-primary-200) bg-white p-2">
-              <div className="flex items-start justify-between gap-2">
+              <div className="space-y-2">
                 <div className="min-w-0">
                   <p className="text-xs font-semibold text-(--rs-neutral-grey-900)">Reply due by {dueLabel(ping.deadlineAt)}</p>
                   <p className="mt-0.5 line-clamp-2 text-xs text-(--rs-neutral-grey-500)">
                     {ping.from.name}: {ping.message}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => acknowledgePing(ping)}
-                  disabled={acknowledgingPingId === ping.id}
-                  className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-md bg-(--rs-primary-500) px-2 text-xs font-medium text-white disabled:opacity-60"
-                >
-                  {acknowledgingPingId === ping.id && <Loader2 className="h-3 w-3 animate-spin" />}
-                  I&apos;m here
-                </button>
+                <div className="flex gap-2">
+                  <input
+                    value={replyDraftByPingId[ping.id] ?? ''}
+                    onChange={e => setReplyDraftForPing(ping.id, e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') acknowledgePing(ping, replyDraftByPingId[ping.id]);
+                    }}
+                    maxLength={160}
+                    placeholder="I'm here"
+                    className="min-h-8 min-w-0 flex-1 rounded-md border border-(--rs-neutral-grey-200) px-2 text-xs focus:border-(--rs-primary-300) focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => acknowledgePing(ping, replyDraftByPingId[ping.id])}
+                    disabled={acknowledgingPingId === ping.id}
+                    className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-md bg-(--rs-primary-500) px-2 text-xs font-medium text-white disabled:opacity-60"
+                  >
+                    {acknowledgingPingId === ping.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                    Reply
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -352,6 +379,8 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
   const [pingingId, setPingingId] = useState<number | null>(null);
   const [pingStatus, setPingStatus] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const [incomingPings, setIncomingPings] = useState<IncomingPing[]>([]);
+  const [incomingReplies, setIncomingReplies] = useState<IncomingPingReply[]>([]);
+  const [replyDraftByPingId, setReplyDraftByPingId] = useState<Record<string, string>>({});
   const [pingSnapshot, setPingSnapshot] = useState<PresencePingSnapshot>({
     byUserId: {},
     sent: [],
@@ -369,6 +398,10 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
       // Presence ping status is an enhancement; keep the live panel usable.
     }
   }, []);
+
+  function setReplyDraftForPing(id: string, message: string) {
+    setReplyDraftByPingId(prev => ({ ...prev, [id]: message }));
+  }
 
   async function forceClockOut(user: PresenceUser) {
     if (!confirm(`Force clock-out ${user.name}? Their open session will be closed now.`)) return;
@@ -419,13 +452,13 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
     }
   }
 
-  async function acknowledgePing(ping: IncomingPing | PresencePingRecord) {
+  async function acknowledgePing(ping: IncomingPing | PresencePingRecord, replyMessage?: string) {
     setAcknowledgingPingId(ping.id);
     try {
       const res = await fetch('/api/presence/ping/ack', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId: ping.id }),
+        body: JSON.stringify({ eventId: ping.id, replyMessage }),
       });
       const data = await res.json().catch(() => ({})) as {
         error?: string;
@@ -434,6 +467,11 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
       if (!res.ok) throw new Error(data.error ?? 'Could not reply to ping');
       if (data.snapshot) setPingSnapshot(data.snapshot);
       setIncomingPings(prev => prev.filter(p => p.id !== ping.id));
+      setReplyDraftByPingId(prev => {
+        const next = { ...prev };
+        delete next[ping.id];
+        return next;
+      });
     } catch (err) {
       setPingStatus({ tone: 'error', message: err instanceof Error ? err.message : 'Could not reply to ping' });
       void loadPingSnapshot();
@@ -477,6 +515,13 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
         playRomegaNotificationSound(4);
         window.setTimeout(() => {
           setIncomingPings(prev => prev.filter(p => p.id !== event.id));
+        }, 9000);
+      } else if (event.type === 'user_ping_reply') {
+        setIncomingReplies(prev => [event, ...prev.filter(p => p.id !== event.id)].slice(0, 3));
+        void loadPingSnapshot();
+        playRomegaNotificationSound(2);
+        window.setTimeout(() => {
+          setIncomingReplies(prev => prev.filter(p => p.id !== event.id));
         }, 9000);
       }
     };
@@ -558,13 +603,48 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
               <div className="mt-2 flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => acknowledgePing(ping)}
+                  onClick={() => acknowledgePing(ping, replyDraftByPingId[ping.id])}
                   disabled={acknowledgingPingId === ping.id}
                   className="inline-flex min-h-8 items-center gap-1 rounded-md bg-(--rs-primary-500) px-3 text-xs font-medium text-white disabled:opacity-60"
                 >
                   {acknowledgingPingId === ping.id && <Loader2 className="h-3 w-3 animate-spin" />}
-                  I&apos;m here
+                  Reply
                 </button>
+              </div>
+              <input
+                value={replyDraftByPingId[ping.id] ?? ''}
+                onChange={e => setReplyDraftForPing(ping.id, e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') acknowledgePing(ping, replyDraftByPingId[ping.id]);
+                }}
+                maxLength={160}
+                placeholder="I'm here"
+                className="mt-2 min-h-8 w-full rounded-md border border-(--rs-neutral-grey-200) px-2 text-xs focus:border-(--rs-primary-300) focus:outline-none"
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {incomingReplies.length > 0 && (
+        <div className="fixed right-4 top-20 z-[60] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2">
+          {incomingReplies.map(reply => (
+            <div
+              key={reply.id}
+              className="rounded-lg border border-green-200 bg-white p-3 text-left shadow-xl"
+            >
+              <div className="flex items-start gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-50 text-green-700">
+                  <BellRing className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-(--rs-neutral-grey-900)">
+                    {reply.responderName} replied
+                  </span>
+                  <span className="mt-0.5 line-clamp-2 block text-xs text-(--rs-neutral-grey-600)">
+                    {reply.replyMessage}
+                  </span>
+                </span>
               </div>
             </div>
           ))}
@@ -611,8 +691,10 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
             pingStatus={pingStatus}
             pingSnapshot={pingSnapshot}
             acknowledgingPingId={acknowledgingPingId}
+            replyDraftByPingId={replyDraftByPingId}
             setPingTargetId={setPingTargetId}
             setPingDraft={setPingDraft}
+            setReplyDraftForPing={setReplyDraftForPing}
             sendPing={sendPing}
             acknowledgePing={acknowledgePing}
             forceClockOut={forceClockOut}

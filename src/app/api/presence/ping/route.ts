@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { route, requireSession, parseBody } from '@/lib/api';
 import { getPresencePingSnapshotForUser, sendPresencePing } from '@/lib/presence';
 import { hydrateOpenPresenceFromDB } from '@/lib/presence-hydration';
+import {
+  getStoredPresencePingSnapshotForUser,
+  persistPresencePingRecord,
+} from '@/lib/presence-ping-store';
 
 export const runtime = 'nodejs';
 
@@ -19,7 +23,8 @@ const errorByReason: Record<'self' | 'not_online' | 'not_connected', { status: n
 
 export const GET = route(async () => {
   const session = await requireSession();
-  return NextResponse.json(getPresencePingSnapshotForUser(session.id));
+  const stored = await getStoredPresencePingSnapshotForUser(session.id);
+  return NextResponse.json(stored ?? getPresencePingSnapshotForUser(session.id));
 });
 
 export const POST = route(async (req: Request) => {
@@ -44,10 +49,14 @@ export const POST = route(async (req: Request) => {
     return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }
 
+  await persistPresencePingRecord(result.record);
+  const snapshot = await getStoredPresencePingSnapshotForUser(session.id)
+    ?? getPresencePingSnapshotForUser(session.id);
+
   return NextResponse.json({
     ok: true,
     ping: result.event,
     record: result.record,
-    snapshot: getPresencePingSnapshotForUser(session.id),
+    snapshot,
   });
 });

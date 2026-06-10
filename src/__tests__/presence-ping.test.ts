@@ -5,6 +5,7 @@ import {
   clockIn,
   getPresencePingSnapshotForUser,
   PRESENCE_PING_RESPONSE_WINDOW_MS,
+  sendPresencePingReply,
   sendPresencePing,
   subscribeToLive,
   type PresenceUser,
@@ -148,6 +149,41 @@ describe('sendPresencePing', () => {
       acknowledgedReplyCount: 1,
       missedReplyCount: 0,
     });
+  });
+
+  it('notifies the sender when the receiver replies to a ping', () => {
+    clockIn(makeUser({ userId: 2, name: 'Receiver' }));
+    subscribeToLive(2, makeController().ctrl);
+    const senderStream = makeController();
+    subscribeToLive(1, senderStream.ctrl);
+
+    const sent = sendPresencePing({
+      from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
+      toUserId: 2,
+      message: 'Please confirm you are online.',
+      createdAt: '2026-06-10T02:00:00.000Z',
+    });
+    expect(sent.ok).toBe(true);
+    if (!sent.ok) return;
+
+    const ack = acknowledgePresencePing({
+      eventId: sent.event.id,
+      userId: 2,
+      replyMessage: "I'm here",
+      now: new Date('2026-06-10T02:30:00.000Z'),
+    });
+    expect(ack.ok).toBe(true);
+    if (!ack.ok) return;
+
+    sendPresencePingReply({
+      record: ack.record,
+      responderName: 'Receiver',
+    });
+
+    expect(senderStream.chunks).toHaveLength(1);
+    expect(senderStream.chunks[0]).toContain('"type":"user_ping_reply"');
+    expect(senderStream.chunks[0]).toContain('"replyMessage":"I\'m here"');
+    expect(senderStream.chunks[0]).toContain('"responderName":"Receiver"');
   });
 
   it('marks an unanswered ping missed after the one-hour response window expires', () => {

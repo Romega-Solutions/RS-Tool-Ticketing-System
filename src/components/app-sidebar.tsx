@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import Image from "next/image";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap, BookMarked, Timer } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap, BookMarked, Timer, BellRing } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { PersonAvatar } from "@/components/person-avatar";
@@ -26,6 +26,7 @@ const navItems = [
   { href: "/marketing/content",      label: "Marketing",  icon: Wand2,           category: "leadTools" },
   { href: "/admin/users",       label: "Users",          icon: Shield,            category: "admin"     },
   { href: "/admin/overtime",    label: "Overtime",       icon: Timer,             category: "admin"     },
+  { href: "/admin/presence-pings", label: "Ping Records", icon: BellRing,          category: "admin"     },
   { href: "/admin/learning",    label: "Manage Learning",icon: BookOpen,          category: "admin"     },
   { href: "/rates",             label: "Rates",          icon: CircleDollarSign,  category: "admin"     },
 ];
