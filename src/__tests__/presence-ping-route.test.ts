@@ -101,9 +101,29 @@ describe('POST /api/presence/ping', () => {
     const res = await POST(jsonReq({ toUserId: 2, message: 'Are you online?' }));
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true });
+    const data = await res.json();
+    expect(data).toMatchObject({
+      ok: true,
+      ping: {
+        type: 'user_ping',
+        deadlineAt: expect.any(String),
+      },
+      record: {
+        status: 'pending',
+        deadlineAt: expect.any(String),
+      },
+      snapshot: {
+        byUserId: {
+          2: {
+            awaitingReplyCount: 1,
+            missedReplyCount: 0,
+          },
+        },
+      },
+    });
     expect(targetStream.chunks).toHaveLength(1);
     expect(targetStream.chunks[0]).toContain('"type":"user_ping"');
     expect(targetStream.chunks[0]).toContain('"message":"Are you online?"');
+    expect(targetStream.chunks[0]).toContain('"deadlineAt"');
   });
 });

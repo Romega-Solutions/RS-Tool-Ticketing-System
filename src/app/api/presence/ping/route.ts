@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { route, requireSession, parseBody } from '@/lib/api';
-import { sendPresencePing } from '@/lib/presence';
+import { getPresencePingSnapshotForUser, sendPresencePing } from '@/lib/presence';
 import { hydrateOpenPresenceFromDB } from '@/lib/presence-hydration';
 
 export const runtime = 'nodejs';
@@ -16,6 +16,11 @@ const errorByReason: Record<'self' | 'not_online' | 'not_connected', { status: n
   not_online:    { status: 409, message: 'User is not clocked in right now' },
   not_connected: { status: 409, message: 'User is not connected right now' },
 };
+
+export const GET = route(async () => {
+  const session = await requireSession();
+  return NextResponse.json(getPresencePingSnapshotForUser(session.id));
+});
 
 export const POST = route(async (req: Request) => {
   const session = await requireSession();
@@ -39,5 +44,10 @@ export const POST = route(async (req: Request) => {
     return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }
 
-  return NextResponse.json({ ok: true, ping: result.event });
+  return NextResponse.json({
+    ok: true,
+    ping: result.event,
+    record: result.record,
+    snapshot: getPresencePingSnapshotForUser(session.id),
+  });
 });

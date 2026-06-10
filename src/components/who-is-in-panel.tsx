@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { BellRing, LogOut, Loader2, MessageCircle, Send, X } from 'lucide-react';
 import { isOvertime } from '@/lib/utils';
 import { PersonAvatar } from '@/components/person-avatar';
@@ -36,13 +36,45 @@ type SSEEvent =
       toUserId: number;
       message: string;
       createdAt: string;
+      deadlineAt: string;
     };
 
 type IncomingPing = Extract<SSEEvent, { type: 'user_ping' }>;
 
+type PresencePingStatus = 'pending' | 'acknowledged' | 'missed';
+
+type PresencePingRecord = IncomingPing & {
+  senderId: number;
+  targetUserId: number;
+  status: PresencePingStatus;
+  acknowledgedAt: string | null;
+  missedAt: string | null;
+};
+
+type PresencePingUserSummary = {
+  userId: number;
+  awaitingReplyCount: number;
+  acknowledgedReplyCount: number;
+  missedReplyCount: number;
+  requiresMyReplyCount: number;
+  missedMeCount: number;
+  nextDeadlineAt: string | null;
+  latestMissedAt: string | null;
+};
+
+type PresencePingSnapshot = {
+  byUserId: Record<number, PresencePingUserSummary>;
+  sent: PresencePingRecord[];
+  received: PresencePingRecord[];
+};
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function sinceLabel(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+function dueLabel(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
@@ -83,9 +115,12 @@ function PanelContent({
   pingDraft,
   pingingId,
   pingStatus,
+  pingSnapshot,
+  acknowledgingPingId,
   setPingTargetId,
   setPingDraft,
   sendPing,
+  acknowledgePing,
   forceClockOut,
 }: {
   sorted: PresenceUser[];
@@ -97,11 +132,17 @@ function PanelContent({
   pingDraft: string;
   pingingId: number | null;
   pingStatus: { tone: 'success' | 'error'; message: string } | null;
+  pingSnapshot: PresencePingSnapshot;
+  acknowledgingPingId: string | null;
   setPingTargetId: (id: number | null) => void;
   setPingDraft: (message: string) => void;
   sendPing: (user: PresenceUser) => void;
+  acknowledgePing: (ping: IncomingPing | PresencePingRecord) => void;
   forceClockOut: (user: PresenceUser) => void;
 }) {
+  const pendingReplies = pingSnapshot.received.filter(p => p.status === 'pending');
+  const missedReplies = pingSnapshot.received.filter(p => p.status === 'missed');
+
   return (
     <div className="flex flex-col h-full">
       {/* Panel header */}
@@ -123,6 +164,39 @@ function PanelContent({
         </span>
       </div>
 
+      {(pendingReplies.length > 0 || missedReplies.length > 0) && (
+        <div className="space-y-2 border-b border-(--rs-neutral-grey-100) bg-(--rs-neutral-grey-50) px-4 py-3">
+          {pendingReplies.map(ping => (
+            <div key={ping.id} className="rounded-lg border border-(--rs-primary-200) bg-white p-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-(--rs-neutral-grey-900)">Reply due by {dueLabel(ping.deadlineAt)}</p>
+                  <p className="mt-0.5 line-clamp-2 text-xs text-(--rs-neutral-grey-500)">
+                    {ping.from.name}: {ping.message}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => acknowledgePing(ping)}
+                  disabled={acknowledgingPingId === ping.id}
+                  className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-md bg-(--rs-primary-500) px-2 text-xs font-medium text-white disabled:opacity-60"
+                >
+                  {acknowledgingPingId === ping.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                  I&apos;m here
+                </button>
+              </div>
+            </div>
+          ))}
+          {missedReplies.length > 0 && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700">
+              {missedReplies.length === 1
+                ? '1 missed ping mark is on your live status.'
+                : `${missedReplies.length} missed ping marks are on your live status.`}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* People list */}
       <div className="flex-1 overflow-y-auto">
         {sorted.length === 0 ? (
@@ -136,6 +210,7 @@ function PanelContent({
               const pinging = pingingId === user.userId;
               const showingPingForm = pingTargetId === user.userId;
               const canPing = user.userId !== currentUserId;
+              const pingSummary = pingSnapshot.byUserId[user.userId];
               return (
                 <div key={user.userId} className="hover:bg-(--rs-neutral-grey-50)">
                   <div className="group flex items-center gap-3 px-4 py-3">
@@ -152,6 +227,30 @@ function PanelContent({
                       <p className="text-sm font-medium text-(--rs-neutral-grey-900) truncate">{user.name}</p>
                       {user.team && (
                         <p className="text-xs text-(--rs-neutral-grey-400) truncate">{user.team}</p>
+                      )}
+                      {pingSummary && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {pingSummary.requiresMyReplyCount > 0 && (
+                            <span className="rounded-full bg-(--rs-primary-50) px-1.5 py-0.5 text-[10px] font-semibold text-(--rs-primary-700)">
+                              Reply due
+                            </span>
+                          )}
+                          {pingSummary.awaitingReplyCount > 0 && (
+                            <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                              Awaiting reply
+                            </span>
+                          )}
+                          {pingSummary.missedReplyCount > 0 && (
+                            <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+                              Missed ping
+                            </span>
+                          )}
+                          {pingSummary.missedMeCount > 0 && (
+                            <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+                              Missed reply
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
 
@@ -253,7 +352,23 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
   const [pingingId, setPingingId] = useState<number | null>(null);
   const [pingStatus, setPingStatus] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const [incomingPings, setIncomingPings] = useState<IncomingPing[]>([]);
+  const [pingSnapshot, setPingSnapshot] = useState<PresencePingSnapshot>({
+    byUserId: {},
+    sent: [],
+    received: [],
+  });
+  const [acknowledgingPingId, setAcknowledgingPingId] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
+
+  const loadPingSnapshot = useCallback(async () => {
+    try {
+      const res = await fetch('/api/presence/ping');
+      if (!res.ok) return;
+      setPingSnapshot((await res.json()) as PresencePingSnapshot);
+    } catch {
+      // Presence ping status is an enhancement; keep the live panel usable.
+    }
+  }, []);
 
   async function forceClockOut(user: PresenceUser) {
     if (!confirm(`Force clock-out ${user.name}? Their open session will be closed now.`)) return;
@@ -285,9 +400,13 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ toUserId: user.userId, message }),
       });
-      const data = await res.json().catch(() => ({})) as { error?: string };
+      const data = await res.json().catch(() => ({})) as {
+        error?: string;
+        snapshot?: PresencePingSnapshot;
+      };
       if (!res.ok) throw new Error(data.error ?? 'Ping failed');
-      setPingStatus({ tone: 'success', message: `Ping sent to ${user.name}` });
+      if (data.snapshot) setPingSnapshot(data.snapshot);
+      setPingStatus({ tone: 'success', message: `Ping sent to ${user.name}. They have 1 hour to reply.` });
       setPingDraft('');
       window.setTimeout(() => {
         setPingTargetId(null);
@@ -300,8 +419,38 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
     }
   }
 
+  async function acknowledgePing(ping: IncomingPing | PresencePingRecord) {
+    setAcknowledgingPingId(ping.id);
+    try {
+      const res = await fetch('/api/presence/ping/ack', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: ping.id }),
+      });
+      const data = await res.json().catch(() => ({})) as {
+        error?: string;
+        snapshot?: PresencePingSnapshot;
+      };
+      if (!res.ok) throw new Error(data.error ?? 'Could not reply to ping');
+      if (data.snapshot) setPingSnapshot(data.snapshot);
+      setIncomingPings(prev => prev.filter(p => p.id !== ping.id));
+    } catch (err) {
+      setPingStatus({ tone: 'error', message: err instanceof Error ? err.message : 'Could not reply to ping' });
+      void loadPingSnapshot();
+    } finally {
+      setAcknowledgingPingId(null);
+    }
+  }
+
   // Single SSE connection for both the badge count and the panel list
   useEffect(() => {
+    const initialPingStatusTimeout = window.setTimeout(() => {
+      void loadPingSnapshot();
+    }, 0);
+    const pingStatusInterval = window.setInterval(() => {
+      void loadPingSnapshot();
+    }, 60_000);
+
     const es = new EventSource('/api/presence/live');
     esRef.current = es;
 
@@ -324,15 +473,21 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
         setOnline(prev => prev.filter(u => u.userId !== event.userId));
       } else if (event.type === 'user_ping') {
         setIncomingPings(prev => [event, ...prev.filter(p => p.id !== event.id)].slice(0, 3));
-        playRomegaNotificationSound();
+        void loadPingSnapshot();
+        playRomegaNotificationSound(4);
         window.setTimeout(() => {
           setIncomingPings(prev => prev.filter(p => p.id !== event.id));
         }, 9000);
       }
     };
 
-    return () => { es.close(); esRef.current = null; };
-  }, []);
+    return () => {
+      window.clearTimeout(initialPingStatusTimeout);
+      window.clearInterval(pingStatusInterval);
+      es.close();
+      esRef.current = null;
+    };
+  }, [loadPingSnapshot]);
 
   // Close on Escape key
   useEffect(() => {
@@ -377,23 +532,41 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
       {incomingPings.length > 0 && (
         <div className="fixed right-4 top-20 z-[60] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2">
           {incomingPings.map(ping => (
-            <button
+            <div
               key={ping.id}
-              type="button"
-              onClick={() => {
-                setOpen(true);
-                setIncomingPings(prev => prev.filter(p => p.id !== ping.id));
-              }}
-              className="flex items-start gap-3 rounded-lg border border-(--rs-primary-200) bg-white p-3 text-left shadow-xl transition-colors hover:border-(--rs-primary-300)"
+              className="rounded-lg border border-(--rs-primary-200) bg-white p-3 text-left shadow-xl"
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-(--rs-primary-50) text-(--rs-primary-700)">
-                <BellRing className="h-4 w-4" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-(--rs-neutral-grey-900)">Ping from {ping.from.name}</span>
-                <span className="mt-0.5 line-clamp-2 block text-xs text-(--rs-neutral-grey-600)">{ping.message}</span>
-              </span>
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(true);
+                  setIncomingPings(prev => prev.filter(p => p.id !== ping.id));
+                }}
+                className="flex w-full items-start gap-3 text-left"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-(--rs-primary-50) text-(--rs-primary-700)">
+                  <BellRing className="h-4 w-4" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-(--rs-neutral-grey-900)">Ping from {ping.from.name}</span>
+                  <span className="mt-0.5 line-clamp-2 block text-xs text-(--rs-neutral-grey-600)">{ping.message}</span>
+                  <span className="mt-1 block text-[10px] font-semibold text-amber-700">
+                    Reply by {dueLabel(ping.deadlineAt)} to avoid a missed ping mark.
+                  </span>
+                </span>
+              </button>
+              <div className="mt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => acknowledgePing(ping)}
+                  disabled={acknowledgingPingId === ping.id}
+                  className="inline-flex min-h-8 items-center gap-1 rounded-md bg-(--rs-primary-500) px-3 text-xs font-medium text-white disabled:opacity-60"
+                >
+                  {acknowledgingPingId === ping.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                  I&apos;m here
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -436,9 +609,12 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
             pingDraft={pingDraft}
             pingingId={pingingId}
             pingStatus={pingStatus}
+            pingSnapshot={pingSnapshot}
+            acknowledgingPingId={acknowledgingPingId}
             setPingTargetId={setPingTargetId}
             setPingDraft={setPingDraft}
             sendPing={sendPing}
+            acknowledgePing={acknowledgePing}
             forceClockOut={forceClockOut}
           />
         )}
