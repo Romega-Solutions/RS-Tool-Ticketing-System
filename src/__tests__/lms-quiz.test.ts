@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { gradeQuiz, formatCertificateSerial, type QuizQuestionWithAnswers } from '@/lib/lms-quiz';
+import { gradeQuiz, formatCertificateSerial, computeQuizGate, type QuizQuestionWithAnswers } from '@/lib/lms-quiz';
 
 function mcQuestion(id: number, correctKeys: string[]): QuizQuestionWithAnswers {
   return {
@@ -102,6 +102,46 @@ describe('gradeQuiz — edge cases', () => {
     });
     expect(r.score).toBe(50);
     expect(r.passed).toBe(true);
+  });
+});
+
+describe('computeQuizGate — sequential progression', () => {
+  const preceding = [
+    { id: 1, title: 'Welcome' },
+    { id: 2, title: 'Policy doc' },
+    { id: 3, title: 'Safety video' },
+  ];
+
+  it('unlocked when there are no preceding lessons (quiz is first)', () => {
+    const g = computeQuizGate({ precedingLessons: [], completedLessonIds: [] });
+    expect(g).toEqual({ locked: false, remaining: [], nextLessonId: null });
+  });
+
+  it('unlocked when every preceding lesson is complete', () => {
+    const g = computeQuizGate({ precedingLessons: preceding, completedLessonIds: [1, 2, 3] });
+    expect(g.locked).toBe(false);
+    expect(g.remaining).toEqual([]);
+    expect(g.nextLessonId).toBeNull();
+  });
+
+  it('locked when nothing is complete — remaining is the full ordered list', () => {
+    const g = computeQuizGate({ precedingLessons: preceding, completedLessonIds: [] });
+    expect(g.locked).toBe(true);
+    expect(g.remaining.map(l => l.id)).toEqual([1, 2, 3]);
+    expect(g.nextLessonId).toBe(1);
+  });
+
+  it('locked when partially complete — nextLessonId is the first gap (order preserved)', () => {
+    const g = computeQuizGate({ precedingLessons: preceding, completedLessonIds: [1, 3] });
+    expect(g.locked).toBe(true);
+    expect(g.remaining.map(l => l.id)).toEqual([2]);
+    expect(g.nextLessonId).toBe(2);
+  });
+
+  it('ignores completions for unrelated lessons', () => {
+    const g = computeQuizGate({ precedingLessons: preceding, completedLessonIds: [99, 100] });
+    expect(g.locked).toBe(true);
+    expect(g.remaining.map(l => l.id)).toEqual([1, 2, 3]);
   });
 });
 

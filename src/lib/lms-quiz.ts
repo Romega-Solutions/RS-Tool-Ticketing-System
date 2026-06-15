@@ -51,3 +51,29 @@ export function gradeQuiz(args: {
 export function formatCertificateSerial(year: number, sequence: number): string {
   return `RS-LMS-${year}-${String(sequence).padStart(6, '0')}`;
 }
+
+// ── Sequential-progression gate ───────────────────────────────────────────
+// A quiz stays locked until every lesson that precedes it (lower sort_order in
+// the same course) is complete for the learner. Keeping the decision pure so it
+// can be unit-tested and reused by both the lesson page and the grading action.
+
+export type QuizGateLesson = { id: number; title: string };
+
+export type QuizGate = {
+  locked:       boolean;
+  remaining:    QuizGateLesson[];   // preceding lessons still incomplete, in order
+  nextLessonId: number | null;      // first incomplete preceding lesson (CTA target)
+};
+
+export function computeQuizGate(args: {
+  precedingLessons:   QuizGateLesson[];   // already ordered by sort_order
+  completedLessonIds: number[];
+}): QuizGate {
+  const done = new Set(args.completedLessonIds);
+  const remaining = args.precedingLessons.filter(l => !done.has(l.id));
+  return {
+    locked:       remaining.length > 0,
+    remaining,
+    nextLessonId: remaining[0]?.id ?? null,
+  };
+}

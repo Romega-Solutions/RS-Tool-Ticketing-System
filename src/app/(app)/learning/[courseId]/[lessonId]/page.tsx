@@ -2,10 +2,12 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { userInCourseAudience, type LmsLesson, type LmsCourse } from '@/lib/lms';
+import { userInCourseAudience, quizGateFor, type LmsLesson, type LmsCourse } from '@/lib/lms';
 import { refreshLessonVideoSignedUrl } from '@/lib/storage';
 import { LessonPlayer } from '@/components/lms/lesson-player.client';
 import { QuizRunner } from '@/components/lms/quiz-runner.client';
+import { QuizLockedCard } from '@/components/lms/quiz-locked-card';
+import { TextLesson } from '@/components/lms/text-lesson';
 import { DiscussionThread, type DiscussionComment } from '@/components/lms/discussion-thread.client';
 import type { QuizQuestion } from '@/lib/lms-quiz';
 import {
@@ -88,7 +90,7 @@ export default async function LessonPage({
   // Second parallel batch: re-sign the upload URL (upload lessons only), load
   // quiz detail (only when a quiz exists), and resolve comment authors — each
   // independent of the others.
-  const [playableVideoUrl, quizDetail, { data: commentUsers }] = await Promise.all([
+  const [playableVideoUrl, quizDetail, { data: commentUsers }, quizGate] = await Promise.all([
     (async (): Promise<string | null> => {
       if (lesson.videoSource === 'upload' && lesson.videoUrl) {
         try { return await refreshLessonVideoSignedUrl(lesson.videoUrl); }
@@ -113,6 +115,7 @@ export default async function LessonPage({
     commentUserIds.length > 0
       ? admin.from('users').select('id, name').in('id', commentUserIds)
       : Promise.resolve({ data: [] as Array<{ id: number; name: string }> }),
+    quizRow ? quizGateFor(session.id, lid) : Promise.resolve(null),
   ]);
 
   let quizQuestions: QuizQuestion[] = [];
@@ -165,22 +168,20 @@ export default async function LessonPage({
       */}
       {quizRow ? (
         <div className="space-y-6">
-          {(lesson.lessonType === 'text' || lesson.lessonType === 'mixed') && (
-            <div>
-              <div className="prose prose-sm whitespace-pre-wrap text-(--rs-neutral-grey-800)">
-                {lesson.bodyMd}
-              </div>
-            </div>
+          {lesson.bodyMd?.trim() && <TextLesson body={lesson.bodyMd} />}
+          {quizGate?.locked ? (
+            <QuizLockedCard courseId={course.id} gate={quizGate} />
+          ) : (
+            <QuizRunner
+              quizId={quizRow.id}
+              passScore={quizRow.pass_score}
+              maxAttempts={quizRow.max_attempts}
+              attemptsUsed={attemptsUsed}
+              questions={quizQuestions}
+              alreadyPassed={quizPassed || alreadyDone}
+              onSubmit={submitQuizAttempt}
+            />
           )}
-          <QuizRunner
-            quizId={quizRow.id}
-            passScore={quizRow.pass_score}
-            maxAttempts={quizRow.max_attempts}
-            attemptsUsed={attemptsUsed}
-            questions={quizQuestions}
-            alreadyPassed={quizPassed || alreadyDone}
-            onSubmit={submitQuizAttempt}
-          />
         </div>
       ) : (
         <LessonPlayer

@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { normalizeRole, type AppRole } from '@/lib/rbac';
+import { computeQuizGate, type QuizGate } from '@/lib/lms-quiz';
 
 export type LmsScope = 'foundation' | 'department' | 'intern';
 export type LessonType = 'text' | 'video' | 'mixed';
@@ -172,6 +173,42 @@ export function canMarkComplete(args: {
   if (args.lessonType === 'video') return args.watchedToEnd;
   // mixed: requires watching to end
   return args.watchedToEnd;
+}
+
+// Quiz gate (sequential progression): resolve the preceding lessons + this
+// user's completions, then defer the locked/remaining decision to the pure
+// computeQuizGate helper. Used by the lesson page (UI) and submitQuizAttempt
+// (server enforcement) so the lock can't be bypassed via the URL/API.
+export async function quizGateFor(userId: number, quizLessonId: number): Promise<QuizGate> {
+  const admin = createAdminClient();
+
+  const { data: quizLesson } = await admin
+    .from('lms_lessons')
+    .select('course_id, sort_order')
+    .eq('id', quizLessonId)
+    .maybeSingle();
+  if (!quizLesson) return { locked: false, remaining: [], nextLessonId: null };
+
+  const { data: preceding } = await admin
+    .from('lms_lessons')
+    .select('id, title, sort_order')
+    .eq('course_id', quizLesson.course_id)
+    .lt('sort_order', quizLesson.sort_order)
+    .order('sort_order', { ascending: true });
+
+  const precedingLessons = ((preceding ?? []) as { id: number; title: string }[])
+    .map(l => ({ id: l.id, title: l.title }));
+  if (precedingLessons.length === 0) return { locked: false, remaining: [], nextLessonId: null };
+
+  const ids = precedingLessons.map(l => l.id);
+  const { data: completions } = await admin
+    .from('lms_lesson_completions')
+    .select('lesson_id')
+    .eq('user_id', userId)
+    .in('lesson_id', ids);
+  const completedLessonIds = ((completions ?? []) as { lesson_id: number }[]).map(r => r.lesson_id);
+
+  return computeQuizGate({ precedingLessons, completedLessonIds });
 }
 
 // Coerce arbitrary DB strings to a known scope literal; defaults to 'foundation' on garbage.

@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
-import { canMarkComplete } from '@/lib/lms';
+import { canMarkComplete, quizGateFor } from '@/lib/lms';
 import { gradeQuiz, formatCertificateSerial, type QuizQuestionWithAnswers } from '@/lib/lms-quiz';
 import { renderCertificatePdf } from '@/components/lms/certificate-pdf';
 
@@ -68,6 +68,13 @@ export async function submitQuizAttempt(
     .eq('id', quizId)
     .maybeSingle();
   if (qe || !quiz) throw new Error('Quiz not found.');
+
+  // Sequential-progression gate — the quiz can't be attempted (even by hitting
+  // this action directly) until every preceding lesson in the course is done.
+  const gate = await quizGateFor(session.id, quiz.lesson_id);
+  if (gate.locked) {
+    throw new Error('Complete the earlier lessons before taking this quiz.');
+  }
 
   // Attempt-limit gate.
   if (quiz.max_attempts != null) {

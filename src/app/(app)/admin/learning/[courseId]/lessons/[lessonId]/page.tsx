@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
@@ -135,7 +136,19 @@ export default async function AdminLessonEditPage({
             <option value="mixed">Mixed (text + video)</option>
           </select>
         </div>
-        <Field label="Body (Markdown)" name="bodyMd" defaultValue={lesson.body_md ?? ''} textarea />
+        <Field
+          label="Body (Markdown)"
+          name="bodyMd"
+          defaultValue={lesson.body_md ?? ''}
+          textarea
+          hint={
+            <>
+              Markdown supported — <code className="text-(--rs-neutral-grey-700)">**bold**</code>, lists, and links.
+              Paste a full URL (<code className="text-(--rs-neutral-grey-700)">https://…</code>) to make it clickable,
+              or use <code className="text-(--rs-neutral-grey-700)">[label](https://…)</code>. External links open in a new tab for learners.
+            </>
+          }
+        />
         <div>
           <label className="block text-sm font-medium text-(--rs-neutral-grey-800) mb-1">Video source</label>
           <select name="videoSource" defaultValue={lesson.video_source ?? ''}
@@ -297,8 +310,8 @@ export default async function AdminLessonEditPage({
   );
 }
 
-function Field({ label, name, defaultValue, required, textarea }: {
-  label: string; name: string; defaultValue?: string; required?: boolean; textarea?: boolean;
+function Field({ label, name, defaultValue, required, textarea, hint }: {
+  label: string; name: string; defaultValue?: string; required?: boolean; textarea?: boolean; hint?: ReactNode;
 }) {
   return (
     <div>
@@ -312,6 +325,7 @@ function Field({ label, name, defaultValue, required, textarea }: {
         <input type="text" name={name} defaultValue={defaultValue} required={required}
           className="block w-full rounded-md border border-(--rs-neutral-grey-300) bg-white px-3 py-2 text-sm" />
       )}
+      {hint && <p className="mt-1.5 text-xs text-(--rs-neutral-grey-500)">{hint}</p>}
     </div>
   );
 }
