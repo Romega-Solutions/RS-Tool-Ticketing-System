@@ -11,6 +11,7 @@ function mcQuestion(id: number, correctKeys: string[]): QuizQuestionWithAnswers 
       { key: 'c', text: 'C' }, { key: 'd', text: 'D' },
     ],
     correctKeys,
+    multiSelect: correctKeys.length > 1,
   };
 }
 
@@ -21,6 +22,7 @@ function tfQuestion(id: number, correctKey: 'true' | 'false'): QuizQuestionWithA
     questionType: 'true_false',
     choices: [{ key: 'true', text: 'True' }, { key: 'false', text: 'False' }],
     correctKeys: [correctKey],
+    multiSelect: false,
   };
 }
 

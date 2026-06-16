@@ -102,6 +102,7 @@ export async function submitQuizAttempt(
     questionType: r.question_type === 'true_false' ? 'true_false' : 'multiple_choice',
     choices:      Array.isArray(r.choices) ? (r.choices as { key: string; text: string }[]) : [],
     correctKeys:  Array.isArray(r.correct_keys) ? (r.correct_keys as string[]) : [],
+    multiSelect:  Array.isArray(r.correct_keys) && (r.correct_keys as string[]).length > 1,
   }));
 
   const result = gradeQuiz({ questions: qs, answers, passScore: quiz.pass_score });

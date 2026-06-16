@@ -11,6 +11,10 @@ export type QuizQuestion = {
   prompt:        string;
   questionType:  QuestionType;
   choices:       QuizChoice[];
+  // True ⇒ "select all that apply" (the question has ≥2 correct answers), so the
+  // client renders checkboxes; false ⇒ a single-answer question rendered as radios.
+  // Derived server-side from correctKeys.length so the keys themselves never ship.
+  multiSelect:   boolean;
   // correctKeys is server-only; the client never receives it.
 };
 

@@ -23,7 +23,7 @@ export function CourseCard({
   return (
     <Link
       href={`/learning/${course.id}`}
-      className="group relative block rounded-xl border border-(--rs-neutral-grey-200) bg-white p-4 hover:border-(--rs-primary-300) hover:shadow-sm transition"
+      className="group relative block rounded-xl border border-(--rs-neutral-grey-200) bg-white p-4 hover:border-(--rs-primary-300) hover:shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300) focus-visible:border-(--rs-primary-300)"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">

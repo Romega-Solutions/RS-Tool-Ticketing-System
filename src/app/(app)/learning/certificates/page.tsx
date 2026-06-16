@@ -77,7 +77,7 @@ export default async function CertificatesPage() {
                 {cert.pdf_path ? (
                   <a
                     href={`/api/lms/certificates/${cert.id}`}
-                    className="inline-flex items-center rounded-md bg-(--rs-primary-500) text-white text-xs font-semibold px-3 py-1.5 hover:bg-(--rs-primary-600)"
+                    className="inline-flex items-center rounded-md bg-(--rs-primary-500) text-white text-xs font-semibold px-3 py-1.5 hover:bg-(--rs-primary-600) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300)"
                   >
                     Download PDF
                   </a>

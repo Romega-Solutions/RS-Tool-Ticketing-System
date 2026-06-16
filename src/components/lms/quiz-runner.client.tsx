@@ -27,13 +27,17 @@ export function QuizRunner(props: Props) {
   const attemptsExhausted =
     !!props.maxAttempts && props.attemptsUsed >= props.maxAttempts;
 
-  function toggle(qid: number, key: string, type: 'multiple_choice' | 'true_false') {
+  // Answered-progress so a learner doesn't burn an attempt on a blank/partial
+  // submission. Grading is all-or-nothing, so an unanswered question = wrong.
+  const answeredCount = props.questions.filter(q => (answers[String(q.id)] ?? []).length > 0).length;
+  const allAnswered   = props.questions.length > 0 && answeredCount === props.questions.length;
+
+  function toggle(qid: number, key: string, single: boolean) {
     setAnswers(prev => {
+      // Single-answer (true/false or single-correct multiple choice) → radio
+      // semantics: the pick replaces any prior choice. Multi-answer → toggle in/out.
+      if (single) return { ...prev, [String(qid)]: [key] };
       const cur = prev[String(qid)] ?? [];
-      if (type === 'true_false') {
-        return { ...prev, [String(qid)]: [key] };
-      }
-      // multiple_choice: allow multi-select (correctKeys may be multiple)
       const next = cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key];
       return { ...prev, [String(qid)]: next };
     });
@@ -87,30 +91,38 @@ export function QuizRunner(props: Props) {
         </p>
       </header>
 
-      {props.questions.map((q, idx) => (
-        <div key={q.id} className="space-y-2">
-          <p className="text-sm font-medium text-(--rs-neutral-grey-900)">
-            {idx + 1}. {q.prompt}
-          </p>
-          <div className="space-y-1.5">
-            {q.choices.map(c => {
-              const chosen = (answers[String(q.id)] ?? []).includes(c.key);
-              const inputType = q.questionType === 'true_false' ? 'radio' : 'checkbox';
-              return (
-                <label key={c.key} className="flex items-center gap-2 text-sm">
-                  <input
-                    type={inputType}
-                    name={`q-${q.id}`}
-                    checked={chosen}
-                    onChange={() => toggle(q.id, c.key, q.questionType)}
-                  />
-                  <span>{c.text}</span>
-                </label>
-              );
-            })}
+      {props.questions.map((q, idx) => {
+        // Single-answer questions (true/false, or multiple choice with one correct
+        // answer) render as radios; only genuine "select all that apply" questions
+        // (≥2 correct answers) render as checkboxes.
+        const single = q.questionType === 'true_false' || !q.multiSelect;
+        return (
+          <div key={q.id} className="space-y-2">
+            <p className="text-sm font-medium text-(--rs-neutral-grey-900)">
+              {idx + 1}. {q.prompt}
+            </p>
+            {!single && (
+              <p className="text-xs text-(--rs-neutral-grey-400)">Select all that apply.</p>
+            )}
+            <div className="space-y-1.5">
+              {q.choices.map(c => {
+                const chosen = (answers[String(q.id)] ?? []).includes(c.key);
+                return (
+                  <label key={c.key} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type={single ? 'radio' : 'checkbox'}
+                      name={`q-${q.id}`}
+                      checked={chosen}
+                      onChange={() => toggle(q.id, c.key, single)}
+                    />
+                    <span>{c.text}</span>
+                  </label>
+                );
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       {result && !result.passed && (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -118,17 +130,25 @@ export function QuizRunner(props: Props) {
         </div>
       )}
 
-      <div className="flex items-center gap-3 border-t border-(--rs-neutral-grey-100) pt-4">
+      <div className="flex flex-wrap items-center gap-3 border-t border-(--rs-neutral-grey-100) pt-4">
         {result && !result.passed && !attemptsExhausted ? (
           <button type="button" onClick={retry}
-            className="rounded-md bg-(--rs-primary-500) text-white text-sm font-semibold px-3 py-2 hover:bg-(--rs-primary-600)">
+            className="rounded-md bg-(--rs-primary-500) text-white text-sm font-semibold px-3 py-2 hover:bg-(--rs-primary-600) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300)">
             Try again
           </button>
         ) : !result && (
-          <button type="button" onClick={submit} disabled={pending || attemptsExhausted}
-            className="rounded-md bg-(--rs-primary-500) text-white text-sm font-semibold px-3 py-2 hover:bg-(--rs-primary-600) disabled:opacity-50">
-            {pending ? 'Submitting…' : 'Submit answers'}
-          </button>
+          <>
+            <button type="button" onClick={submit} disabled={pending || attemptsExhausted || !allAnswered}
+              className="rounded-md bg-(--rs-primary-500) text-white text-sm font-semibold px-3 py-2 hover:bg-(--rs-primary-600) disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300)">
+              {pending ? 'Submitting…' : 'Submit answers'}
+            </button>
+            {!attemptsExhausted && (
+              <span className="text-xs text-(--rs-neutral-grey-500)">
+                {answeredCount} of {props.questions.length} answered
+                {!allAnswered && ' — answer all questions to submit'}
+              </span>
+            )}
+          </>
         )}
         {attemptsExhausted && (
           <p className="text-sm text-red-700">You&apos;ve used all attempts on this quiz.</p>

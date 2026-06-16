@@ -102,7 +102,7 @@ export default async function LessonPage({
       if (!quizRow) return null;
       const [{ data: qs }, { count }, { data: passRow }] = await Promise.all([
         admin.from('lms_quiz_questions')
-          .select('id, prompt, question_type, choices, sort_order')
+          .select('id, prompt, question_type, choices, correct_keys, sort_order')
           .eq('quiz_id', quizRow.id).order('sort_order', { ascending: true }),
         admin.from('lms_quiz_attempts')
           .select('id', { count: 'exact', head: true })
@@ -122,12 +122,14 @@ export default async function LessonPage({
   let attemptsUsed = 0;
   let quizPassed = false;
   if (quizDetail) {
-    type QRow = { id: number; prompt: string; question_type: string; choices: unknown };
+    type QRow = { id: number; prompt: string; question_type: string; choices: unknown; correct_keys: unknown };
     quizQuestions = ((quizDetail.qs ?? []) as QRow[]).map(r => ({
       id:           r.id,
       prompt:       r.prompt,
       questionType: r.question_type === 'true_false' ? 'true_false' : 'multiple_choice',
       choices:      Array.isArray(r.choices) ? (r.choices as { key: string; text: string }[]) : [],
+      // Only the boolean ships to the client — never the correct keys themselves.
+      multiSelect:  Array.isArray(r.correct_keys) && (r.correct_keys as unknown[]).length > 1,
     }));
     attemptsUsed = quizDetail.count ?? 0;
     quizPassed = !!(quizDetail.passRow && quizDetail.passRow.length > 0);
