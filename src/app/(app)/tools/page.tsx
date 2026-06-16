@@ -114,7 +114,7 @@ function ToolTile({ tool }: { tool: ToolTileData }) {
       target="_blank"
       rel="noopener noreferrer"
       aria-label={`Open ${tool.name} (opens in a new tab)`}
-      className={`${base} border-(--rs-neutral-grey-200) hover:border-(--rs-primary-300) hover:shadow-sm`}
+      className={`${base} border-(--rs-neutral-grey-200) hover:border-(--rs-primary-300) hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300) focus-visible:border-(--rs-primary-300)`}
     >
       {inner}
     </a>
@@ -155,7 +155,7 @@ function OrgChartCard({
               target="_blank"
               rel="noopener noreferrer"
               aria-label="Open Org Chart (opens in a new tab)"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-(--rs-primary-500) px-3 py-1.5 text-sm font-medium text-white hover:bg-(--rs-primary-600) transition-colors"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-(--rs-primary-500) px-3 py-1.5 text-sm font-medium text-white hover:bg-(--rs-primary-600) transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300)"
             >
               Open Org Chart <ExternalLink className="h-3.5 w-3.5" />
             </a>
