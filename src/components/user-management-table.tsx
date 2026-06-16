@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Pencil, Check, X, Loader2, UserPlus, Eye, EyeOff, Users } from 'lucide-react';
+import { Pencil, Check, X, Loader2, UserPlus, Eye, EyeOff, Users, UserMinus, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { createClient } from '@/lib/supabase/client';
 
 export type UserRow = {
@@ -65,10 +66,14 @@ function formatUsd(value: number | null): string {
   return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] }) {
+export function UserManagementTable({ initialUsers, currentUserId }: { initialUsers: UserRow[]; currentUserId?: number }) {
   const [userList, setUserList] = useState<UserRow[]>(initialUsers);
   const [liveAlert, setLiveAlert] = useState<string | null>(null);
   const alertTimer = useRef<ReturnType<typeof setTimeout>>(null);
+
+  // Soft remove (deactivate) / restore
+  const [pendingRemove, setPendingRemove] = useState<UserRow | null>(null);
+  const [togglingActive, setTogglingActive] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -151,6 +156,27 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
       setError('Request failed');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Soft remove (deactivate) or restore via the partial PATCH endpoint.
+  const setActive = async (user: UserRow, active: boolean) => {
+    setTogglingActive(true);
+    setError('');
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: user.id, isActive: active ? 1 : 0 }),
+      });
+      const data = (await res.json()) as { user?: UserRow; error?: string };
+      if (!res.ok) { setError(data.error ?? 'Failed to update'); return; }
+      if (data.user) setUserList(prev => prev.map(u => u.id === user.id ? data.user! : u));
+      setPendingRemove(null);
+    } catch {
+      setError('Request failed');
+    } finally {
+      setTogglingActive(false);
     }
   };
 
@@ -335,11 +361,28 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
                           </Button>
                         </div>
                       ) : (
-                        <Button size="sm" variant="ghost"
-                          className="h-7 px-2.5 text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-900)"
-                          onClick={() => startEdit(user)}>
-                          <Pencil className="w-3.5 h-3.5 mr-1" />Edit
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button size="sm" variant="ghost"
+                            className="h-7 px-2.5 text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-900)"
+                            onClick={() => startEdit(user)}>
+                            <Pencil className="w-3.5 h-3.5 mr-1" />Edit
+                          </Button>
+                          {currentUserId !== user.id && (
+                            user.isActive ? (
+                              <Button size="sm" variant="ghost"
+                                className="h-7 px-2.5 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                onClick={() => setPendingRemove(user)} title="Remove (deactivate)">
+                                <UserMinus className="w-3.5 h-3.5 mr-1" />Remove
+                              </Button>
+                            ) : (
+                              <Button size="sm" variant="ghost"
+                                className="h-7 px-2.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                                onClick={() => setActive(user, true)} disabled={togglingActive} title="Restore (reactivate)">
+                                <RotateCcw className="w-3.5 h-3.5 mr-1" />Restore
+                              </Button>
+                            )
+                          )}
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -449,6 +492,21 @@ export function UserManagementTable({ initialUsers }: { initialUsers: UserRow[] 
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingRemove !== null}
+        onOpenChange={(o) => { if (!o) setPendingRemove(null); }}
+        destructive
+        loading={togglingActive}
+        title="Remove this user?"
+        description={
+          pendingRemove
+            ? `${pendingRemove.name} will be deactivated — they won't be able to sign in. Their data is preserved, and you can restore them anytime.`
+            : ''
+        }
+        confirmLabel="Remove user"
+        onConfirm={() => { if (pendingRemove) void setActive(pendingRemove, false); }}
+      />
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { canAccessAdmin } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { UserManagementTable } from '@/components/user-management-table';
+import { UsersAdminTabs } from '@/components/users-admin-tabs';
 
 export default async function AdminUsersPage() {
   const session = await getSession();
@@ -37,7 +37,7 @@ export default async function AdminUsersPage() {
         </p>
       </div>
 
-      <UserManagementTable initialUsers={allUsers} />
+      <UsersAdminTabs initialUsers={allUsers} currentUserId={session.id} />
     </div>
   );
 }
