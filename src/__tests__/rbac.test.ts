@@ -6,6 +6,10 @@ import {
   canAccessPath,
   defaultLandingPath,
   roleLabel,
+  isHrTeam,
+  canAccessCertificateCreator,
+  canAccessDevTools,
+  emailSignatureAccess,
 } from '@/lib/rbac';
 
 describe('normalizeRole', () => {
@@ -92,5 +96,39 @@ describe('roleLabel', () => {
     expect(roleLabel('admin')).toBe('Admin');
     expect(roleLabel('lead')).toBe('Lead');
     expect(roleLabel('ic')).toBe('IC');
+  });
+});
+
+describe('Tools hub gating', () => {
+  it('isHrTeam matches hr/marketing and the exec/admin group, case-insensitively', () => {
+    expect(isHrTeam('hr/marketing')).toBe(true);
+    expect(isHrTeam('HR/Marketing')).toBe(true);
+    expect(isHrTeam('Executive & Admin')).toBe(true);
+    expect(isHrTeam('admin')).toBe(true);
+    expect(isHrTeam('operations')).toBe(false);
+    expect(isHrTeam(null)).toBe(false);
+  });
+
+  it('Certificate Creator is admin-or-HR only', () => {
+    expect(canAccessCertificateCreator('admin', null)).toBe(true);
+    expect(canAccessCertificateCreator('lead', 'hr/marketing')).toBe(true);
+    expect(canAccessCertificateCreator('ic', 'hr/marketing')).toBe(true);
+    expect(canAccessCertificateCreator('lead', 'operations')).toBe(false);
+    expect(canAccessCertificateCreator('intern', null)).toBe(false);
+  });
+
+  it('Dev Tools are admins only', () => {
+    expect(canAccessDevTools('admin')).toBe(true);
+    expect(canAccessDevTools('lead')).toBe(false);
+    expect(canAccessDevTools('ic')).toBe(false);
+    expect(canAccessDevTools('intern')).toBe(false);
+  });
+
+  it('Email Signature access level: admin role → admin, HR team → editor, else visitor', () => {
+    expect(emailSignatureAccess('admin', 'operations')).toBe('admin');
+    expect(emailSignatureAccess('lead', 'hr/marketing')).toBe('editor');
+    expect(emailSignatureAccess('ic', 'executive & admin')).toBe('editor');
+    expect(emailSignatureAccess('ic', 'operations')).toBe('visitor');
+    expect(emailSignatureAccess('intern', null)).toBe('visitor');
   });
 });

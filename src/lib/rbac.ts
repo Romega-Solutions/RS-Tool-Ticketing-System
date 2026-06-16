@@ -49,6 +49,34 @@ export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string
   return LEAD_TOOL_TEAMS[tool].includes(normalizeTeamName(team));
 }
 
+// ── Romega Tools hub (external app launchers) ────────────────────────────────
+// "HR" for tool-gating purposes = the people/HR team plus the exec/admin group.
+const HR_TEAMS = ['hr/marketing', 'executive & admin', 'admin'];
+
+export function isHrTeam(team: string | null): boolean {
+  return HR_TEAMS.includes(String(team ?? '').trim().toLowerCase());
+}
+
+// Certificate Creator is HR-only for now (admins always included).
+export function canAccessCertificateCreator(role: AppRole, team: string | null): boolean {
+  return role === 'admin' || isHrTeam(team);
+}
+
+// Development Tools (GitHub/Vercel/Figma) — admins only for now.
+export function canAccessDevTools(role: AppRole): boolean {
+  return role === 'admin';
+}
+
+export type SignatureAccess = 'admin' | 'editor' | 'visitor';
+
+// Email Signature is open to everyone, but at three permission levels:
+// admin role → Admin, HR team → Editor, everyone else → Visitor.
+export function emailSignatureAccess(role: AppRole, team: string | null): SignatureAccess {
+  if (role === 'admin') return 'admin';
+  if (isHrTeam(team)) return 'editor';
+  return 'visitor';
+}
+
 export function canAccessPath(pathname: string, role: AppRole, team: string | null = null): boolean {
   // /admin/* (including /admin/learning) is admin-only. /learning and
   // /learning/certificates are open to all signed-in users.

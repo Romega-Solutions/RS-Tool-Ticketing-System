@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import Image from "next/image";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap, BookMarked, Timer, BellRing } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap, BookMarked, Timer, BellRing, LayoutGrid } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { PersonAvatar } from "@/components/person-avatar";
@@ -16,6 +16,7 @@ const navItems = [
   { href: "/my-tasks",          label: "My Tasks",       icon: CheckSquare,     category: "main"      },
   { href: "/projects",          label: "Projects",       icon: Briefcase,       category: "main"      },
   { href: "/learning",          label: "Learning",       icon: BookMarked,      category: "main"      },
+  { href: "/tools",             label: "Tools",          icon: LayoutGrid,      category: "main"      },
   { href: "/weekly-report",     label: "Weekly Reports", icon: FileText,        category: "main"      },
   { href: "/attendance",        label: "Attendance",     icon: Calendar,        category: "reports"   },
   { href: "/sales/leads",            label: "Sales",      icon: Users2,          category: "leadTools" },
@@ -135,7 +136,7 @@ function NavLinks({ collapsed = false, role, team }: { collapsed?: boolean; role
     <nav className="flex-1 overflow-y-auto w-full" aria-label="Main Navigation">
       <NavSection label="Workspace" items={mainItems}     collapsed={collapsed} isActive={isActive} />
       <NavSection label="Team"      items={reportItems}   collapsed={collapsed} isActive={isActive} />
-      <NavSection label="Tools"     items={leadToolItems} collapsed={collapsed} isActive={isActive} />
+      <NavSection label="Team Tools" items={leadToolItems} collapsed={collapsed} isActive={isActive} />
       <NavSection label="Admin"     items={adminItems}    collapsed={collapsed} isActive={isActive} />
     </nav>
   );
