@@ -25,7 +25,7 @@ function getMondayOfWeek(dateStr: string): string | null {
 // Admin-only — overwrite weekly attendance status + notes for ANY user.
 // Body: { userId, weekStart, monday?..sunday?, notes? }
 export const PATCH = route(async (req: Request) => {
-  await requireAdmin();
+  const session = await requireAdmin();
 
   let body: {
     userId?: number;
@@ -83,6 +83,8 @@ export const PATCH = route(async (req: Request) => {
     notes:            body.notes == null ? null : body.notes.toString().trim() || null,
     submitted_at:     now,
     updated_at:       now,
+    edited_by:        session.id,
+    edited_at:        now,
   };
 
   const { data: existing } = await admin

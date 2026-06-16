@@ -92,6 +92,8 @@ type AttendanceRow = {
   sunday_status: string | null;
   notes: string | null;
   submitted_at: string | null;
+  edited_by: number | null;
+  edited_at: string | null;
 };
 
 export const GET = route(async (req: Request) => {
@@ -204,6 +206,16 @@ export const GET = route(async (req: Request) => {
   const teamUsers = teamUsersData2 ?? [];
   const resolvePhoto = await getPhotoResolver();
 
+  // Resolve attendance editor display names for the audit-trail tooltip.
+  const attEditorIds = [...new Set((rawRecords as AttendanceRow[])
+    .map(r => r.edited_by)
+    .filter((v): v is number => typeof v === 'number'))];
+  const attEditorNames: Record<number, string> = {};
+  if (attEditorIds.length > 0) {
+    const { data: editors } = await admin.from('users').select('id, name').in('id', attEditorIds);
+    for (const e of (editors ?? []) as { id: number; name: string }[]) attEditorNames[e.id] = e.name;
+  }
+
   // Map snake_case DB rows to camelCase for the client
   const records = (rawRecords as AttendanceRow[]).map(r => ({
     id:               r.id,
@@ -218,6 +230,8 @@ export const GET = route(async (req: Request) => {
     sundayStatus:     r.sunday_status,
     notes:            r.notes,
     submittedAt:      r.submitted_at,
+    editedAt:         r.edited_at,
+    editedByName:     r.edited_by != null ? (attEditorNames[r.edited_by] ?? 'an admin') : null,
   }));
 
   // Build Mon–Sun ISO date strings for timesheet lookup

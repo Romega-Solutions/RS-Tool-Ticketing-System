@@ -31,6 +31,9 @@ export const timesheets = pgTable('timesheets', {
   overtimeConsentUntil: text('overtime_consent_until'),
   notes:           text('notes'),
   date:            text('date').notNull(),
+  // Audit trail: who last admin-edited this session and when (null = never edited).
+  editedBy:        integer('edited_by'),
+  editedAt:        text('edited_at'),
   createdAt:       text('created_at').default(sql`CURRENT_TIMESTAMP`),
 });
 
@@ -187,6 +190,9 @@ export const attendance = pgTable('attendance', {
   sundayStatus:    text('sunday_status'),
   notes:           text('notes'),
   submittedAt:     text('submitted_at'),
+  // Audit trail: who last admin-edited this week's attendance and when (null = never edited).
+  editedBy:        integer('edited_by'),
+  editedAt:        text('edited_at'),
   createdAt:       text('created_at').default(sql`CURRENT_TIMESTAMP`),
 });
 

@@ -3,8 +3,9 @@
 import { Fragment, useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { AttendanceExportSheet } from '@/components/attendance-export-sheet';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { PersonAvatar } from '@/components/person-avatar';
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock, Search, X, Pencil, LogOut, Save, Trash2, ShieldCheck } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock, Search, X, Pencil, LogOut, Save, Trash2, ShieldCheck, Check, History, AlertTriangle } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -17,6 +18,7 @@ interface AttendanceRecord {
   wednesdayStatus: string | null; thursdayStatus: string | null;
   fridayStatus: string | null; saturdayStatus: string | null; sundayStatus: string | null;
   notes: string | null; submittedAt: string | null;
+  editedByName?: string | null; editedAt?: string | null;
 }
 
 interface TeamUser { id: number; name: string; team: string | null; role: string; memberCode?: string | null; hourlyRateUsd?: number | null; photoUrl?: string | null; }
@@ -36,6 +38,8 @@ interface TimesheetEntry {
   durationSeconds: number | null;
   isOvertime?: boolean;
   overtimeSeconds?: number | null;
+  editedByName?: string | null;
+  editedAt?: string | null;
 }
 
 interface DetailDay {
@@ -53,11 +57,13 @@ const DAY_LABELS: Record<DayKey, string> = {
   saturday: 'Sat', sunday: 'Sun',
 };
 
+// Text shades are -800 (not -700) so each label clears WCAG AA (≥4.5:1) on its
+// soft -100 background; the Leave badge gets a -400 border for extra definition.
 const STATUS_OPTS = [
-  { value: 'present', label: 'Present', color: 'bg-green-100 text-green-700 border-green-300' },
-  { value: 'wfh',     label: 'WFH',     color: 'bg-blue-100 text-blue-700 border-blue-300'   },
-  { value: 'leave',   label: 'Leave',   color: 'bg-yellow-100 text-yellow-700 border-yellow-300' },
-  { value: 'absent',  label: 'Absent',  color: 'bg-red-100 text-red-700 border-red-300'      },
+  { value: 'present', label: 'Present', color: 'bg-green-100 text-green-800 border-green-300' },
+  { value: 'wfh',     label: 'WFH',     color: 'bg-blue-100 text-blue-800 border-blue-300'   },
+  { value: 'leave',   label: 'Leave',   color: 'bg-yellow-100 text-yellow-800 border-yellow-400' },
+  { value: 'absent',  label: 'Absent',  color: 'bg-red-100 text-red-800 border-red-300'      },
 ];
 
 function fmtSeconds(s: number): string {
@@ -70,6 +76,12 @@ function fmtSeconds(s: number): string {
 
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+// Audit-trail tooltip: "Edited by Jane Doe on Jun 16".
+function auditTooltip(name: string, iso: string): string {
+  const when = new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `Edited by ${name} on ${when}`;
 }
 
 function statusColor(val: string | null): string {
@@ -140,6 +152,7 @@ function offsetMonth(yearMonth: string, delta: number): string {
 
 function TimesheetDetailPanel({
   userId, weekStart, detailDays, notes, isAdmin, onChanged,
+  attendanceEditedByName, attendanceEditedAt,
 }: {
   userId: number;
   weekStart: string;
@@ -147,6 +160,8 @@ function TimesheetDetailPanel({
   notes: string | null;
   isAdmin: boolean;
   onChanged: () => void;
+  attendanceEditedByName?: string | null;
+  attendanceEditedAt?: string | null;
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
@@ -159,7 +174,25 @@ function TimesheetDetailPanel({
   const [dayDraft,  setDayDraft]  = useState<Record<string, string | null>>(
     () => Object.fromEntries(detailDays.map(d => [d.key, d.status])),
   );
+  // Baseline statuses captured at mount so we can detect admin edits and gate
+  // the Save button on a mandatory note. The panel remounts (keyed) after each
+  // save, which re-baselines automatically.
+  const [initialStatuses] = useState<Record<string, string | null>>(
+    () => Object.fromEntries(detailDays.map(d => [d.key, d.status])),
+  );
   const [notesDraft, setNotesDraft] = useState(notes ?? '');
+  // Which day's status editor is open (per-day accordion — one at a time).
+  const [openDayKey, setOpenDayKey] = useState<string | null>(null);
+  // Pending destructive action awaiting confirmation in the styled dialog.
+  const [pendingAction, setPendingAction] = useState<
+    { kind: 'delete'; id: number } | { kind: 'forceOut'; userId: number } | null
+  >(null);
+
+  const statusChanged = detailDays.some(d => (dayDraft[d.key] ?? null) !== (initialStatuses[d.key] ?? null));
+  const notesChanged  = (notesDraft ?? '') !== (notes ?? '');
+  const dirty         = statusChanged || notesChanged;
+  // A reason is mandatory only when an attendance status actually changed.
+  const needsNote     = statusChanged && !notesDraft.trim();
 
   useEffect(() => {
     let cancelled = false;
@@ -217,13 +250,13 @@ function TimesheetDetailPanel({
     }
   }
 
-  async function deleteEntry(id: number) {
-    if (!confirm('Delete this clock-in session? This cannot be undone.')) return;
+  async function performDelete(id: number) {
     setAdminBusy(true);
     try {
       const res = await fetch(`/api/admin/timesheets?id=${id}`, { method: 'DELETE' });
       const data = await res.json() as { error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Delete failed');
+      setPendingAction(null);
       setReloadKey(k => k + 1);
       onChanged();
     } catch (err) {
@@ -233,8 +266,7 @@ function TimesheetDetailPanel({
     }
   }
 
-  async function forceClockOut(userIdToClose: number) {
-    if (!confirm("Force clock-out this user's open session now?")) return;
+  async function performForceClockOut(userIdToClose: number) {
     setAdminBusy(true);
     try {
       const res = await fetch('/api/admin/timesheets/force-clock-out', {
@@ -244,6 +276,7 @@ function TimesheetDetailPanel({
       });
       const data = await res.json() as { error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Force clock-out failed');
+      setPendingAction(null);
       setReloadKey(k => k + 1);
       onChanged();
     } catch (err) {
@@ -251,6 +284,12 @@ function TimesheetDetailPanel({
     } finally {
       setAdminBusy(false);
     }
+  }
+
+  function runPendingAction() {
+    if (!pendingAction) return;
+    if (pendingAction.kind === 'delete') void performDelete(pendingAction.id);
+    else void performForceClockOut(pendingAction.userId);
   }
 
   async function saveAttendance() {
@@ -311,45 +350,106 @@ function TimesheetDetailPanel({
   }
 
   return (
+    <>
     <tr>
       <td colSpan={10} className="bg-(--rs-neutral-grey-50) border-b border-(--rs-neutral-grey-100)">
         <div className="px-4 py-3">
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_2fr]">
             <div className="space-y-3">
               <div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <p className="text-xs font-semibold text-(--rs-neutral-grey-600) uppercase tracking-wider">Attendance status</p>
-                  {isAdmin && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-(--rs-primary-50) px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-(--rs-primary-700)">
-                      <ShieldCheck className="w-2.5 h-2.5" /> Admin edit
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {attendanceEditedAt && attendanceEditedByName && (
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] text-(--rs-neutral-grey-500)"
+                        title={auditTooltip(attendanceEditedByName, attendanceEditedAt)}
+                      >
+                        <History className="w-2.5 h-2.5" /> Edited
+                      </span>
+                    )}
+                    {isAdmin && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-(--rs-primary-50) px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-(--rs-primary-700)">
+                        <ShieldCheck className="w-2.5 h-2.5" /> Admin edit
+                      </span>
+                    )}
+                  </div>
                 </div>
+                {isAdmin && (
+                  <p className="mt-1 text-[11px] text-(--rs-neutral-grey-400)">Click a day to change its status.</p>
+                )}
                 <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-2">
                   {detailDays.map(day => {
                     const draftVal = dayDraft[day.key] ?? '';
-                    return (
-                      <div key={day.key} className="rounded border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2">
-                        <div className="text-[10px] font-bold uppercase tracking-wide text-(--rs-neutral-grey-400)">
-                          {day.label} {new Date(day.date + 'T00:00:00').getDate()}
-                        </div>
-                        {isAdmin ? (
+                    const dayLabel = `${day.label} ${new Date(day.date + 'T00:00:00').getDate()}`;
+                    const changed  = (dayDraft[day.key] ?? null) !== (initialStatuses[day.key] ?? null);
+                    const isOpen   = isAdmin && openDayKey === day.key;
+
+                    // Admin, day open → inline dropdown editor.
+                    if (isOpen) {
+                      return (
+                        <div key={day.key} className="rounded border border-(--rs-primary-300) bg-(--rs-primary-50)/40 px-2.5 py-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-(--rs-primary-700)">{dayLabel}</span>
+                            <button
+                              type="button"
+                              onClick={() => setOpenDayKey(null)}
+                              aria-label={`Done editing ${dayLabel}`}
+                              className="rounded p-0.5 text-(--rs-primary-600) hover:bg-(--rs-primary-100)"
+                            >
+                              <Check className="w-3 h-3" />
+                            </button>
+                          </div>
                           <select
+                            autoFocus
                             value={draftVal ?? ''}
                             onChange={e => setDayDraft(prev => ({ ...prev, [day.key]: e.target.value || null }))}
                             disabled={adminBusy}
-                            className={`mt-1 w-full rounded border text-xs font-medium px-1.5 py-0.5 outline-none focus:ring-2 focus:ring-(--rs-primary-100) ${statusColor(draftVal)}`}
+                            className={`mt-1 w-full rounded border text-xs font-medium px-1.5 py-1 outline-none focus:ring-2 focus:ring-(--rs-primary-100) ${statusColor(draftVal)}`}
                           >
                             <option value="">—</option>
                             {STATUS_OPTS.map(opt => (
                               <option key={opt.value} value={opt.value}>{opt.label}</option>
                             ))}
                           </select>
-                        ) : (
-                          <div className={`mt-1 inline-block rounded border px-2 py-0.5 text-xs font-medium ${statusColor(day.status)}`}>
-                            {detailDayStatusLabel(day)}
+                        </div>
+                      );
+                    }
+
+                    // Admin, day collapsed → clickable chip that opens the editor.
+                    if (isAdmin) {
+                      return (
+                        <button
+                          key={day.key}
+                          type="button"
+                          onClick={() => setOpenDayKey(day.key)}
+                          disabled={adminBusy}
+                          aria-label={`Edit ${dayLabel} attendance status`}
+                          className="w-full rounded border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-left transition-colors hover:border-(--rs-primary-300) cursor-pointer focus:outline-none focus:ring-2 focus:ring-(--rs-primary-100) disabled:opacity-60"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-(--rs-neutral-grey-400)">
+                              {dayLabel}
+                              {changed && <span className="ml-1 text-(--rs-accent-600)" title="Unsaved change">●</span>}
+                            </span>
+                            <Pencil className="w-3 h-3 text-(--rs-neutral-grey-300)" />
                           </div>
-                        )}
+                          <span className={`mt-1 inline-block rounded border px-2 py-0.5 text-xs font-medium ${statusColor(draftVal || null)}`}>
+                            {draftVal ? statusLabel(draftVal) : '—'}
+                          </span>
+                        </button>
+                      );
+                    }
+
+                    // Non-admin → read-only chip.
+                    return (
+                      <div key={day.key} className="rounded border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2">
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-(--rs-neutral-grey-400)">
+                          {dayLabel}
+                        </div>
+                        <div className={`mt-1 inline-block rounded border px-2 py-0.5 text-xs font-medium ${statusColor(day.status)}`}>
+                          {detailDayStatusLabel(day)}
+                        </div>
                       </div>
                     );
                   })}
@@ -377,11 +477,24 @@ function TimesheetDetailPanel({
                   </div>
                 )}
                 {isAdmin && (
-                  <div className="mt-2 flex justify-end">
-                    <Button size="sm" onClick={saveAttendance} disabled={adminBusy} className="gap-1.5">
-                      {adminBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                      Save attendance
-                    </Button>
+                  <div className="mt-2 space-y-1.5">
+                    {needsNote && (
+                      <p className="flex items-center gap-1 text-[11px] text-(--rs-accent-700)">
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        A note is required when you change an attendance status.
+                      </p>
+                    )}
+                    <div className="flex justify-end">
+                      <Button
+                        size="sm"
+                        onClick={saveAttendance}
+                        disabled={adminBusy || !dirty || needsNote}
+                        className="gap-1.5"
+                      >
+                        {adminBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                        Save attendance
+                      </Button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -398,11 +511,17 @@ function TimesheetDetailPanel({
                 <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-7">
                   {detailDays.map(day => {
                     const daySessions = byDate[day.date] ?? [];
+                    const daySessionSeconds = daySessions.reduce((sum, s) => sum + (s.durationSeconds ?? 0), 0);
                     return (
                       <div key={day.key} className="space-y-1">
                         <p className="text-[10px] font-bold uppercase tracking-wide text-(--rs-neutral-grey-400)">
                           {day.label} {new Date(day.date + 'T00:00:00').getDate()}
                         </p>
+                        {daySessions.length > 1 && (
+                          <p className="text-[9px] font-medium text-(--rs-primary-600)">
+                            {daySessions.length} sessions · {fmtSeconds(daySessionSeconds)}
+                          </p>
+                        )}
                         {daySessions.length === 0 ? (
                           <p className="text-xs text-(--rs-neutral-grey-300)">—</p>
                         ) : (
@@ -472,6 +591,14 @@ function TimesheetDetailPanel({
                                         OT{s.overtimeSeconds ? ` +${fmtSeconds(s.overtimeSeconds)}` : ''}
                                       </div>
                                     )}
+                                    {s.editedAt && s.editedByName && (
+                                      <div
+                                        className="flex items-center gap-1 text-[9px] text-(--rs-neutral-grey-400)"
+                                        title={auditTooltip(s.editedByName, s.editedAt)}
+                                      >
+                                        <History className="w-2.5 h-2.5 shrink-0" /> Edited
+                                      </div>
+                                    )}
                                     {isAdmin && (
                                       <div className="flex items-center gap-1 pt-1 border-t border-(--rs-neutral-grey-100) mt-1">
                                         <button
@@ -486,9 +613,10 @@ function TimesheetDetailPanel({
                                         {!s.clockedOutAt && (
                                           <button
                                             type="button"
-                                            onClick={() => forceClockOut(userId)}
+                                            onClick={() => setPendingAction({ kind: 'forceOut', userId })}
                                             disabled={adminBusy}
                                             title="Force clock-out now"
+                                            aria-label="Force clock-out now"
                                             className="rounded p-1 text-orange-500 hover:bg-orange-50 hover:text-orange-700 transition-colors"
                                           >
                                             <LogOut className="w-3 h-3" />
@@ -496,9 +624,10 @@ function TimesheetDetailPanel({
                                         )}
                                         <button
                                           type="button"
-                                          onClick={() => deleteEntry(s.id)}
+                                          onClick={() => setPendingAction({ kind: 'delete', id: s.id })}
                                           disabled={adminBusy}
                                           title="Delete entry"
+                                          aria-label="Delete clock-in session"
                                           className="ml-auto rounded p-1 text-(--rs-neutral-grey-400) hover:bg-red-50 hover:text-red-600 transition-colors"
                                         >
                                           <Trash2 className="w-3 h-3" />
@@ -521,6 +650,21 @@ function TimesheetDetailPanel({
         </div>
       </td>
     </tr>
+    <ConfirmDialog
+      open={pendingAction !== null}
+      onOpenChange={open => { if (!open) setPendingAction(null); }}
+      destructive
+      loading={adminBusy}
+      title={pendingAction?.kind === 'delete' ? 'Delete clock-in session?' : 'Force clock-out now?'}
+      description={
+        pendingAction?.kind === 'delete'
+          ? 'This permanently removes the session and its hours from this week. This cannot be undone.'
+          : "This ends the user's currently open session at the current time."
+      }
+      confirmLabel={pendingAction?.kind === 'delete' ? 'Delete session' : 'Force clock-out'}
+      onConfirm={runPendingAction}
+    />
+    </>
   );
 }
 
@@ -819,6 +963,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-(--rs-neutral-grey-400)" />
                   <input
                     type="text"
+                    autoFocus
                     value={weeklySearch}
                     onChange={e => { setWeeklySearch(e.target.value); setWeeklyPage(1); }}
                     placeholder="Search member or team…"
@@ -908,7 +1053,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                               return (
                                 <td key={day} className={`text-center py-4 px-1 align-middle ${isTodayCol ? 'bg-(--rs-primary-50)/30' : ''}`}>
                                   {isRestDay ? (
-                                    <span className="inline-block w-full rounded bg-(--rs-neutral-grey-200) text-(--rs-neutral-grey-500) text-[10px] font-medium px-1 py-1">
+                                    <span className="inline-block w-full rounded bg-(--rs-neutral-grey-200) text-(--rs-neutral-grey-700) text-[10px] font-medium px-1 py-1">
                                       Rest day
                                     </span>
                                   ) : (
@@ -943,6 +1088,8 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                               notes={rec?.notes ?? null}
                               isAdmin={isAdmin}
                               onChanged={() => setWeekRefreshKey(k => k + 1)}
+                              attendanceEditedByName={rec?.editedByName ?? null}
+                              attendanceEditedAt={rec?.editedAt ?? null}
                             />
                           )}
                         </Fragment>

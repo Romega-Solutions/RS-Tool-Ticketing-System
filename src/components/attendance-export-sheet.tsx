@@ -12,7 +12,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Download, FileText, FileJson, FileSpreadsheet, Check, Users, ChevronDown } from 'lucide-react';
+import { Download, FileText, FileJson, FileSpreadsheet, Check, Users, ChevronDown, Loader2 } from 'lucide-react';
 import {
   downloadTextFile,
   rowsToCsv,
@@ -76,6 +76,7 @@ function reformatDurationCell(value: string, target: DurationFormat): string {
 
 export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLabel, timesheet, wisePaymentReference, wiseAmounts, fx }: Props) {
   const [open, setOpen] = useState(false);
+  const [exporting, setExporting]                 = useState(false);
   const [format, setFormat]                       = useState<ExportFormat>('csv');
   const [csvTemplate, setCsvTemplate]             = useState<CsvTemplate>('standard');
   const [includeNotes, setIncludeNotes]           = useState(true);
@@ -148,7 +149,10 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
     : filteredRows.length;
   const disabled = rowCount === 0;
 
-  function handleExport() {
+  // Builds the file synchronously. Kept separate so handleExport can yield a
+  // frame first — that lets the button paint its busy state before a large
+  // dataset is serialized, avoiding a frozen-looking UI on big exports.
+  function buildAndDownload() {
     const dateSuffix = new Date().toISOString().slice(0, 10);
 
     if (format === 'csv' && activeTemplate === 'timesheet' && timesheet) {
@@ -157,7 +161,6 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
         `${baseName}_timesheet_${dateSuffix}.csv`,
         'text/csv',
       );
-      setOpen(false);
       return;
     }
     if (format === 'csv' && activeTemplate === 'wise') {
@@ -170,7 +173,6 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
         `${baseName}_wise_${dateSuffix}.csv`,
         'text/csv',
       );
-      setOpen(false);
       return;
     }
 
@@ -183,7 +185,22 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
       const payload = { ...(jsonMeta ?? {}), rows: filteredRows };
       downloadTextFile(JSON.stringify(payload, null, 2), filename, 'application/json');
     }
-    setOpen(false);
+  }
+
+  async function handleExport() {
+    if (exporting) return;
+    setExporting(true);
+    // Yield one frame so the "Exporting…" state renders before the (possibly
+    // heavy) serialization runs on the main thread.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    try {
+      buildAndDownload();
+      setOpen(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setExporting(false);
+    }
   }
 
   function toggleMember(name: string) {
@@ -426,11 +443,13 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
           <Button
             size="sm"
             onClick={handleExport}
-            disabled={disabled}
+            disabled={disabled || exporting}
             className="bg-(--rs-accent-500) text-white hover:bg-(--rs-accent-600)"
           >
-            <Download className="w-3.5 h-3.5" />
-            Export
+            {exporting
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              : <Download className="w-3.5 h-3.5" />}
+            {exporting ? 'Exporting…' : 'Export'}
           </Button>
         </SheetFooter>
       </SheetContent>

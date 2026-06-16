@@ -66,12 +66,25 @@ export const GET = route(async (req: Request) => {
     weekDates.push(toLocalISO(new Date(base.getTime() + i * 86400000)));
   }
 
+  // select('*') (rather than naming edited_by/edited_at) keeps this read working
+  // even if the audit-columns migration hasn't been applied yet — the fields just
+  // come back undefined and the tooltip stays hidden.
   const { data: tsData } = await admin
     .from('timesheets')
-    .select('id, clocked_in_at, clocked_out_at, duration_seconds, is_overtime, overtime_seconds, date')
+    .select('*')
     .eq('user_id', userId)
     .in('date', weekDates)
     .order('clocked_in_at', { ascending: true });
+
+  // Resolve editor display names for the audit-trail tooltip in one round-trip.
+  const editorIds = [...new Set((tsData ?? [])
+    .map((r: { edited_by?: number | null }) => r.edited_by ?? null)
+    .filter((v): v is number => typeof v === 'number'))];
+  const editorNames: Record<number, string> = {};
+  if (editorIds.length > 0) {
+    const { data: editors } = await admin.from('users').select('id, name').in('id', editorIds);
+    for (const e of (editors ?? []) as { id: number; name: string }[]) editorNames[e.id] = e.name;
+  }
 
   const timesheets = (tsData ?? []).map((row: {
     id: number;
@@ -81,6 +94,8 @@ export const GET = route(async (req: Request) => {
     is_overtime: number | null;
     overtime_seconds: number | null;
     date: string;
+    edited_by?: number | null;
+    edited_at?: string | null;
   }) => ({
     id:              row.id,
     date:            row.date,
@@ -89,6 +104,8 @@ export const GET = route(async (req: Request) => {
     durationSeconds: row.duration_seconds,
     isOvertime:      row.is_overtime === 1,
     overtimeSeconds: row.overtime_seconds,
+    editedAt:        row.edited_at ?? null,
+    editedByName:    row.edited_by != null ? (editorNames[row.edited_by] ?? 'an admin') : null,
   }));
 
   return NextResponse.json({ userId, weekStart, timesheets });
@@ -99,7 +116,7 @@ export const GET = route(async (req: Request) => {
 //
 // Body: { id: number, clockedInAt?: ISO, clockedOutAt?: ISO | null }
 export const PATCH = route(async (req: Request) => {
-  await requireAdmin();
+  const session = await requireAdmin();
 
   let body: { id?: number; clockedInAt?: string | null; clockedOutAt?: string | null };
   try {
@@ -146,6 +163,8 @@ export const PATCH = route(async (req: Request) => {
     clocked_in_at: inDate.toISOString(),
     clocked_out_at: outDate ? outDate.toISOString() : null,
     date: toLocalISO(inDate),
+    edited_by: session.id,
+    edited_at: new Date().toISOString(),
   };
 
   if (outDate) {
