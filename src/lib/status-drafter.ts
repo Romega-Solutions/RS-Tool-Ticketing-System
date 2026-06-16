@@ -218,9 +218,14 @@ export async function buildStatusDraftStats(weekStart: string): Promise<StatusDr
     }
   }
 
-  const missingReports = users
-    .filter(user => !reportMap.has(user.id))
-    .map(user => user.name);
+  // Dedupe by name — the same person can have more than one user row (e.g. a
+  // company + Gmail account, both valid in the org chart), which would otherwise
+  // list (and double-nag) the same name twice and collide on the React key.
+  const missingReports = [...new Set(
+    users
+      .filter(user => !reportMap.has(user.id))
+      .map(user => user.name),
+  )];
 
   const totalHours = Array.from(hoursByUser.values()).reduce((sum, value) => sum + value, 0);
 
