@@ -768,6 +768,10 @@ export function KanbanBoard({
       )}
 
       <DndContext
+        // Stable id so dnd-kit's accessibility node ids (aria-describedby) are
+        // deterministic across SSR + client hydration instead of an incrementing
+        // counter, which otherwise causes a hydration mismatch warning.
+        id="kanban-board"
         sensors={sensors}
         accessibility={accessibility}
         collisionDetection={kanbanCollisionDetection}
