@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { hash } from 'bcryptjs';
 import { route, requireAdmin } from '@/lib/api';
+import { recordAudit, deriveUserPatchAction } from '@/lib/audit';
 
 export const runtime = 'nodejs';
 
@@ -56,7 +57,7 @@ export const GET = route(async () => {
 
 // POST — create a new user in Supabase Auth + public.users
 export const POST = route(async (req: Request) => {
-  await requireAdmin();
+  const session = await requireAdmin();
 
   let body: {
     email?: string;
@@ -151,6 +152,13 @@ export const POST = route(async (req: Request) => {
 
     if (dbErr) throw new Error(dbErr.message);
 
+    await recordAudit({
+      actorId: session.id,
+      action: 'user.created',
+      targetUserId: inserted.id as number,
+      details: { role, team },
+    });
+
     return NextResponse.json({
       user: {
         id:            inserted.id,
@@ -224,6 +232,12 @@ export const PATCH = route(async (req: Request) => {
   updates.updated_at = new Date().toISOString();
 
   const admin = createAdminClient();
+  const { data: before } = await admin
+    .from('users')
+    .select('role, is_active')
+    .eq('id', body.id)
+    .maybeSingle();
+
   const { error: updateError } = await admin.from('users').update(updates).eq('id', body.id);
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
 
@@ -234,6 +248,14 @@ export const PATCH = route(async (req: Request) => {
     .maybeSingle();
 
   if (!updated) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
+  if (before) {
+    const { action, details } = deriveUserPatchAction(
+      { role: String(before.role), is_active: Number(before.is_active) },
+      { role: String(updated.role), is_active: Number(updated.is_active) },
+    );
+    await recordAudit({ actorId: session.id, action, targetUserId: body.id, details });
+  }
 
   return NextResponse.json({
     user: {
