@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { route, requireAdmin } from '@/lib/api';
+import { enforceRateLimit, keyByUser } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -63,6 +64,7 @@ export const GET = route(async () => {
 // POST — approve or deny a request. { id, action: 'approve' | 'deny' }.
 export const POST = route(async (req: Request) => {
   const session = await requireAdmin();
+  await enforceRateLimit({ key: keyByUser('admin-overtime-write', session.id), limit: 60, windowSeconds: 60 });
 
   let body: { id?: number; action?: string } = {};
   try { body = await req.json(); } catch { body = {}; }

@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { hash } from 'bcryptjs';
 import { route, requireAdmin } from '@/lib/api';
 import { recordAudit, deriveUserPatchAction } from '@/lib/audit';
+import { enforceRateLimit, keyByUser } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 
@@ -58,6 +59,7 @@ export const GET = route(async () => {
 // POST — create a new user in Supabase Auth + public.users
 export const POST = route(async (req: Request) => {
   const session = await requireAdmin();
+  await enforceRateLimit({ key: keyByUser('admin-users-write', session.id), limit: 30, windowSeconds: 60 });
 
   let body: {
     email?: string;
@@ -187,6 +189,7 @@ export const POST = route(async (req: Request) => {
 
 export const PATCH = route(async (req: Request) => {
   const session = await requireAdmin();
+  await enforceRateLimit({ key: keyByUser('admin-users-write', session.id), limit: 30, windowSeconds: 60 });
 
   let body: {
     id?: number;
