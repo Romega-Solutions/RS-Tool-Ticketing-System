@@ -26,7 +26,7 @@ export async function GET(
 ) {
   const { token } = await ctx.params;
 
-  const rl = await checkRateLimit({ key: keyByIp('talent-confirm', clientIpFrom(req.headers)), limit: 10, windowSeconds: 60 });
+  const rl = await checkRateLimit({ key: keyByIp('talent-confirm', clientIpFrom(req.headers) ?? 'unknown'), limit: 10, windowSeconds: 60 });
   if (!rl.ok) {
     return html(consentHtmlPage({
       variant: 'neutral',
