@@ -34,7 +34,7 @@ export function UsersAdminTabs({ initialUsers, currentUserId }: { initialUsers: 
 
       {tab === 'manage'
         ? <UserManagementTable initialUsers={initialUsers} currentUserId={currentUserId} />
-        : <UserActivityPanel />}
+        : <UserActivityPanel users={initialUsers} />}
     </div>
   );
 }
