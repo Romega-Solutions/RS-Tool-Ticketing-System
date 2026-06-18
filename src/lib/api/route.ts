@@ -12,7 +12,7 @@ export function route<Args extends unknown[]>(handler: Handler<Args>) {
       return await handler(...args);
     } catch (err) {
       if (err instanceof HttpError) {
-        return NextResponse.json({ error: err.message }, { status: err.status });
+        return NextResponse.json({ error: err.message }, { status: err.status, headers: err.headers });
       }
       console.error('[api] Unhandled route error:', err);
       return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
