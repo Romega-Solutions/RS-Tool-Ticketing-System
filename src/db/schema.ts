@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean, index, primaryKey } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id:            serial('id').primaryKey(),
@@ -423,3 +423,29 @@ export const lmsLessonComments = pgTable('lms_lesson_comments', {
   deletedAt: text('deleted_at'),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+// Admin-action audit trail. Records who did what to whom (user create / role
+// change / (de)activate). Best-effort writes (see src/lib/audit.ts); also a
+// source in the admin activity feed. Mirror of
+// docs/migrations/add-audit-log-and-rate-limits.sql.
+export const auditLog = pgTable('audit_log', {
+  id:           serial('id').primaryKey(),
+  actorId:      integer('actor_id').notNull(),
+  action:       text('action').notNull(),
+  targetUserId: integer('target_user_id'),
+  details:      jsonb('details'),
+  createdAt:    text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  index('audit_log_created_idx').on(t.createdAt),
+  index('audit_log_actor_idx').on(t.actorId),
+]);
+
+// Fixed-window API rate limiter. One row per (key, window_start); count is
+// incremented atomically. See src/lib/rate-limit.ts.
+export const rateLimits = pgTable('rate_limits', {
+  key:         text('key').notNull(),
+  windowStart: text('window_start').notNull(),
+  count:       integer('count').notNull().default(0),
+}, (t) => [
+  primaryKey({ columns: [t.key, t.windowStart] }),
+]);
