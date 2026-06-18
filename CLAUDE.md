@@ -23,16 +23,26 @@ npm test           # vitest run
 
 ### Database (Supabase Postgres + Drizzle)
 
-```bash
-# Generate a migration after editing src/db/schema.ts
-npx drizzle-kit generate
+**Single source of truth: `src/db/schema.ts`.** Migration files are derived artifacts.
 
-# Apply migrations (dialect: postgresql, uses DATABASE_URL)
-npx drizzle-kit migrate
+```bash
+# Tables: edit src/db/schema.ts, then generate + apply the Drizzle migration
+npx drizzle-kit generate        # diffs schema.ts → new file in drizzle/
+npx drizzle-kit migrate         # applies pending migrations (uses DATABASE_URL)
 ```
 
-Migrations live in `drizzle/`. Some schema changes are also tracked as hand-written
-SQL in `docs/migrations/` and `docs/supabase-setup.sql`.
+**Migration responsibilities (do not duplicate table DDL across the two):**
+
+- **`drizzle/` — the canonical table-schema migration system.** Driven by `drizzle-kit`
+  off `schema.ts`. History was baseline-reset on 2026-06-19: `drizzle/0000_baseline.sql`
+  is the full current schema; older numbered migrations were collapsed into it. On a DB
+  that already has the tables, mark the baseline as applied rather than re-running its DDL.
+- **`docs/migrations/*.sql` — non-table DB objects only** (RPC functions, storage buckets,
+  RLS policies, triggers, data backfills) that Drizzle cannot model. Several in-app setup
+  screens and the `scripts/apply-*-migration.ts` one-shots reference these by name, so keep
+  them. **Do not** add new table-only migrations here — those belong in `drizzle/`.
+- `docs/supabase-setup.sql` is a legacy one-paste bootstrap and is **stale** (schema v6);
+  prefer `drizzle/0000_baseline.sql` + the `docs/migrations/` object files for a fresh DB.
 
 ### Seeding
 

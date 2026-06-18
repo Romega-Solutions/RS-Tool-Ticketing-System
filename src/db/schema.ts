@@ -426,8 +426,8 @@ export const lmsLessonComments = pgTable('lms_lesson_comments', {
 
 // Admin-action audit trail. Records who did what to whom (user create / role
 // change / (de)activate). Best-effort writes (see src/lib/audit.ts); also a
-// source in the admin activity feed. Mirror of
-// docs/migrations/add-audit-log-and-rate-limits.sql.
+// source in the admin activity feed. Tables are owned by the Drizzle baseline
+// (drizzle/0000_baseline.sql) — this schema.ts definition is the source of truth.
 export const auditLog = pgTable('audit_log', {
   id:           serial('id').primaryKey(),
   actorId:      integer('actor_id').notNull(),
