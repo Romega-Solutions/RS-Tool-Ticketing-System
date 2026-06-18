@@ -10,6 +10,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { submitPublicApplication } from '@/app/apply/[positionId]/actions';
+import { checkRateLimit, keyByIp, clientIp } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 // Resume PDFs can be up to 10 MB; default body size limit on Vercel is
@@ -21,6 +22,14 @@ export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ positionId: string }> },
 ) {
+  const rl = await checkRateLimit({ key: keyByIp('apply', clientIp(req)), limit: 5, windowSeconds: 60 });
+  if (!rl.ok) {
+    return NextResponse.json(
+      { ok: false, code: 'RATE_LIMITED', error: 'Too many submissions. Please try again shortly.' },
+      { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } },
+    );
+  }
+
   const expected = process.env.PUBLIC_APPLICATIONS_TOKEN;
   if (!expected) {
     return NextResponse.json(

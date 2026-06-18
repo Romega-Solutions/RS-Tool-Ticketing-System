@@ -6,6 +6,7 @@
 import { type NextRequest } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { consentHtmlPage } from '@/lib/talent-consent-page';
+import { checkRateLimit, keyByIp, clientIp } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,10 +19,20 @@ function html(body: string, status = 200): Response {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   ctx: { params: Promise<{ token: string }> },
 ) {
   const { token } = await ctx.params;
+
+  const rl = await checkRateLimit({ key: keyByIp('talent-revoke', clientIp(req)), limit: 10, windowSeconds: 60 });
+  if (!rl.ok) {
+    return html(consentHtmlPage({
+      variant: 'neutral',
+      heading: 'Please slow down',
+      message: 'Too many requests from your network. Please wait a minute and try the link again.',
+    }), 429);
+  }
+
   if (!token || token.length < 16) {
     return html(consentHtmlPage({
       variant: 'neutral',

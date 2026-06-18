@@ -8,6 +8,7 @@
 import { type NextRequest } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { consentHtmlPage, clientIpFrom } from '@/lib/talent-consent-page';
+import { checkRateLimit, keyByIp } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,6 +25,16 @@ export async function GET(
   ctx: { params: Promise<{ token: string }> },
 ) {
   const { token } = await ctx.params;
+
+  const rl = await checkRateLimit({ key: keyByIp('talent-confirm', clientIpFrom(req.headers)), limit: 10, windowSeconds: 60 });
+  if (!rl.ok) {
+    return html(consentHtmlPage({
+      variant: 'neutral',
+      heading: 'Please slow down',
+      message: 'Too many requests from your network. Please wait a minute and try the link again.',
+    }), 429);
+  }
+
   if (!token || token.length < 16) {
     return html(consentHtmlPage({
       variant: 'neutral',
