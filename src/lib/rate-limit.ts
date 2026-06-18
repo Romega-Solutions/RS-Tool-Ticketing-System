@@ -1,11 +1,17 @@
-import { sql } from 'drizzle-orm';
-import { db } from '@/db';
-import { rateLimits } from '@/db/schema';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { tooManyRequests } from '@/lib/api';
 
-// Fixed-window API rate limiter backed by the `rate_limits` table. Atomic at the
-// DB (INSERT ... ON CONFLICT ... count + 1 RETURNING) so it is correct across
-// serverless instances. Fails OPEN: a limiter outage must not take down a route.
+// Fixed-window API rate limiter backed by the `rate_limits` table, accessed
+// through the Supabase PostgREST client (SERVICE_ROLE_KEY) — the same data path
+// the rest of the app uses. (We deliberately do NOT use the drizzle/DATABASE_URL
+// client here: nothing else in the app uses it and the pooler URL is frequently
+// unset/stale, which would make the limiter silently fail open.)
+//
+// Read-then-upsert per window: not strictly atomic, so under heavy concurrency a
+// couple of requests can slip at a window boundary. That's an acceptable
+// trade-off for an abuse guard; if strict counting is ever needed, move the
+// increment into a Postgres RPC. Fails OPEN: a limiter/DB outage must not take
+// down a route.
 
 /** Start of the fixed window containing `now`, as an ISO string. Pure. */
 export function windowStartIso(now: Date, windowSeconds: number): string {
@@ -47,16 +53,22 @@ export async function checkRateLimit(
 ): Promise<{ ok: boolean; retryAfterSec: number; count: number }> {
   const windowStart = windowStartIso(now, windowSeconds);
   try {
-    const rows = await db
-      .insert(rateLimits)
-      .values({ key, windowStart, count: 1 })
-      .onConflictDoUpdate({
-        target: [rateLimits.key, rateLimits.windowStart],
-        set: { count: sql`${rateLimits.count} + 1` },
-      })
-      .returning({ count: rateLimits.count });
-    const count = rows[0]?.count ?? 1;
-    return { ok: count <= limit, retryAfterSec: retryAfterSeconds(now, windowSeconds), count };
+    const sb = createAdminClient();
+    const { data: existing, error: readErr } = await sb
+      .from('rate_limits')
+      .select('count')
+      .eq('key', key)
+      .eq('window_start', windowStart)
+      .maybeSingle();
+    if (readErr) throw readErr;
+
+    const next = ((existing?.count as number | undefined) ?? 0) + 1;
+    const { error: writeErr } = await sb
+      .from('rate_limits')
+      .upsert({ key, window_start: windowStart, count: next }, { onConflict: 'key,window_start' });
+    if (writeErr) throw writeErr;
+
+    return { ok: next <= limit, retryAfterSec: retryAfterSeconds(now, windowSeconds), count: next };
   } catch (err) {
     console.error('[rate-limit] check failed, failing open:', err);
     return { ok: true, retryAfterSec: 0, count: 0 };

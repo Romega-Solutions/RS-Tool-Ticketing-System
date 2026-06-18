@@ -1,10 +1,7 @@
 import { NextResponse } from 'next/server';
-import { lt } from 'drizzle-orm';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { sweepOpenSessions } from '@/lib/overtime-server';
 import { route, requireBearer } from '@/lib/api';
-import { db } from '@/db';
-import { rateLimits } from '@/db/schema';
 
 export const runtime = 'nodejs';
 
@@ -24,10 +21,10 @@ export const GET = route(async (req: Request) => {
   const now = new Date();
   const result = await sweepOpenSessions(admin, now);
 
-  // Best-effort prune of rate-limit windows older than a day.
+  // Best-effort prune of rate-limit windows older than a day (PostgREST path).
   try {
     const cutoff = new Date(now.getTime() - 24 * 3600 * 1000).toISOString();
-    await db.delete(rateLimits).where(lt(rateLimits.windowStart, cutoff));
+    await admin.from('rate_limits').delete().lt('window_start', cutoff);
   } catch (err) {
     console.error('[cron] rate_limits prune failed:', err);
   }
