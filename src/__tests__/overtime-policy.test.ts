@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   decideAutoClockOut,
   decideClockInAllowed,
+  isClockInCapLocked,
   planEnforcement,
   weekStartMonday,
 } from '@/lib/overtime-policy';
@@ -38,9 +39,9 @@ describe('planEnforcement — close-on-read decision + write payload', () => {
     expect(r).toMatchObject({ close: true, reason: 'safety ceiling' });
   });
 
-  it('does not close an admin under the ceiling', () => {
+  it('closes an over-cap admin now that admins are capped like everyone', () => {
     const r = planEnforcement({ role: 'admin', clockedInAt: ago(4 * H), weekSecondsBefore: 20 * H, approvedUntil: null, now: NOW });
-    expect(r).toEqual({ close: false, reason: 'admin exempt' });
+    expect(r).toMatchObject({ close: true, isOvertime: true, reason: 'weekly cap' });
   });
 
   it('does not close a non-admin holding active approval', () => {
@@ -62,10 +63,11 @@ describe('decideAutoClockOut — no per-session/day cap', () => {
   });
 });
 
-describe('decideAutoClockOut — admin exemption + safety ceiling', () => {
-  it.each(['admin', 'ceo', 'owner', 'superadmin'])('skips role=%s even past the weekly cap', (role) => {
+describe('decideAutoClockOut — no role exemption (admins capped like everyone)', () => {
+  it.each(['admin', 'ceo', 'owner', 'superadmin'])('closes role=%s past the weekly cap', (role) => {
     const r = decideAutoClockOut({ role, clockedInAt: ago(4 * H), weekSecondsBefore: 20 * H, approvedUntil: null, now: NOW });
-    expect(r).toEqual({ action: 'skip', reason: 'admin exempt' });
+    expect(r.action).toBe('close');
+    if (r.action === 'close') expect(r.reason).toBe('weekly cap');
   });
 
   it('closes even an admin at the 16h safety ceiling (ghost-session guard)', () => {
@@ -126,14 +128,41 @@ describe('decideClockInAllowed', () => {
     expect(r).toEqual({ allowed: true });
   });
 
-  it('always allows admins', () => {
+  it('blocks admins at the cap too (no role exemption)', () => {
     const r = decideClockInAllowed({ role: 'ceo', weekSecondsBefore: WEEKLY_CAP_SECONDS * 2, approvedUntil: null, now: NOW });
+    expect(r).toEqual({ allowed: false, reason: 'weekly cap reached' });
+  });
+
+  it('allows an admin who holds an active approval', () => {
+    const r = decideClockInAllowed({ role: 'admin', weekSecondsBefore: WEEKLY_CAP_SECONDS * 2, approvedUntil: future(3600), now: NOW });
     expect(r).toEqual({ allowed: true });
   });
 
   it('allows a contractor under the cap', () => {
     const r = decideClockInAllowed({ role: 'ic', weekSecondsBefore: 14 * H, approvedUntil: null, now: NOW });
     expect(r).toEqual({ allowed: true });
+  });
+});
+
+describe('isClockInCapLocked — UI mirror of the clock-in gate for a clocked-out user', () => {
+  it('locks a user who is exactly at the 15h cap with no request', () => {
+    expect(isClockInCapLocked({ weekSecondsBefore: WEEKLY_CAP_SECONDS, requestStatus: 'none' })).toBe(true);
+  });
+
+  it('locks a user who is over the cap', () => {
+    expect(isClockInCapLocked({ weekSecondsBefore: WEEKLY_CAP_SECONDS + 5 * H, requestStatus: 'none' })).toBe(true);
+  });
+
+  it('keeps locking while a request is only pending (not yet approved)', () => {
+    expect(isClockInCapLocked({ weekSecondsBefore: WEEKLY_CAP_SECONDS, requestStatus: 'pending' })).toBe(true);
+  });
+
+  it('unlocks once the overtime request is approved', () => {
+    expect(isClockInCapLocked({ weekSecondsBefore: WEEKLY_CAP_SECONDS * 2, requestStatus: 'approved' })).toBe(false);
+  });
+
+  it('does not lock a user still under the cap', () => {
+    expect(isClockInCapLocked({ weekSecondsBefore: 14 * H, requestStatus: 'none' })).toBe(false);
   });
 });
 

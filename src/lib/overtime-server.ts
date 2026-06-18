@@ -128,8 +128,8 @@ type SweepResult = {
 
 /**
  * Batched weekly-cap sweep: close every open session the policy says must end
- * now (15h weekly cap for non-admins, 16h absolute ceiling for everyone; an
- * active admin approval suspends the weekly cap). This is the SINGLE sweep used
+ * now (15h weekly cap for every role incl. admins, 16h absolute ceiling for
+ * everyone; an active admin approval suspends the weekly cap). This is the SINGLE sweep used
  * by both the daily cron and the throttled activity backstop, so the cap is
  * enforced identically no matter what triggers it.
  */

@@ -111,7 +111,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               </div>
               <div className="flex items-center gap-2 rounded-2xl border border-(--rs-neutral-grey-200) bg-white/92 px-2 py-2 shadow-sm">
                 <WhoIsInPanel currentUserId={session.id} isAdmin={session.role === 'admin'} />
-                <ClockWidget variant="topbar" isExempt={session.role === 'admin'} />
+                <ClockWidget variant="topbar" />
               </div>
             </div>
           </div>

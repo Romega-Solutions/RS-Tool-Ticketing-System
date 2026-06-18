@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { AlertTriangle, Loader2, LogIn, LogOut } from 'lucide-react';
+import { AlertTriangle, Loader2, Lock, LogIn, LogOut, Send } from 'lucide-react';
 import { formatDuration, isOvertime, weeklyBudget, WEEKLY_CAP_SECONDS } from '@/lib/utils';
+import { isClockInCapLocked, type WeeklyCapRequestStatus } from '@/lib/overtime-policy';
 import { ClockOutReminderBanner } from '@/components/clock-out-reminder-banner';
 import { OvertimeGuardrailDialog } from '@/components/overtime-guardrail-dialog';
 import { OvertimeStatusBanner } from '@/components/overtime-status-banner';
@@ -158,11 +159,9 @@ function WeeklyBudgetBar({ weekSecondsBefore, elapsed }: { weekSecondsBefore: nu
 export function ClockWidget({
   collapsed = false,
   variant = 'sidebar',
-  isExempt = false,
 }: {
   collapsed?: boolean;
   variant?: 'sidebar' | 'topbar';
-  isExempt?: boolean;
 }) {
   const [state, setState] = useState<WidgetState>('loading');
   const [sessionNote, setSessionNote] = useState('');
@@ -181,6 +180,9 @@ export function ClockWidget({
   const [limitWeekTotal, setLimitWeekTotal] = useState(0);
   const [dialogVariant, setDialogVariant] = useState<'crossed' | 'on-open'>('crossed');
   const [otRequestState, setOtRequestState] = useState<'idle' | 'sending' | 'pending' | 'error'>('idle');
+  // This week's overtime-request status, used to lock the Clock In button once
+  // the user is at/over the 15h cap (and to unlock it again once approved).
+  const [weekRequestStatus, setWeekRequestStatus] = useState<WeeklyCapRequestStatus>('none');
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedRef = useRef(0);
   const weekBeforeRef = useRef(0);
@@ -234,33 +236,33 @@ export function ClockWidget({
         } else {
           setState('out');
           // Opened the app already over the 15h cap — close-on-read clocked them
-          // out server-side. Surface the request-overtime prompt (once per week,
-          // per browser session) unless they already have an open request.
-          if (!isExempt && wsb >= WEEKLY_CAP_SECONDS) {
+          // out server-side. Record this week's request status (which locks the
+          // Clock In button), and surface the request-overtime prompt once per
+          // week (per browser session) unless a request is already open/approved.
+          if (wsb >= WEEKLY_CAP_SECONDS) {
             let acked = false;
             try { acked = sessionStorage.getItem(OVERCAP_ACK_KEY) === currentWeekKey(); } catch { /* no sessionStorage */ }
-            if (!acked) {
-              const showOnOpenPrompt = () => {
+            const showOnOpenPrompt = () => {
+              if (cancelled || acked) return;
+              setLimitWeekTotal(wsb);
+              setDialogVariant('on-open');
+              setOtRequestState('idle');
+              setLimitDialogVisible(true);
+            };
+            fetch('/api/presence/overtime-request')
+              .then(r => r.json())
+              .then((d: { request?: { status: string; approved_until: string | null } | null }) => {
                 if (cancelled) return;
-                setLimitWeekTotal(wsb);
-                setDialogVariant('on-open');
-                setOtRequestState('idle');
-                setLimitDialogVisible(true);
-              };
-              fetch('/api/presence/overtime-request')
-                .then(r => r.json())
-                .then((d: { request?: { status: string; approved_until: string | null } | null }) => {
-                  if (cancelled) return;
-                  const req = d.request;
-                  const pending = req?.status === 'pending';
-                  const approved = !!req && req.status === 'approved' && !!req.approved_until
-                    && new Date(req.approved_until).getTime() > Date.now();
-                  // Already requested or actively approved → no prompt needed.
-                  if (pending || approved) return;
-                  showOnOpenPrompt();
-                })
-                .catch(showOnOpenPrompt);
-            }
+                const req = d.request;
+                const pending = req?.status === 'pending';
+                const approved = !!req && req.status === 'approved' && !!req.approved_until
+                  && new Date(req.approved_until).getTime() > Date.now();
+                setWeekRequestStatus(approved ? 'approved' : pending ? 'pending' : 'none');
+                // Already requested or actively approved → no nagging prompt.
+                if (pending || approved) return;
+                showOnOpenPrompt();
+              })
+              .catch(() => { if (!cancelled) { setWeekRequestStatus('none'); showOnOpenPrompt(); } });
           }
         }
       })
@@ -269,8 +271,7 @@ export function ClockWidget({
       cancelled = true;
       if (timerRef.current) clearInterval(timerRef.current);
     };
-    // isExempt is a stable role-derived prop; the mount fetch needn't re-run on it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Mount-only fetch; intentionally runs once.
   }, []);
 
   useEffect(() => {
@@ -290,19 +291,17 @@ export function ClockWidget({
 
   // Overtime guardrail. The 15h weekly cap is hard-enforced server-side; this
   // mirrors it in the browser using the week-to-date total (completed seconds
-  // before this session + live elapsed). When it crosses 15h a non-admin is
+  // before this session + live elapsed). When it crosses 15h the user is
   // clocked out and shown the request dialog — unless they already hold an
   // active admin approval, in which case the session keeps running under an
-  // "On overtime" banner. Admins are exempt (a high safety ceiling still
-  // applies server-side).
+  // "On overtime" banner. No role is exempt (a 16h safety ceiling still applies
+  // server-side).
   useEffect(() => {
     if (state !== 'in') return;
     const check = async () => {
       if (weekBeforeRef.current + elapsedRef.current < WEEKLY_CAP_SECONDS) return;
       if (overtimeHandledRef.current) return;
       overtimeHandledRef.current = true;
-
-      if (isExempt) { setOvertimeApproved(true); return; }
 
       let approved = false;
       try {
@@ -325,7 +324,7 @@ export function ClockWidget({
     return () => clearInterval(id);
     // confirmClockOut is a stable function declaration; only fired once at 15h.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, isExempt]);
+  }, [state]);
 
   async function requestOvertime() {
     setOtRequestState('sending');
@@ -337,9 +336,21 @@ export function ClockWidget({
       });
       if (!res.ok) throw new Error('request failed');
       setOtRequestState('pending');
+      // Keep the button locked but reflect that approval is now pending.
+      setWeekRequestStatus('pending');
     } catch {
       setOtRequestState('error');
     }
+  }
+
+  // Open the request-overtime dialog from the locked Clock In control. Reuses
+  // the on-open guardrail dialog (request flow + "notify your attendance admin"
+  // messaging); shows the pending state if a request is already filed.
+  function openOvertimeRequest() {
+    setLimitWeekTotal(weekSecondsBefore);
+    setDialogVariant('on-open');
+    setOtRequestState(weekRequestStatus === 'pending' ? 'pending' : 'idle');
+    setLimitDialogVisible(true);
   }
 
   function dismissReminder() {
@@ -448,6 +459,12 @@ export function ClockWidget({
 
   const inOvertime = state === 'in' && isOvertime(weekSecondsBefore + elapsed);
 
+  // Clocked out and at/over the 15h weekly cap with no active approval → Clock In
+  // is disabled; the only path forward is to request overtime from the admin.
+  // Applies to every role, admins included.
+  const capLocked = state === 'out'
+    && isClockInCapLocked({ weekSecondsBefore, requestStatus: weekRequestStatus });
+
   const overtimeOverlays = (
     <>
       {state === 'in' && overtimeApproved && (
@@ -498,6 +515,24 @@ export function ClockWidget({
               <span className="hidden sm:inline">Clock Out</span>
             </button>
           </div>
+        ) : capLocked ? (
+          <div className="flex items-center gap-2">
+            <span
+              className="flex items-center gap-1.5 rounded-full border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-100) px-2.5 py-1 text-xs font-semibold text-(--rs-neutral-grey-400) cursor-not-allowed"
+              title="Weekly 15-hour limit reached — request overtime to clock in again"
+            >
+              <Lock className="w-3 h-3" aria-hidden="true" />
+              <span className="hidden sm:inline">Clock In</span>
+            </span>
+            <button
+              onClick={openOvertimeRequest}
+              className="flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+              title="Request overtime from your attendance admin"
+            >
+              <Send className="w-3 h-3" aria-hidden="true" />
+              <span className="hidden sm:inline">{weekRequestStatus === 'pending' ? 'OT pending' : 'Request overtime'}</span>
+            </button>
+          </div>
         ) : (
           <button
             onClick={openClockInConfirm}
@@ -536,19 +571,23 @@ export function ClockWidget({
       {overtimeOverlays}
       {collapsed ? (
         <button
-          onClick={state === 'out' ? openClockInConfirm : openClockOutConfirm}
+          onClick={capLocked ? openOvertimeRequest : state === 'out' ? openClockInConfirm : openClockOutConfirm}
           disabled={busy || state === 'loading'}
           className={`w-full flex justify-center py-2 transition-colors ${
             state === 'in'
               ? inOvertime ? 'text-amber-400 hover:text-amber-300' : 'text-green-400 hover:text-green-300'
-              : 'text-white/40 hover:text-white/80'
+              : capLocked ? 'text-amber-400 hover:text-amber-300' : 'text-white/40 hover:text-white/80'
           } disabled:opacity-50`}
-          title={state === 'in' ? `Clocked in · ${formatDuration(elapsed)}` : 'Clock In'}
+          title={state === 'in'
+            ? `Clocked in · ${formatDuration(elapsed)}`
+            : capLocked ? 'Weekly 15-hour limit reached — request overtime' : 'Clock In'}
         >
           {busy || state === 'loading'
             ? <Loader2 className="w-4 h-4 animate-spin" />
             : state === 'in'
             ? <span className={`w-2 h-2 rounded-full mt-1 ${inOvertime ? 'bg-amber-400' : 'bg-green-400'}`} />
+            : capLocked
+            ? <Lock className="w-4 h-4" />
             : <LogIn className="w-4 h-4" />}
         </button>
       ) : (
@@ -571,6 +610,32 @@ export function ClockWidget({
                 Clock Out
               </button>
             </>
+          ) : capLocked ? (
+            <div className="space-y-1.5">
+              <button
+                type="button"
+                disabled
+                aria-disabled="true"
+                className="w-full flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-xs font-semibold text-white/40 cursor-not-allowed"
+                title="Weekly 15-hour limit reached"
+              >
+                <Lock className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                Clock In
+              </button>
+              <button
+                type="button"
+                onClick={openOvertimeRequest}
+                className="w-full flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-400/20"
+              >
+                <Send className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                {weekRequestStatus === 'pending' ? 'Overtime requested' : 'Request overtime'}
+              </button>
+              <p className="px-1 text-[10px] leading-snug text-white/45">
+                {weekRequestStatus === 'pending'
+                  ? 'Waiting for your attendance admin to approve.'
+                  : 'You’ve hit your 15h weekly limit. Ask your admin for an extension to continue.'}
+              </p>
+            </div>
           ) : (
             <button
               onClick={openClockInConfirm}

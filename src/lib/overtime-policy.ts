@@ -1,22 +1,18 @@
 import { WEEKLY_CAP_SECONDS, SAFETY_CEILING_SECONDS, computeOvertime } from './utils';
-import { normalizeRole } from './rbac';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Pure overtime policy. All thresholds and decisions live here with no I/O,
 // so the cron, the clock-in route, and the UI share one tested source of
 // truth. Overtime is gated behind an admin approval and bounded by a 15h
-// Mon–Sun weekly cap — there is no per-session or per-day cap. Admin is the
-// only exemption, and an absolute 16h safety ceiling applies to everyone.
+// Mon–Sun weekly cap — there is no per-session or per-day cap, and no role is
+// exempt (admins are capped exactly like everyone else). Only an active admin
+// approval suspends the cap, and an absolute 16h safety ceiling applies to all.
 // ─────────────────────────────────────────────────────────────────────────
 
 function approvalActive(approvedUntil: string | null, now: Date): boolean {
   if (!approvedUntil) return false;
   const ms = new Date(approvedUntil).getTime();
   return Number.isFinite(ms) && now.getTime() < ms;
-}
-
-function isAdmin(role: string | null | undefined): boolean {
-  return normalizeRole(role) === 'admin';
 }
 
 export type AutoClockOutInput = {
@@ -46,15 +42,12 @@ export function decideAutoClockOut(input: AutoClockOutInput): AutoClockOutDecisi
   if (elapsedSec >= SAFETY_CEILING_SECONDS) {
     return { action: 'close', elapsedSec, reason: 'safety ceiling' };
   }
-  // 2. Admins are exempt from the weekly cap.
-  if (isAdmin(input.role)) {
-    return { action: 'skip', reason: 'admin exempt' };
-  }
-  // 3. An active admin approval suspends the weekly cap.
+  // 2. An active admin approval suspends the weekly cap (the only exemption — no
+  //    role, including admin, is exempt without one).
   if (approvalActive(input.approvedUntil, input.now)) {
     return { action: 'skip', reason: 'approved overtime' };
   }
-  // 4. 15h weekly cap (already-completed seconds + this running session).
+  // 3. 15h weekly cap (already-completed seconds + this running session).
   if (input.weekSecondsBefore + elapsedSec >= WEEKLY_CAP_SECONDS) {
     return { action: 'close', elapsedSec, reason: 'weekly cap' };
   }
@@ -97,14 +90,35 @@ export type ClockInDecision =
   | { allowed: true }
   | { allowed: false; reason: string };
 
-// May this user start a new clock-in session right now?
+// May this user start a new clock-in session right now? No role is exempt; the
+// only thing that lifts the 15h cap is an active admin approval.
 export function decideClockInAllowed(input: ClockInInput): ClockInDecision {
-  if (isAdmin(input.role)) return { allowed: true };
   if (approvalActive(input.approvedUntil, input.now)) return { allowed: true };
   if (input.weekSecondsBefore >= WEEKLY_CAP_SECONDS) {
     return { allowed: false, reason: 'weekly cap reached' };
   }
   return { allowed: true };
+}
+
+/** Current-week overtime-request status as the browser knows it. */
+export type WeeklyCapRequestStatus = 'none' | 'pending' | 'approved';
+
+export type ClockInCapLockInput = {
+  /** Completed seconds for this user this Mon–Sun week. */
+  weekSecondsBefore: number;
+  /** This week's overtime-request status. */
+  requestStatus:     WeeklyCapRequestStatus;
+};
+
+// Browser-side mirror of `decideClockInAllowed` for a *clocked-out* user: should
+// the Clock In button be locked (disabled) because they're at/over the 15h cap
+// with no active approval? No role is exempt (admins are capped too); an
+// approved overtime request unlocks clock-in, while a merely *pending* request
+// keeps it locked until the admin approves. Pure so the widget and tests share
+// one rule.
+export function isClockInCapLocked(input: ClockInCapLockInput): boolean {
+  if (input.requestStatus === 'approved') return false;
+  return input.weekSecondsBefore >= WEEKLY_CAP_SECONDS;
 }
 
 /** Monday (local) of the week containing `date`, as YYYY-MM-DD. */
