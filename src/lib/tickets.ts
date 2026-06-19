@@ -125,6 +125,14 @@ export async function getProjects(opts?: { team?: string | null }): Promise<Plan
   return (data ?? []).map(mapProject);
 }
 
+// Lightweight name lookup used for notification copy ("…tagged you in {name}").
+export async function getProjectName(projectId: number | string): Promise<string> {
+  const sb = createAdminClient();
+  const { data } = await sb.from('projects')
+    .select('name').eq('id', Number(projectId)).maybeSingle();
+  return String((data as Row | null)?.name ?? 'a project');
+}
+
 export async function getProjectStates(projectId: string): Promise<PlaneState[]> {
   const sb = createAdminClient();
   const { data, error } = await sb

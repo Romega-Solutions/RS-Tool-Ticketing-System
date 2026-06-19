@@ -10,6 +10,7 @@ import { hasIncompleteHardCourse, isPathExemptFromHardEnforcement } from "@/lib/
 import { ClockWidget } from "@/components/clock-widget";
 import { LiveClock } from "@/components/live-clock";
 import { WhoIsInPanel } from "@/components/who-is-in-panel";
+import { NotificationBell } from "@/components/notification-bell.client";
 import { FloatingGuide } from "@/components/guide/floating-guide.client";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
@@ -109,7 +110,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               <div className="hidden rounded-2xl border border-(--rs-neutral-grey-200) bg-white/80 px-3 py-2 text-(--rs-neutral-grey-500) shadow-sm md:flex">
                 <LiveClock />
               </div>
-              <div className="flex items-center gap-2 rounded-2xl border border-(--rs-neutral-grey-200) bg-white/92 px-2 py-2 shadow-sm">
+              <div className="flex items-center gap-1 rounded-2xl border border-(--rs-neutral-grey-200) bg-white/92 px-2 py-2 shadow-sm">
+                <NotificationBell />
                 <WhoIsInPanel currentUserId={session.id} isAdmin={session.role === 'admin'} />
                 <ClockWidget variant="topbar" />
               </div>

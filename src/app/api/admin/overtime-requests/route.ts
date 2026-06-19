@@ -17,13 +17,15 @@ type Row = {
   approved_until: string | null;
 };
 
-/** End of today in Asia/Manila (UTC+8, no DST), as an ISO timestamp. */
-function endOfManilaDay(now: Date): string {
-  const manilaWall = new Date(now.getTime() + 8 * 3600 * 1000);
-  const y = manilaWall.getUTCFullYear();
-  const m = String(manilaWall.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(manilaWall.getUTCDate()).padStart(2, '0');
-  return new Date(`${y}-${m}-${d}T23:59:59+08:00`).toISOString();
+// Overtime is now granted in bounded slices: an admin extends by 30 minutes,
+// 1 hour, or 2 hours from the moment of approval (default 1 hour). The approval
+// stays active until `approved_until`, then the weekly cap re-applies.
+const ALLOWED_OT_MINUTES = new Set([30, 60, 120]);
+const DEFAULT_OT_MINUTES = 60;
+
+function normalizeOtMinutes(raw: unknown): number {
+  const n = Number(raw);
+  return ALLOWED_OT_MINUTES.has(n) ? n : DEFAULT_OT_MINUTES;
 }
 
 // GET — pending requests first, plus recently decided ones, with user names.
@@ -66,7 +68,7 @@ export const POST = route(async (req: Request) => {
   const session = await requireAdmin();
   await enforceRateLimit({ key: keyByUser('admin-overtime-write', session.id), limit: 60, windowSeconds: 60 });
 
-  let body: { id?: number; action?: string } = {};
+  let body: { id?: number; action?: string; minutes?: number } = {};
   try { body = await req.json(); } catch { body = {}; }
   const id = Number(body.id);
   if (!Number.isFinite(id) || (body.action !== 'approve' && body.action !== 'deny')) {
@@ -75,8 +77,10 @@ export const POST = route(async (req: Request) => {
 
   const admin = createAdminClient();
   const now = new Date();
+  const minutes = normalizeOtMinutes(body.minutes);
+  const approvedUntil = new Date(now.getTime() + minutes * 60_000).toISOString();
   const patch = body.action === 'approve'
-    ? { status: 'approved', decided_by: session.id, decided_at: now.toISOString(), approved_until: endOfManilaDay(now) }
+    ? { status: 'approved', decided_by: session.id, decided_at: now.toISOString(), approved_until: approvedUntil }
     : { status: 'denied',   decided_by: session.id, decided_at: now.toISOString(), approved_until: null };
 
   const { data, error } = await admin

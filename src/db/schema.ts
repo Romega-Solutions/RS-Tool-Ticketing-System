@@ -449,3 +449,20 @@ export const rateLimits = pgTable('rate_limits', {
 }, (t) => [
   primaryKey({ columns: [t.key, t.windowStart] }),
 ]);
+
+// In-app notifications surfaced by the dashboard bell. Produced by @mentions in
+// task comments, project-member adds, and the daily "task due tomorrow" cron;
+// consumed by GET /api/notifications. See src/lib/notifications.ts.
+export const notifications = pgTable('notifications', {
+  id:        serial('id').primaryKey(),
+  userId:    integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }), // recipient
+  actorId:   integer('actor_id').references(() => users.id, { onDelete: 'set null' }),         // who caused it
+  type:      text('type').notNull(),   // 'project_added' | 'mentioned' | 'task_due'
+  title:     text('title').notNull(),
+  body:      text('body'),
+  link:      text('link'),             // in-app path to navigate to on click
+  isRead:    integer('is_read').notNull().default(0),
+  createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  index('notifications_user_idx').on(t.userId, t.isRead, t.createdAt),
+]);

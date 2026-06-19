@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { Pencil, Building2, MapPin, AlertCircle, Briefcase } from 'lucide-react';
+import { Pencil, MapPin, AlertCircle, Briefcase } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -19,11 +19,16 @@ import { updatePosition } from './actions';
 export type Position = {
   id:              number;
   job_title:       string;
-  client:          string | null;
+  placement_type:  string | null;  // 'internal' | 'external'
   location:        string | null;
-  job_description: string | null;
+  compensation:    string | null;
+  employment_type: string | null;  // 'full_time' | 'part_time'
+  openings:        number | null;
+  job_description: string | null;  // sanitized HTML
   is_open:         boolean;
   created_at:      string;
+  created_by:      number | null;
+  created_by_name?: string | null;
 };
 
 function formatDate(iso: string) {
@@ -31,10 +36,22 @@ function formatDate(iso: string) {
   catch { return iso; }
 }
 
+function employmentLabel(v: string | null) {
+  return v === 'part_time' ? 'Part time' : 'Full time';
+}
+
+function descriptionPreview(html: string | null) {
+  if (!html) return '';
+  return html.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 export function PositionTableRow({ position }: { position: Position }) {
   const [editOpen, setEditOpen]  = useState(false);
   const [isPending, start]       = useTransition();
   const [errorMsg, setErrorMsg]  = useState<string | null>(null);
+
+  const isExternal = (position.placement_type ?? 'internal') === 'external';
+  const preview = descriptionPreview(position.job_description);
 
   async function onSubmit(formData: FormData) {
     setErrorMsg(null);
@@ -59,19 +76,20 @@ export function PositionTableRow({ position }: { position: Position }) {
         >
           {position.job_title}
         </button>
-        {position.job_description && (
+        {preview && (
           <div className="text-xs text-(--rs-neutral-grey-500) mt-0.5 line-clamp-1 max-w-md">
-            {position.job_description}
+            {preview}
           </div>
         )}
       </td>
-      <td className="px-4 py-3.5 text-(--rs-neutral-grey-700)">
-        {position.client ? (
-          <span className="inline-flex items-center gap-1.5">
-            <Building2 className="w-3 h-3 text-(--rs-neutral-grey-400)" />
-            {position.client}
-          </span>
-        ) : '—'}
+      <td className="px-4 py-3.5">
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+          isExternal
+            ? 'bg-(--rs-accent-50) text-(--rs-accent-700)'
+            : 'bg-(--rs-primary-50) text-(--rs-primary-700)'
+        }`}>
+          {isExternal ? 'External' : 'Internal'}
+        </span>
       </td>
       <td className="px-4 py-3.5 text-(--rs-neutral-grey-700)">
         {position.location ? (
@@ -81,6 +99,9 @@ export function PositionTableRow({ position }: { position: Position }) {
           </span>
         ) : '—'}
       </td>
+      <td className="px-4 py-3.5 text-(--rs-neutral-grey-700) whitespace-nowrap">{employmentLabel(position.employment_type)}</td>
+      <td className="px-4 py-3.5 text-(--rs-neutral-grey-700)">{position.openings ?? 1}</td>
+      <td className="px-4 py-3.5 text-(--rs-neutral-grey-700)">{position.created_by_name || '—'}</td>
       <td className="px-4 py-3.5 text-(--rs-neutral-grey-500) whitespace-nowrap">{formatDate(position.created_at)}</td>
       <td className="px-4 py-3.5">
         <div className="flex items-center gap-1.5 flex-wrap">

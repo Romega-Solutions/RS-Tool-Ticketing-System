@@ -4,6 +4,31 @@ import { revalidatePath } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
 import { canAccessLeadTool } from '@/lib/rbac';
+import { sanitizeRichText, isRichTextEmpty } from '@/lib/sanitize';
+
+const PLACEMENTS  = new Set(['internal', 'external']);
+const EMPLOYMENTS = new Set(['full_time', 'part_time']);
+
+// Pulls the new structured fields out of FormData with safe fallbacks.
+function readPositionFields(formData: FormData) {
+  const jobTitle    = String(formData.get('jobTitle') ?? '').trim();
+  const location    = String(formData.get('location') ?? '').trim() || null;
+  const compensation = String(formData.get('compensation') ?? '').trim() || null;
+
+  const placementRaw  = String(formData.get('placementType') ?? '').trim();
+  const placementType = PLACEMENTS.has(placementRaw) ? placementRaw : 'internal';
+
+  const employmentRaw  = String(formData.get('employmentType') ?? '').trim();
+  const employmentType = EMPLOYMENTS.has(employmentRaw) ? employmentRaw : 'full_time';
+
+  const openingsNum = Math.trunc(Number(formData.get('openings')));
+  const openings    = Number.isFinite(openingsNum) && openingsNum > 0 ? openingsNum : 1;
+
+  const rawDescription = String(formData.get('jobDescription') ?? '');
+  const jobDescription = isRichTextEmpty(rawDescription) ? null : sanitizeRichText(rawDescription);
+
+  return { jobTitle, location, compensation, placementType, employmentType, openings, jobDescription };
+}
 
 async function requireSession() {
   const session = await getSession();
@@ -17,19 +42,18 @@ async function requireSession() {
 export async function createPosition(formData: FormData) {
   const session = await requireSession();
 
-  const jobTitle       = String(formData.get('jobTitle')       ?? '').trim();
-  const client         = String(formData.get('client')         ?? '').trim() || null;
-  const location       = String(formData.get('location')       ?? '').trim() || null;
-  const jobDescription = String(formData.get('jobDescription') ?? '').trim() || null;
-
-  if (!jobTitle) throw new Error('Job title is required');
+  const f = readPositionFields(formData);
+  if (!f.jobTitle) throw new Error('Job title is required');
 
   const supabase = createAdminClient();
   const { error } = await supabase.from('positions').insert({
-    job_title:       jobTitle,
-    client,
-    location,
-    job_description: jobDescription,
+    job_title:       f.jobTitle,
+    placement_type:  f.placementType,
+    location:        f.location,
+    compensation:    f.compensation,
+    employment_type: f.employmentType,
+    openings:        f.openings,
+    job_description: f.jobDescription,
     is_open:         true,
     created_by:      session.id,
   });
@@ -42,21 +66,20 @@ export async function updatePosition(id: number, formData: FormData) {
   await requireSession();
   if (!Number.isInteger(id) || id <= 0) throw new Error('Invalid id');
 
-  const jobTitle       = String(formData.get('jobTitle')       ?? '').trim();
-  const client         = String(formData.get('client')         ?? '').trim() || null;
-  const location       = String(formData.get('location')       ?? '').trim() || null;
-  const jobDescription = String(formData.get('jobDescription') ?? '').trim() || null;
-
-  if (!jobTitle) throw new Error('Job title is required');
+  const f = readPositionFields(formData);
+  if (!f.jobTitle) throw new Error('Job title is required');
 
   const supabase = createAdminClient();
   const { error } = await supabase
     .from('positions')
     .update({
-      job_title:       jobTitle,
-      client,
-      location,
-      job_description: jobDescription,
+      job_title:       f.jobTitle,
+      placement_type:  f.placementType,
+      location:        f.location,
+      compensation:    f.compensation,
+      employment_type: f.employmentType,
+      openings:        f.openings,
+      job_description: f.jobDescription,
       updated_at:      new Date().toISOString(),
     })
     .eq('id', id);

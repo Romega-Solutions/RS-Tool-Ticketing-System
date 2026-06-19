@@ -11,6 +11,7 @@ import {
   type TaskDetailCrumb,
 } from '@/lib/task-detail-navigation';
 import { isAllowedTaskImageUpload } from '@/lib/task-image-uploads';
+import { MentionTextarea, extractMentionedIds } from '@/components/mention-textarea.client';
 
 // ── Shape we get from /api/tickets/work-items/[id] ─────────────────────────
 export interface SheetWorkItem {
@@ -243,10 +244,12 @@ export function TaskDetailSheet({
     if (!item || !newComment.trim()) return;
     setPostingComment(true); setError('');
     try {
+      const trimmed = newComment.trim();
+      const mentions = extractMentionedIds(trimmed, members.map(m => ({ user_id: m.user_id, name: m.name })));
       const res = await fetch(`/api/tickets/work-items/${item.id}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: newComment.trim() }),
+        body: JSON.stringify({ body: trimmed, mentions }),
       });
       if (!res.ok) {
         const d = (await res.json().catch(() => ({}))) as { error?: string };
@@ -802,12 +805,14 @@ export function TaskDetailSheet({
               ))}
 
               <div className="pt-2 space-y-2">
-                <textarea
+                <MentionTextarea
                   value={newComment}
-                  onChange={e => setNewComment(e.target.value)}
+                  onChange={setNewComment}
+                  members={members}
                   rows={3}
-                  placeholder="Write a comment…"
+                  placeholder="Write a comment… use @ to tag a teammate"
                   className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm resize-y focus:border-(--rs-primary-400) focus:outline-none"
+                  onSubmitShortcut={handlePostComment}
                 />
                 <button
                   onClick={handlePostComment}

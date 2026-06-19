@@ -128,8 +128,8 @@ export function OvertimeGuardrailDialog({
             </div>
           ) : (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              Overtime is approved by your attendance admin. Send a request and they can grant it
-              for the rest of today.
+              Overtime is approved by your attendance admin. Send a request and they can grant you
+              a short extension (30 minutes, 1 hour, or 2 hours).
             </div>
           )}
         </div>

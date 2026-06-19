@@ -36,6 +36,8 @@ export function OvertimeRequestsClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [pendingId, setPendingId] = useState<number | null>(null);
+  // Per-request extension length the admin grants on approval (minutes).
+  const [minutesById, setMinutesById] = useState<Record<number, number>>({});
 
   // No setState before the first `await`, so calling this from an effect never
   // triggers a synchronous state update within the effect body.
@@ -73,13 +75,13 @@ export function OvertimeRequestsClient() {
     return () => { active = false; };
   }, []);
 
-  async function decide(id: number, action: 'approve' | 'deny') {
+  async function decide(id: number, action: 'approve' | 'deny', minutes?: number) {
     setPendingId(id);
     try {
       const res = await fetch('/api/admin/overtime-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action }),
+        body: JSON.stringify({ id, action, minutes }),
       });
       if (!res.ok) {
         const d = (await res.json()) as { error?: string };
@@ -149,9 +151,20 @@ export function OvertimeRequestsClient() {
 
               {r.status === 'pending' && (
                 <div className="flex shrink-0 items-center gap-1.5">
+                  <select
+                    aria-label="Extension length"
+                    value={minutesById[r.id] ?? 60}
+                    onChange={e => setMinutesById(prev => ({ ...prev, [r.id]: Number(e.target.value) }))}
+                    disabled={pendingId === r.id}
+                    className="rounded-lg border border-(--rs-neutral-grey-200) bg-white px-2 py-1.5 text-xs text-(--rs-neutral-grey-700) focus:border-(--rs-primary-300) focus:outline-none disabled:opacity-50"
+                  >
+                    <option value={30}>30 min</option>
+                    <option value={60}>1 hour</option>
+                    <option value={120}>2 hours</option>
+                  </select>
                   <button
                     type="button"
-                    onClick={() => void decide(r.id, 'approve')}
+                    onClick={() => void decide(r.id, 'approve', minutesById[r.id] ?? 60)}
                     disabled={pendingId === r.id}
                     className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 transition-colors disabled:opacity-50"
                   >

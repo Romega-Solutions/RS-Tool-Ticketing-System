@@ -7,12 +7,16 @@ import { getSession } from '@/lib/session';
 import { canAccessLeadTool } from '@/lib/rbac';
 import { AtsTabs } from '../ats-tabs';
 import { PositionForm } from './position-form';
-import { PositionTableRow, type Position } from './position-table-row';
+import { type Position } from './position-table-row';
+import { PositionsTable } from './positions-table.client';
 
 function isTableMissing(msg: string | undefined) {
   if (!msg) return false;
   const m = msg.toLowerCase();
-  return m.includes('relation') && m.includes('does not exist');
+  // Catches both a missing `positions` table and a missing column (before the
+  // extend-positions-fields migration has been applied) — both are fixed by the
+  // SQL files listed in the setup card below.
+  return m.includes('does not exist') && (m.includes('relation') || m.includes('column'));
 }
 
 export default async function PositionsPage() {
@@ -24,14 +28,29 @@ export default async function PositionsPage() {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from('positions')
-    .select('id, job_title, client, location, job_description, is_open, created_at')
+    .select('id, job_title, placement_type, location, compensation, employment_type, openings, job_description, is_open, created_at, created_by')
     .order('created_at', { ascending: false })
     .limit(200);
 
   const errorMsg = error?.message;
   const tableMissing = isTableMissing(errorMsg);
   const unexpectedError = error && !tableMissing ? errorMsg : null;
-  const positions: Position[] = (data as Position[] | null) ?? [];
+  const rawPositions = (data as Position[] | null) ?? [];
+
+  // Resolve creator ids → names with a single lookup (same id→name map pattern
+  // the candidates pages use).
+  const creatorIds = [...new Set(rawPositions.map(p => p.created_by).filter((v): v is number => v != null))];
+  const nameMap = new Map<number, string>();
+  if (creatorIds.length) {
+    const { data: users } = await supabase.from('users').select('id, name').in('id', creatorIds);
+    for (const u of (users ?? []) as Array<{ id: number; name: string }>) {
+      nameMap.set(Number(u.id), String(u.name));
+    }
+  }
+  const positions: Position[] = rawPositions.map(p => ({
+    ...p,
+    created_by_name: p.created_by != null ? nameMap.get(Number(p.created_by)) ?? null : null,
+  }));
 
   const openCount   = positions.filter(p => p.is_open).length;
   const closedCount = positions.length - openCount;
@@ -55,10 +74,11 @@ export default async function PositionsPage() {
             <h2 className="font-serif text-lg font-bold text-(--rs-neutral-grey-900)">Setup required</h2>
             <p className="text-sm text-(--rs-neutral-grey-600)">
               The <code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">positions</code> table
-              hasn&apos;t been created yet. Run this in Supabase SQL Editor:
+              needs a database update. Run any you haven&apos;t yet, in order, in the Supabase SQL Editor:
             </p>
             <ol className="list-decimal text-sm text-(--rs-neutral-grey-700) ml-5 space-y-1">
               <li><code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">docs/migrations/add-ats-history-and-positions.sql</code></li>
+              <li><code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">docs/migrations/extend-positions-fields.sql</code></li>
             </ol>
           </CardContent>
         </Card>
@@ -84,41 +104,7 @@ export default async function PositionsPage() {
             <StatCard icon={<Briefcase className="w-4 h-4" />} label="Total"            value={String(positions.length)} accent hint="all-time" />
           </div>
 
-          <Card>
-            <CardContent className="p-0">
-              {positions.length === 0 ? (
-                <div className="px-6 py-20 text-center">
-                  <div className="mx-auto w-12 h-12 rounded-full bg-(--rs-primary-50) flex items-center justify-center mb-3">
-                    <Briefcase className="w-6 h-6 text-(--rs-primary-500)" />
-                  </div>
-                  <p className="text-sm font-semibold text-(--rs-neutral-grey-900)">No positions yet</p>
-                  <p className="text-sm text-(--rs-neutral-grey-500) mt-1 max-w-sm mx-auto">
-                    Click <strong>Add position</strong> to track an open role.
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="border-b border-(--rs-neutral-grey-200) text-left text-xs uppercase tracking-wider text-(--rs-neutral-grey-500) bg-(--rs-neutral-grey-50)">
-                      <tr>
-                        <th className="px-6 py-3 font-semibold">Job title</th>
-                        <th className="px-4 py-3 font-semibold">Client</th>
-                        <th className="px-4 py-3 font-semibold">Location</th>
-                        <th className="px-4 py-3 font-semibold">Opened</th>
-                        <th className="px-4 py-3 font-semibold">Status</th>
-                        <th className="px-4 py-3 font-semibold w-10" />
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-(--rs-neutral-grey-100)">
-                      {positions.map(p => (
-                        <PositionTableRow key={p.id} position={p} />
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <PositionsTable positions={positions} />
         </>
       )}
     </div>
