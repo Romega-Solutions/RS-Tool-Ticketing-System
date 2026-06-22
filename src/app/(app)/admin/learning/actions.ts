@@ -20,7 +20,7 @@ async function requireAdmin() {
 
 const courseInput = z.object({
   title:        z.string().trim().min(1).max(200),
-  description:  z.string().trim().max(2000).nullable().optional(),
+  description:  z.string().trim().max(8000).nullable().optional(),
   scope:        z.enum(['foundation', 'department', 'intern']),
   department:   z.string().trim().max(120).nullable().optional(),
   enforcement:  z.enum(['soft', 'hard']).default('soft'),

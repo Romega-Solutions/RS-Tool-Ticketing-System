@@ -9,6 +9,7 @@ const BUCKET           = process.env.SUPABASE_RESUMES_BUCKET   ?? 'candidate-res
 const ONBOARDER_BUCKET = process.env.SUPABASE_ONBOARDER_BUCKET ?? 'onboarder-docs';
 const LEARNING_BUCKET  = process.env.SUPABASE_LEARNING_BUCKET  ?? 'learning-content';
 const TASK_IMAGE_BUCKET = process.env.SUPABASE_TASK_IMAGES_BUCKET ?? 'task-images';
+const TIMESHEET_DOCS_BUCKET = process.env.SUPABASE_TIMESHEET_DOCS_BUCKET ?? 'timesheet-edit-docs';
 
 // 1y — long enough that the signed URL doesn't expire mid-pipeline. Recruiters
 // who want to share externally should re-sign just before sharing.
@@ -215,6 +216,52 @@ export type TaskImageUpload = {
   mimeType: string;
   sizeBytes: number;
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Timesheet edit-request documents — optional supporting files (screenshots,
+// medical certs, outage tickets) an IC attaches when requesting a time
+// correction. Private bucket; leads/admins get a short-lived signed URL when
+// reviewing the request in the approval queue.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ALLOWED_EDIT_DOC_MIME = new Set([
+  'application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/heic',
+]);
+
+export function isAllowedTimesheetEditDoc(file: File): boolean {
+  return ALLOWED_EDIT_DOC_MIME.has(file.type);
+}
+
+export type TimesheetEditUpload = { path: string; name: string; mimeType: string; sizeBytes: number };
+
+/** Upload an optional supporting document for a time-edit request. */
+export async function uploadTimesheetEditDocument(args: {
+  userId: number;
+  file:   File;
+}): Promise<TimesheetEditUpload> {
+  const ext = extensionFor(args.file.name, args.file.type);
+  const base = slugify(args.file.name.replace(/\.[^.]+$/, '') || 'document');
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const path = `time-edits/${args.userId}/${base}-${stamp}.${ext}`;
+
+  const admin = createAdminClient();
+  const bytes = new Uint8Array(await args.file.arrayBuffer());
+
+  const { error } = await admin.storage.from(TIMESHEET_DOCS_BUCKET).upload(path, bytes, {
+    contentType: args.file.type || 'application/octet-stream',
+    upsert: false,
+  });
+  if (error) throw new Error(`Document upload failed: ${error.message}`);
+
+  return { path, name: args.file.name, mimeType: args.file.type || 'application/octet-stream', sizeBytes: args.file.size };
+}
+
+/** Short-lived signed URL (1h) for a lead/admin reviewing an edit-request doc. */
+export async function signTimesheetEditDocument(path: string): Promise<string | null> {
+  const admin = createAdminClient();
+  const { data } = await admin.storage.from(TIMESHEET_DOCS_BUCKET).createSignedUrl(path, 60 * 60);
+  return data?.signedUrl ?? null;
+}
 
 export async function uploadTaskImageToStorage(args: {
   workItemId: number;

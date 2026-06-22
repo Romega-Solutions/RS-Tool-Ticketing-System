@@ -9,6 +9,7 @@ import {
 } from '../actions';
 import { SubmitButton } from '@/components/learning/submit-button';
 import { CourseNav } from '@/components/learning/course-nav.client';
+import { CourseSummaryEditor } from './course-summary-editor.client';
 
 export const dynamic = 'force-dynamic';
 
@@ -88,7 +89,7 @@ export default async function AdminCourseEditPage({
         <h2 className="font-serif text-lg font-semibold text-(--rs-neutral-grey-800)">Course settings</h2>
         <form action={saveCourse} className="space-y-3">
           <Field label="Title" name="title" defaultValue={course.title} required />
-          <Field label="Description" name="description" defaultValue={course.description ?? ''} textarea />
+          <CourseSummaryEditor name="description" defaultValue={course.description ?? ''} />
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
               <label className="block text-sm font-medium text-(--rs-neutral-grey-800) mb-1">Audience</label>

@@ -5,7 +5,9 @@ import { createAdminClient } from '@/lib/supabase/admin';
 // migrated yet, inserts no-op rather than breaking the triggering action
 // (commenting, adding a member, the cron sweep).
 
-export type NotificationType = 'project_added' | 'mentioned' | 'task_due';
+export type NotificationType =
+  | 'project_added' | 'mentioned' | 'task_due'
+  | 'time_edit_requested' | 'time_edit_decided';
 
 export interface NotificationRow {
   id:         number;
@@ -108,6 +110,44 @@ export async function notifyMention(opts: {
     body:    opts.snippet ?? null,
     link:    opts.link,
   })));
+}
+
+// Attendance time-edit request → notify the approvers (the IC's team leads + admins).
+export async function notifyTimeEditRequested(opts: {
+  recipientIds: number[];
+  actorId:      number;
+  actorName:    string;
+  dateLabel:    string;
+}): Promise<void> {
+  const unique = [...new Set(opts.recipientIds)];
+  await Promise.all(unique.map(userId => createNotification({
+    userId,
+    actorId: opts.actorId,
+    type:    'time_edit_requested',
+    title:   `${opts.actorName} requested a time correction`,
+    body:    `For ${opts.dateLabel}. Review it in the approval queue.`,
+    link:    '/attendance/requests',
+  })));
+}
+
+// Decision on a time-edit request → notify the IC who filed it.
+export async function notifyTimeEditDecided(opts: {
+  recipientId: number;
+  actorId:     number;
+  approved:    boolean;
+  dateLabel:   string;
+  comment?:    string | null;
+}): Promise<void> {
+  await createNotification({
+    userId:  opts.recipientId,
+    actorId: opts.actorId,
+    type:    'time_edit_decided',
+    title:   opts.approved ? 'Your time correction was approved' : 'Your time correction was declined',
+    body:    opts.approved
+      ? `Your ${opts.dateLabel} correction was applied to your timesheet.`
+      : `Your ${opts.dateLabel} request was declined${opts.comment ? `: ${opts.comment}` : '.'}`,
+    link:    '/my-time',
+  });
 }
 
 export async function notifyProjectAdded(opts: {

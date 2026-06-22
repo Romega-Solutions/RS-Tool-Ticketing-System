@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, AtSign, FolderPlus, CalendarClock, CheckCheck } from 'lucide-react';
+import { Bell, AtSign, FolderPlus, CalendarClock, CheckCheck, Timer } from 'lucide-react';
 import { playRomegaNotificationSound } from '@/lib/notification-sound';
 
 type NotificationItem = {
@@ -34,6 +34,7 @@ function TypeIcon({ type }: { type: string }) {
   if (type === 'mentioned')    return <AtSign className={cls} />;
   if (type === 'project_added') return <FolderPlus className={cls} />;
   if (type === 'task_due')     return <CalendarClock className={cls} />;
+  if (type === 'time_edit_requested' || type === 'time_edit_decided') return <Timer className={cls} />;
   return <Bell className={cls} />;
 }
 

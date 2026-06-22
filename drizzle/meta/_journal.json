@@ -15,6 +15,13 @@
       "when": 1781883915308,
       "tag": "0001_ordinary_black_crow",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782142115156,
+      "tag": "0002_broken_retro_girl",
+      "breakpoints": true
     }
   ]
 }

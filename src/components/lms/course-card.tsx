@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ProgressBar } from './progress-bar';
+import { stripMarkdown } from './course-summary';
 import type { LmsCourse } from '@/lib/lms';
 
 export function CourseCard({
@@ -44,8 +45,8 @@ export function CourseCard({
             {course.title}
           </h3>
           {course.description && (
-            <p className="mt-1 text-sm text-(--rs-neutral-grey-500) line-clamp-2">
-              {course.description}
+            <p className="mt-1.5 text-sm leading-relaxed text-(--rs-neutral-grey-600) line-clamp-2">
+              {stripMarkdown(course.description)}
             </p>
           )}
         </div>

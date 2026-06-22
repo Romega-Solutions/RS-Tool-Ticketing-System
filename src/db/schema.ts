@@ -52,6 +52,29 @@ export const overtimeRequests = pgTable('overtime_requests', {
   approvedUntil: text('approved_until'),
 });
 
+// IC self-service time-edit requests. An IC asks to correct a clock-in/out
+// session; the request enters 'pending' and never overwrites the timesheet
+// until a lead (on the IC's team) or admin approves it. Approval applies the
+// requested times to the timesheet and stamps timesheets.editedBy/editedAt.
+export const timesheetEditRequests = pgTable('timesheet_edit_requests', {
+  id:                serial('id').primaryKey(),
+  userId:            integer('user_id').notNull(),         // the IC requesting
+  timesheetId:       integer('timesheet_id'),              // session being corrected
+  date:              text('date').notNull(),               // denormalized for display
+  currentClockIn:    text('current_clock_in'),             // snapshot at request time
+  currentClockOut:   text('current_clock_out'),
+  requestedClockIn:  text('requested_clock_in'),           // null = leave unchanged
+  requestedClockOut: text('requested_clock_out'),          // null = leave unchanged
+  reason:            text('reason').notNull(),             // mandatory explanation
+  documentPath:      text('document_path'),                // optional supporting file (Storage path)
+  documentName:      text('document_name'),
+  status:            text('status').notNull().default('pending'), // pending | approved | denied | cancelled
+  requestedAt:       text('requested_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  decidedBy:         integer('decided_by'),
+  decidedAt:         text('decided_at'),
+  decisionComment:   text('decision_comment'),             // mandatory on denial
+});
+
 export const presencePings = pgTable('presence_pings', {
   id:              text('id').primaryKey(),
   fromUserId:      integer('from_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),

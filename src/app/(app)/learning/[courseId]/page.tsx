@@ -1,9 +1,11 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
+import { ArrowLeft } from 'lucide-react';
 import { getSession } from '@/lib/session';
 import { getCourseWithLessons, userInCourseAudience, courseProgress } from '@/lib/lms';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { ProgressBar } from '@/components/lms/progress-bar';
+import { CourseSummary } from '@/components/lms/course-summary';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,19 +47,16 @@ export default async function CourseDetailPage({
   const completedIds = new Set((completed ?? []).map((r: { lesson_id: number }) => r.lesson_id));
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-2">
-        <Link href="/learning" className="text-xs text-(--rs-primary-600) hover:underline">
-          ← My Learning
+    <div className="mx-auto max-w-3xl space-y-8">
+      <header className="space-y-3">
+        <Link href="/learning" className="inline-flex items-center gap-1.5 text-xs font-medium text-(--rs-primary-600) hover:underline">
+          <ArrowLeft className="h-3.5 w-3.5" /> My Learning
         </Link>
-        <h1 className="font-serif text-2xl font-semibold text-(--rs-neutral-grey-900)">
+        <h1 className="font-serif text-3xl font-bold leading-tight text-(--rs-neutral-grey-900)">
           {course.title}
         </h1>
-        {course.description && (
-          <p className="text-sm text-(--rs-neutral-grey-500)">{course.description}</p>
-        )}
         {lessons.length > 0 && (
-          <div className="max-w-md pt-2">
+          <div className="max-w-md pt-1">
             <ProgressBar
               percent={progress.percent}
               label={`${progress.completed} of ${progress.total} lessons`}
@@ -66,12 +65,26 @@ export default async function CourseDetailPage({
         )}
       </header>
 
-      {lessons.length === 0 ? (
-        <p className="text-sm italic text-(--rs-neutral-grey-400)">
-          This course has no lessons yet.
-        </p>
-      ) : (
-        <ul className="rounded-xl border border-(--rs-neutral-grey-200) divide-y divide-(--rs-neutral-grey-100) bg-white">
+      {course.description && (
+        <section className="rounded-2xl border border-(--rs-neutral-grey-200) bg-white p-6 sm:p-8 shadow-sm">
+          <h2 className="text-[11px] font-bold uppercase tracking-widest text-(--rs-neutral-grey-500)">
+            About this course
+          </h2>
+          <hr className="my-4 border-(--rs-neutral-grey-100)" />
+          <CourseSummary md={course.description} />
+        </section>
+      )}
+
+      <section className="space-y-3">
+        <h2 className="text-[11px] font-bold uppercase tracking-widest text-(--rs-neutral-grey-500)">
+          Lessons
+        </h2>
+        {lessons.length === 0 ? (
+          <p className="text-sm italic text-(--rs-neutral-grey-400)">
+            This course has no lessons yet.
+          </p>
+        ) : (
+          <ul className="rounded-xl border border-(--rs-neutral-grey-200) divide-y divide-(--rs-neutral-grey-100) bg-white">
           {lessons.map((lesson, idx) => {
             const done = completedIds.has(lesson.id);
             const icon =
@@ -98,8 +111,9 @@ export default async function CourseDetailPage({
               </li>
             );
           })}
-        </ul>
-      )}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
