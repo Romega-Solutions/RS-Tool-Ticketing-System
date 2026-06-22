@@ -64,7 +64,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   const headersList = await headers();
   const pathname = headersList.get('x-invoke-path') ?? '';
-  if (pathname && !canAccessPath(pathname, session.role)) {
+  if (pathname && !canAccessPath(pathname, session.role, session.team)) {
     redirect(defaultLandingPath(session.role));
   }
 

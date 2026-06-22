@@ -28,23 +28,35 @@ export function canAccessAdmin(role: AppRole): boolean {
 }
 
 export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string | null): boolean {
-  // Admins see every tool; ICs/interns see none; a lead sees a tool only if their
-  // team is in that tool's allowlist. The Onboarding Lead keeps access via the
-  // 'hr' / 'human resources' / 'people' entries under `onboarding`.
+  // Admins see every tool; a lead sees a tool only if their team is in that
+  // tool's allowlist. The Onboarding Lead keeps access via the 'hr' / 'human
+  // resources' / 'people' entries under `onboarding`.
+  //
+  // Recruiting is the one exception to "leads only": ICs on a core recruiting/HR
+  // team also get it (RECRUITING_IC_TEAMS), since hands-on ATS work isn't limited
+  // to leads. Interns are still excluded.
   const normalizeTeamName = (value: string | null | undefined) => String(value ?? '').trim().toLowerCase();
   const LEAD_TOOL_TEAMS: Record<LeadToolKey, string[]> = {
     ceo: ['executive', 'executive & admin', 'admin'],
     pm: ['operations', 'project management', 'design/pm'],
     sales: ['sales', 'sales & account management'],
     marketing: ['marketing', 'marketing & brand content', 'hr/marketing'],
-    recruiting: ['recruiting', 'talent acquisition', 'people operations', 'operations', 'hr/marketing', 'marketing & brand content'],
+    recruiting: [
+      'recruiting', 'talent acquisition', 'people operations', 'operations',
+      'hr', 'human resources', 'people', 'hr/marketing', 'marketing & brand content',
+    ],
     onboarding: [
       'recruiting', 'talent acquisition', 'people operations', 'operations',
       'hr', 'human resources', 'people', 'hr/marketing',
       'executive', 'executive & admin', 'admin',
     ],
   };
+  // ICs on a core recruiting/HR team get the Recruiting tool too (not other lead tools).
+  const RECRUITING_IC_TEAMS = ['recruiting', 'talent acquisition', 'people operations', 'hr', 'human resources', 'people'];
   if (role === 'admin') return true;
+  if (tool === 'recruiting' && role === 'ic') {
+    return RECRUITING_IC_TEAMS.includes(normalizeTeamName(team));
+  }
   if (role !== 'lead') return false;
   return LEAD_TOOL_TEAMS[tool].includes(normalizeTeamName(team));
 }
