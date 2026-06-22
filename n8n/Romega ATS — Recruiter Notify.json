@@ -1,0 +1,110 @@
+{
+  "name": "Romega ATS — Recruiter Notify",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ats-recruiter-notify",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "0e9cc720b6",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "0163e3be-6ad5-4b7a-bfe6-6f1b494c2de7"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Romega ATS — Recruiter Notify\n// Inbound (from Next.js notifyRecruiterOfApplication):\n//   { candidateName, candidateEmail, candidatePhone, applicationCode,\n//     positionTitle, recipients:[...emails], resumeUrl, recruiterEmail }\nconst APP = \"https://rs-tool-ticketing-system-kpg782s-projects.vercel.app\";\nconst body = ($input.first().json.body ?? $input.first().json);\nconst recipients = Array.isArray(body.recipients) ? body.recipients.filter(Boolean) : [];\nconst to = (recipients.length ? recipients : [body.recruiterEmail].filter(Boolean)).join(', ');\nif (!to) { throw new Error('No recipients for recruiter notify'); }\nconst name = body.candidateName || 'A candidate';\nconst pos  = body.positionTitle || 'a position';\nconst code = body.applicationCode ? ` (${body.applicationCode})` : '';\nconst subject = `New application: ${name} — ${pos}${code}`;\nconst lines = [\n  `A new application just came in through the Romega careers site.`,\n  ``,\n  `Candidate: ${name}`,\n  `Email: ${body.candidateEmail || '—'}`,\n  `Phone: ${body.candidatePhone || '—'}`,\n  `Position: ${pos}`,\n  body.applicationCode ? `Application code: ${body.applicationCode}` : null,\n  ``,\n  body.resumeUrl ? `Download CV / resume:\\n${body.resumeUrl}` : `Resume: open the candidate in the ATS to view it.`,\n  ``,\n  `Open in the ATS: ${APP}/recruiting/candidates`,\n].filter(x => x !== null);\nreturn [{ json: { to, subject, body: lines.join('\\n') } }];\n"
+      },
+      "id": "a5e0144e77",
+      "name": "Build Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "c9a951d488",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "bUS0S4ZWz9gavO3f",
+          "name": "KEN ROMEGA"
+        }
+      },
+      "webhookId": "7f1f1b02-dc63-4bd7-b70a-e52029595b74"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "98882c14ec",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        720,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Email": {
+      "main": [
+        [
+          {
+            "node": "Send Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Gmail": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
