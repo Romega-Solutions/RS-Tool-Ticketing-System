@@ -153,12 +153,19 @@ export type RecruiterNotifyPayload = {
   candidateId:     number;
   candidateName:   string;
   candidateEmail:  string;
+  candidatePhone:  string | null;
   applicationCode: string | null;
   positionId:      number;
   positionTitle:   string;
   recruiterUserId: number | null;
   recruiterEmail:  string | null;
   recruiterName:   string | null;
+  /** Everyone n8n should email the CV to — the HR team plus the assigned
+   *  recruiter, deduped. The n8n workflow uses this as its To/Bcc list. */
+  recipients:      string[];
+  /** Signed download URL for the uploaded resume PDF (null if upload failed),
+   *  so the n8n workflow can attach or link the CV. */
+  resumeUrl:       string | null;
 };
 
 export async function notifyRecruiterOfApplication(

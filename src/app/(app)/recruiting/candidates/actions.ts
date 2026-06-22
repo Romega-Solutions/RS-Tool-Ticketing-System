@@ -205,6 +205,38 @@ async function fireAutoCommunication(
   return result;
 }
 
+// Teams whose active members are emailed every new public application. Read
+// live from `users`, so future HR/recruiting hires are included automatically.
+// Mirrors the recruiting-access teams in lib/rbac.ts (core HR + recruiting).
+const APPLICATION_NOTIFY_TEAMS = new Set([
+  'human resources', 'hr', 'people', 'people operations', 'talent acquisition', 'recruiting',
+]);
+
+/**
+ * Who n8n should email a new CV to: every active member of an HR/recruiting
+ * team, plus the position's assigned recruiter, deduped and lowercased.
+ */
+async function getApplicationNotifyRecipients(
+  supabase: AdminClient,
+  recruiterEmail: string | null,
+): Promise<string[]> {
+  const emails = new Set<string>();
+  if (recruiterEmail?.trim()) emails.add(recruiterEmail.trim().toLowerCase());
+  try {
+    const { data } = await supabase.from('users').select('email, team, is_active');
+    for (const u of (data ?? []) as Array<{ email: string | null; team: string | null; is_active: number | boolean | null }>) {
+      const active = u.is_active === 1 || u.is_active === true;
+      const team = String(u.team ?? '').trim().toLowerCase();
+      if (active && u.email && APPLICATION_NOTIFY_TEAMS.has(team)) {
+        emails.add(u.email.trim().toLowerCase());
+      }
+    }
+  } catch (err) {
+    console.warn('[ats] getApplicationNotifyRecipients failed:', err instanceof Error ? err.message : err);
+  }
+  return [...emails];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Create
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1065,8 +1097,9 @@ export async function createPublicApplication(args: {
     console.error('[createPublicApplication] writeHistory failed:', err);
   }
 
+  let resumeUrl: string | null = null;
   try {
-    await tryUploadResume({
+    resumeUrl = await tryUploadResume({
       supabase,
       candidateId: inserted.id,
       position:    position.job_title,
@@ -1100,16 +1133,23 @@ export async function createPublicApplication(args: {
     recruiterEmail = recruiter?.email ?? null;
     recruiterName  = recruiter?.name  ?? null;
   }
+  // Email recipients = the assigned recruiter + every active HR/recruiting
+  // team member (Christine, Erich, and any future HR hire), deduped.
+  const recipients = await getApplicationNotifyRecipients(supabase, recruiterEmail);
+
   const notifyResult = await notifyRecruiterOfApplication({
     candidateId:     inserted.id,
     candidateName:   cleanedName || args.fullName,
     candidateEmail:  emailNorm,
+    candidatePhone:  cleanedPhone || null,
     applicationCode,
     positionId:      position.id,
     positionTitle:   position.job_title,
     recruiterUserId: position.created_by ?? null,
     recruiterEmail,
     recruiterName,
+    recipients,
+    resumeUrl,
   });
   if (!notifyResult.ok) {
     console.warn('[ats] recruiter notify failed:', notifyResult.error);

@@ -86,10 +86,14 @@ function Toolbar({ editor }: { editor: Editor | null }) {
  * server-action FormData flow (the action sanitizes it before storing).
  */
 export function JobDescriptionEditor({
-  name, defaultValue,
+  name, defaultValue, bodyClassName,
 }: {
   name: string;
   defaultValue?: string | null;
+  /** Applied to the scroll container around the editor body. Pass a min/max
+   *  height (e.g. on the full-page editor) so a long JD scrolls inside the box
+   *  with the toolbar pinned, instead of growing the whole page unbounded. */
+  bodyClassName?: string;
 }) {
   const [html, setHtml] = useState(defaultValue ?? '');
   const [, force] = useReducer((x: number) => x + 1, 0);
@@ -121,9 +125,11 @@ export function JobDescriptionEditor({
 
   return (
     <div>
-      <div className="rs-richtext-editor overflow-hidden rounded-xl border border-(--rs-neutral-grey-200) bg-white focus-within:border-(--rs-primary-300) focus-within:ring-4 focus-within:ring-(--rs-primary-100)">
+      <div className="rs-richtext-editor flex flex-col overflow-hidden rounded-xl border border-(--rs-neutral-grey-200) bg-white focus-within:border-(--rs-primary-300) focus-within:ring-4 focus-within:ring-(--rs-primary-100)">
         <Toolbar editor={editor} />
-        <EditorContent editor={editor} />
+        <div className={bodyClassName ?? ''}>
+          <EditorContent editor={editor} />
+        </div>
       </div>
       <input type="hidden" name={name} value={html} />
     </div>
