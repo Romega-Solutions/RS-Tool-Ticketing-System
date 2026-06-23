@@ -4,7 +4,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Briefcase, AlertCircle } from 'lucide-react';
 import { LeadToolHeader, StatCard } from '@/components/lead-tool-header';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { AtsTabs } from '../ats-tabs';
 import { PositionForm } from './position-form';
 import { type Position } from './position-table-row';
@@ -21,7 +21,7 @@ function isTableMissing(msg: string | undefined) {
 
 export default async function PositionsPage() {
   const session = await getSession();
-  if (!session || !canAccessLeadTool('recruiting', session.role, session.team)) {
+  if (!session || !hasToolAccess('recruiting', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
 

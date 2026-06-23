@@ -4,7 +4,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Star, Globe, ShieldCheck, Clock, AlertCircle, Search, Filter, MapPin } from 'lucide-react';
 import { LeadToolHeader, StatCard } from '@/components/lead-tool-header';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { CandidateForm } from '../candidates/candidate-form';
 import { AtsTabs } from '../ats-tabs';
 import { ConsentChip, TalentPoolActions, type ConsentStatus } from './talent-pool-row';
@@ -46,7 +46,7 @@ type PageProps = { searchParams: Promise<{ q?: string; filter?: string }> };
 
 export default async function TalentPoolPage({ searchParams }: PageProps) {
   const session = await getSession();
-  if (!session || !canAccessLeadTool('recruiting', session.role, session.team)) {
+  if (!session || !hasToolAccess('recruiting', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
 

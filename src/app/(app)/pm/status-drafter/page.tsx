@@ -8,7 +8,7 @@ import {
 import { LeadToolHeader, StatCard } from '@/components/lead-tool-header';
 import { ToolResetButton } from '@/components/tool-reset-button';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import {
   currentWeekStartPht,
   getLatestStatusDraft,
@@ -39,7 +39,7 @@ type PageProps = {
 
 export default async function StatusDrafterPage({ searchParams }: PageProps) {
   const session = await getSession();
-  if (!session || !canAccessLeadTool('pm', session.role, session.team)) {
+  if (!session || !hasToolAccess('pm', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
 

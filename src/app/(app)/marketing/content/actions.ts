@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { createContentDraft } from '@/lib/content-repurposer';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 export async function generateContentDraftAction(input: {
@@ -13,7 +13,7 @@ export async function generateContentDraftAction(input: {
 }) {
   const session = await getSession();
   if (!session) throw new Error('Not authenticated');
-  if (!canAccessLeadTool('marketing', session.role, session.team)) {
+  if (!hasToolAccess('marketing', session.role, session.toolAccess)) {
     throw new Error('Not authorized');
   }
 
@@ -38,7 +38,7 @@ const DELETE_CONTENT_DRAFTS_CONFIRMATION = 'DELETE CONTENT DRAFTS';
 export async function deleteAllContentDrafts(confirmation: string) {
   const session = await getSession();
   if (!session) throw new Error('Not authenticated');
-  if (!canAccessLeadTool('marketing', session.role, session.team)) {
+  if (!hasToolAccess('marketing', session.role, session.toolAccess)) {
     throw new Error('Not authorized');
   }
   if (confirmation !== DELETE_CONTENT_DRAFTS_CONFIRMATION) {

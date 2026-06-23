@@ -1,7 +1,7 @@
 import { redirect, notFound } from 'next/navigation';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { PositionEditor } from '../../position-editor.client';
 import type { PositionDefaults } from '../../position-fields';
 
@@ -11,7 +11,7 @@ export default async function EditPositionPage({
   params: Promise<{ id: string }>;
 }) {
   const session = await getSession();
-  if (!session || !canAccessLeadTool('recruiting', session.role, session.team)) {
+  if (!session || !hasToolAccess('recruiting', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
 

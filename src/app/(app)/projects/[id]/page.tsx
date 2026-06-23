@@ -1,6 +1,7 @@
 import { getProjects, getProjectStates, getWorkItems, getCycles, buildStateLookup, enrichWorkItems } from '@/lib/tickets';
 import { getSession } from '@/lib/session';
 import { canManageProject } from '@/lib/permissions';
+import { hasToolAccess, defaultLandingPath } from '@/lib/rbac';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { AlertCircle, Settings } from 'lucide-react';
@@ -16,6 +17,7 @@ export default async function ProjectBoardPage({
   const { id } = await params;
   const session = await getSession();
   if (!session) redirect('/login');
+  if (!hasToolAccess('projects', session.role, session.toolAccess)) redirect(defaultLandingPath(session.role));
 
   let projectName = '';
   let states: Awaited<ReturnType<typeof getProjectStates>> = [];

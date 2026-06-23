@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { sanitizeRichText, isRichTextEmpty } from '@/lib/sanitize';
 
 const PLACEMENTS  = new Set(['internal', 'external']);
@@ -33,7 +33,7 @@ function readPositionFields(formData: FormData) {
 async function requireSession() {
   const session = await getSession();
   if (!session) throw new Error('Not authenticated');
-  if (!canAccessLeadTool('recruiting', session.role, session.team)) {
+  if (!hasToolAccess('recruiting', session.role, session.toolAccess)) {
     throw new Error('Not authorized');
   }
   return session;

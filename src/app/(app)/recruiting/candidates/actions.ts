@@ -14,7 +14,7 @@ import {
   type CommunicationEvent,
   type CommunicationResult,
 } from '@/lib/n8n';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { toProperName, formatPhoneNumber } from '@/lib/format';
 import { uploadResumeToStorage } from '@/lib/storage';
 import { createOnboarderFromCandidate } from '@/lib/onboarders';
@@ -54,7 +54,7 @@ const AUTO_EMAIL_STATUSES: ReadonlySet<Status> = new Set<Status>([
 async function requireSession() {
   const session = await getSession();
   if (!session) throw new Error('Not authenticated');
-  if (!canAccessLeadTool('recruiting', session.role, session.team)) {
+  if (!hasToolAccess('recruiting', session.role, session.toolAccess)) {
     throw new Error('Not authorized');
   }
   return session;
@@ -1082,6 +1082,7 @@ export async function createPublicApplication(args: {
     team:     null,
     jobTitle: null,
     isOnboarding: false,
+    toolAccess: [],
   };
 
   try {

@@ -5,7 +5,9 @@ import { canAccessLeadTool, canAccessPath } from '@/lib/rbac';
 // from the recruiting allowlist (so the HR lead was blocked) and ICs were
 // blocked from all lead tools (so HR ICs were blocked even after the allowlist
 // fix). Recruiting now allows HR leads AND ICs on core recruiting/HR teams.
-describe('canAccessLeadTool — recruiting access for the HR team', () => {
+// NOTE: canAccessLeadTool is now the SEED logic (computes day-one tool_access);
+// runtime access is per-user via tool_access / hasToolAccess.
+describe('canAccessLeadTool (seed logic) — recruiting access for the HR team', () => {
   it('lets an HR lead (Christine) see Recruiting', () => {
     expect(canAccessLeadTool('recruiting', 'lead', 'Human Resources')).toBe(true);
   });
@@ -37,9 +39,10 @@ describe('canAccessLeadTool — recruiting access for the HR team', () => {
     expect(canAccessLeadTool('recruiting', 'admin', null)).toBe(true);
   });
 
-  it('gates the /recruiting/* path the same way (team-aware)', () => {
-    expect(canAccessPath('/recruiting/candidates', 'lead', 'Human Resources')).toBe(true);
-    expect(canAccessPath('/recruiting/candidates', 'ic', 'Human Resources')).toBe(true);
-    expect(canAccessPath('/recruiting/candidates', 'ic', 'AI & Technology')).toBe(false);
+  it('gates the /recruiting/* path by the per-user tool_access set', () => {
+    expect(canAccessPath('/recruiting/candidates', 'lead', ['recruiting'])).toBe(true);
+    expect(canAccessPath('/recruiting/candidates', 'ic', ['recruiting'])).toBe(true);
+    expect(canAccessPath('/recruiting/candidates', 'ic', [])).toBe(false);
+    expect(canAccessPath('/recruiting/candidates', 'admin', [])).toBe(true);
   });
 });

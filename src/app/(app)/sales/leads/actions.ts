@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 
 const ALLOWED_STAGES = ['new', 'contacted', 'qualified', 'proposal', 'won', 'lost'] as const;
 type Stage = typeof ALLOWED_STAGES[number];
@@ -15,7 +15,7 @@ function isStage(value: string): value is Stage {
 async function requireSession() {
   const session = await getSession();
   if (!session) throw new Error('Not authenticated');
-  if (!canAccessLeadTool('sales', session.role, session.team)) {
+  if (!hasToolAccess('sales', session.role, session.toolAccess)) {
     throw new Error('Not authorized');
   }
   return session;

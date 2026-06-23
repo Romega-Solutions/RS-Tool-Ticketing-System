@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
-import { canAccessReports, defaultLandingPath } from '@/lib/rbac';
+import { hasToolAccess, defaultLandingPath } from '@/lib/rbac';
 import { signTimesheetEditDocument } from '@/lib/storage';
 import { RequestsQueueClient, type QueueRequest } from './requests-queue-client';
 
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 export default async function TimeEditRequestsPage() {
   const session = await getSession();
   if (!session) redirect('/login');
-  if (!canAccessReports(session.role)) redirect(defaultLandingPath(session.role));
+  if (!hasToolAccess('attendance', session.role, session.toolAccess)) redirect(defaultLandingPath(session.role));
 
   const admin = createAdminClient();
 

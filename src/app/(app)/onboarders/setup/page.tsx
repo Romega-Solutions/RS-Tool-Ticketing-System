@@ -7,7 +7,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { LeadToolHeader } from '@/components/lead-tool-header';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { TestWorkflowButton } from './test-workflow-button';
 
 type WorkflowEntry = {
@@ -142,7 +142,7 @@ const OPEN_QUESTIONS = [
 
 export default async function OnboardingSetupPage() {
   const session = await getSession();
-  if (!session || !canAccessLeadTool('onboarding', session.role, session.team)) {
+  if (!session || !hasToolAccess('onboarding', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
 

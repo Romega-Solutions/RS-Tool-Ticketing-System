@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { Pencil, Check, X, Loader2, UserPlus, Eye, EyeOff, Users, UserMinus, RotateCcw } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Pencil, Check, X, Loader2, UserPlus, Eye, EyeOff, Users, UserMinus, RotateCcw, FileText, ArrowUp, ArrowDown, ChevronsUpDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { createClient } from '@/lib/supabase/client';
@@ -17,21 +17,23 @@ export type UserRow = {
   memberCode: string | null;
   hourlyRateUsd: number | null;
   isActive: boolean;
+  toolAccess: string[];
+  dateOfBirth: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  driveUrl: string | null;
 };
 
-const ROLE_OPTIONS = ['ic', 'lead', 'admin'];
+const ROLE_OPTIONS = ['intern', 'ic', 'lead', 'admin'];
 
+// Canonical departments, shown alphabetically in the selection dropdowns.
 const DEPARTMENTS = [
-  'AI & Technology',
-  'Design',
-  'Social Media',
-  'Marketing & Brand Content',
-  'Sales & Account Management',
-  'Recruitment',
-  'Human Resources',
-  'Finance & Bookkeeping',
-  'Market Research & Analytics',
-  'Executive & Admin',
+  'Executive',
+  'Finance',
+  'Human Resource',
+  'Marketing',
+  'Sales',
+  'Technical',
 ];
 
 const ROLE_BADGE: Record<string, string> = {
@@ -40,10 +42,14 @@ const ROLE_BADGE: Record<string, string> = {
   lead:    'bg-blue-100 text-blue-700 border-blue-200',
   tl:      'bg-blue-100 text-blue-700 border-blue-200',
   manager: 'bg-blue-100 text-blue-700 border-blue-200',
+  intern:  'bg-amber-100 text-amber-700 border-amber-200',
   ic:      'bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-600) border-(--rs-neutral-grey-200)',
 };
 
-type EditState = { role: string; isActive: boolean; team: string; memberCode: string; hourlyRateUsd: string };
+type EditState = {
+  role: string; isActive: boolean; team: string; memberCode: string; hourlyRateUsd: string;
+  dateOfBirth: string; startDate: string; endDate: string; driveUrl: string;
+};
 
 type NewUserForm = {
   email: string;
@@ -55,16 +61,46 @@ type NewUserForm = {
   jobTitle: string;
   memberCode: string;
   hourlyRateUsd: string;
+  dateOfBirth: string;
+  startDate: string;
+  endDate: string;
+  driveUrl: string;
 };
 
 const EMPTY_FORM: NewUserForm = {
   email: '', password: '', name: '', username: '', role: 'ic', team: '', jobTitle: '', memberCode: '', hourlyRateUsd: '',
+  dateOfBirth: '', startDate: '', endDate: '', driveUrl: '',
 };
+
+// ── Column sorting ───────────────────────────────────────────────────────────
+type SortKey = 'name' | 'role' | 'team' | 'dateOfBirth' | 'startDate' | 'endDate' | 'memberCode' | 'hourlyRateUsd' | 'isActive';
+type SortDir = 'asc' | 'desc';
+
+function compareUsers(a: UserRow, b: UserRow, key: SortKey): number {
+  if (key === 'hourlyRateUsd') return (a.hourlyRateUsd ?? -1) - (b.hourlyRateUsd ?? -1);
+  if (key === 'isActive') return (a.isActive ? 1 : 0) - (b.isActive ? 1 : 0);
+  const av = (a[key] ?? '') as string;
+  const bv = (b[key] ?? '') as string;
+  // Empty values sort last in ascending order.
+  if (!av && bv) return 1;
+  if (av && !bv) return -1;
+  return av.localeCompare(bv, undefined, { numeric: true, sensitivity: 'base' });
+}
 
 function formatUsd(value: number | null): string {
   if (value == null) return '';
   return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+// 'YYYY-MM-DD' → 'Jan 5, 2026' (falls back to the raw value if unparseable).
+function fmtDate(value: string | null): string {
+  if (!value) return '';
+  const d = new Date(value + 'T00:00:00');
+  if (isNaN(d.getTime())) return value;
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+const dateInputCls = 'text-xs border border-(--rs-neutral-grey-300) rounded px-2 py-1 bg-white w-full';
 
 export function UserManagementTable({ initialUsers, currentUserId }: { initialUsers: UserRow[]; currentUserId?: number }) {
   const [userList, setUserList] = useState<UserRow[]>(initialUsers);
@@ -108,9 +144,23 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
 
   // Edit existing user
   const [editingId, setEditingId]   = useState<number | null>(null);
-  const [editForm, setEditForm]     = useState<EditState>({ role: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '' });
+  const [editForm, setEditForm]     = useState<EditState>({ role: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '', dateOfBirth: '', startDate: '', endDate: '', driveUrl: '' });
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState('');
+
+  // Column sorting (asc/desc, toggled from the header)
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'name', dir: 'asc' });
+  const toggleSort = (key: SortKey) =>
+    setSort(s => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  const sortedUsers = useMemo(() => {
+    const dirMul = sort.dir === 'asc' ? 1 : -1;
+    return [...userList].sort((a, b) => {
+      // Removed (inactive) users always sink to the very bottom — they keep their
+      // grayed-out row but never sort in among the active users.
+      if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+      return compareUsers(a, b, sort.key) * dirMul;
+    });
+  }, [userList, sort]);
 
   // Create new user
   const [showCreate, setShowCreate]       = useState(false);
@@ -127,6 +177,10 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       team: user.team ?? '',
       memberCode: user.memberCode ?? '',
       hourlyRateUsd: user.hourlyRateUsd != null ? String(user.hourlyRateUsd) : '',
+      dateOfBirth: user.dateOfBirth ?? '',
+      startDate: user.startDate ?? '',
+      endDate: user.endDate ?? '',
+      driveUrl: user.driveUrl ?? '',
     });
     setError('');
   };
@@ -146,6 +200,10 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
           team:          editForm.team.trim() || null,
           memberCode:    editForm.memberCode.trim() || null,
           hourlyRateUsd: editForm.hourlyRateUsd.trim() === '' ? null : editForm.hourlyRateUsd.trim(),
+          dateOfBirth:   editForm.dateOfBirth.trim() || null,
+          startDate:     editForm.startDate.trim() || null,
+          endDate:       editForm.endDate.trim() || null,
+          driveUrl:      editForm.driveUrl.trim() || null,
         }),
       });
       const data = (await res.json()) as { user?: UserRow; error?: string };
@@ -234,20 +292,24 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
 
       <div className="rounded-xl border border-(--rs-neutral-grey-200) bg-white overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[760px]">
+          <table className="w-full text-sm min-w-[1180px]">
             <thead>
               <tr className="border-b border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50)">
-                <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-48">Name</th>
-                <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-28">Role</th>
-                <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-56">Team</th>
-                <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-36">Member Code</th>
-                <th className="text-right px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-32">Rate (USD/hr)</th>
-                <th className="text-center px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-20">Active</th>
+                <SortableTh label="Name"        k="name"          sort={sort} onSort={toggleSort} width="w-48" />
+                <SortableTh label="Role"        k="role"          sort={sort} onSort={toggleSort} width="w-28" />
+                <SortableTh label="Team"        k="team"          sort={sort} onSort={toggleSort} width="w-40" />
+                <SortableTh label="Birth Date"  k="dateOfBirth"   sort={sort} onSort={toggleSort} width="w-32" />
+                <SortableTh label="Start Date"  k="startDate"     sort={sort} onSort={toggleSort} width="w-32" />
+                <SortableTh label="End Date"    k="endDate"       sort={sort} onSort={toggleSort} width="w-32" />
+                <th className="text-center px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-16">File</th>
+                <SortableTh label="Member Code" k="memberCode"    sort={sort} onSort={toggleSort} width="w-32" />
+                <SortableTh label="Rate (USD/hr)" k="hourlyRateUsd" sort={sort} onSort={toggleSort} width="w-32" align="right" />
+                <SortableTh label="Active"      k="isActive"      sort={sort} onSort={toggleSort} width="w-20" align="center" />
                 <th className="text-right px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-28">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-(--rs-neutral-grey-100)">
-              {userList.map(user => {
+              {sortedUsers.map(user => {
                 const isEditing = editingId === user.id;
                 const badge = ROLE_BADGE[user.role.toLowerCase()] ?? ROLE_BADGE.ic;
                 return (
@@ -292,6 +354,60 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                         <span className="text-xs text-(--rs-neutral-grey-700)">{user.team}</span>
                       ) : (
                         <span className="text-xs text-(--rs-neutral-grey-300) italic">No team</span>
+                      )}
+                    </td>
+
+                    {/* Birth Date */}
+                    <td className="px-4 py-3">
+                      {isEditing ? (
+                        <input type="date" aria-label="Birth date" value={editForm.dateOfBirth}
+                          onChange={e => setEditForm(f => ({ ...f, dateOfBirth: e.target.value }))} className={dateInputCls} />
+                      ) : user.dateOfBirth ? (
+                        <span className="text-xs text-(--rs-neutral-grey-700) whitespace-nowrap">{fmtDate(user.dateOfBirth)}</span>
+                      ) : (
+                        <span className="text-xs text-(--rs-neutral-grey-300) italic">—</span>
+                      )}
+                    </td>
+
+                    {/* Start Date */}
+                    <td className="px-4 py-3">
+                      {isEditing ? (
+                        <input type="date" aria-label="Start date" value={editForm.startDate}
+                          onChange={e => setEditForm(f => ({ ...f, startDate: e.target.value }))} className={dateInputCls} />
+                      ) : user.startDate ? (
+                        <span className="text-xs text-(--rs-neutral-grey-700) whitespace-nowrap">{fmtDate(user.startDate)}</span>
+                      ) : (
+                        <span className="text-xs text-(--rs-neutral-grey-300) italic">—</span>
+                      )}
+                    </td>
+
+                    {/* End Date */}
+                    <td className="px-4 py-3">
+                      {isEditing ? (
+                        <input type="date" aria-label="End date" value={editForm.endDate}
+                          onChange={e => setEditForm(f => ({ ...f, endDate: e.target.value }))} className={dateInputCls} />
+                      ) : user.endDate ? (
+                        <span className="text-xs text-(--rs-neutral-grey-700) whitespace-nowrap">{fmtDate(user.endDate)}</span>
+                      ) : (
+                        <span className="text-xs text-(--rs-neutral-grey-300) italic">—</span>
+                      )}
+                    </td>
+
+                    {/* Drive file */}
+                    <td className="px-4 py-3 text-center">
+                      {isEditing ? (
+                        <input type="url" aria-label="Google Drive link" value={editForm.driveUrl}
+                          onChange={e => setEditForm(f => ({ ...f, driveUrl: e.target.value }))}
+                          placeholder="https://drive.google.com/…"
+                          className="text-xs border border-(--rs-neutral-grey-300) rounded px-2 py-1 bg-white w-full min-w-[10rem]" />
+                      ) : user.driveUrl ? (
+                        <a href={user.driveUrl} target="_blank" rel="noopener noreferrer"
+                          title="Open Google Drive file"
+                          className="inline-flex text-(--rs-primary-600) hover:text-(--rs-primary-700)">
+                          <FileText className="w-4 h-4" />
+                        </a>
+                      ) : (
+                        <FileText className="w-4 h-4 mx-auto text-(--rs-neutral-grey-200)" />
                       )}
                     </td>
 
@@ -391,7 +507,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
 
               {userList.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-(--rs-neutral-grey-400) italic text-sm">
+                  <td colSpan={11} className="px-4 py-10 text-center text-(--rs-neutral-grey-400) italic text-sm">
                     No users found.
                   </td>
                 </tr>
@@ -481,6 +597,27 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                 </div>
               </Field>
 
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <Field label="Date of Birth">
+                  <input type="date" value={newForm.dateOfBirth}
+                    onChange={e => setNewForm(f => ({ ...f, dateOfBirth: e.target.value }))} className={inputCls} />
+                </Field>
+                <Field label="Start Date">
+                  <input type="date" value={newForm.startDate}
+                    onChange={e => setNewForm(f => ({ ...f, startDate: e.target.value }))} className={inputCls} />
+                </Field>
+                <Field label="End Date">
+                  <input type="date" value={newForm.endDate}
+                    onChange={e => setNewForm(f => ({ ...f, endDate: e.target.value }))} className={inputCls} />
+                </Field>
+              </div>
+
+              <Field label="Google Drive File (link)">
+                <input type="url" value={newForm.driveUrl}
+                  onChange={e => setNewForm(f => ({ ...f, driveUrl: e.target.value }))}
+                  className={inputCls} placeholder="https://drive.google.com/…" />
+              </Field>
+
               <div className="flex justify-end gap-2 pt-1">
                 <Button type="button" variant="ghost" onClick={closeCreate} disabled={creating}>Cancel</Button>
                 <Button type="submit" disabled={creating} className="gap-2">
@@ -521,5 +658,33 @@ function Field({ label, required, children }: { label: string; required?: boolea
       </label>
       {children}
     </div>
+  );
+}
+
+// Clickable column header — toggles ascending ↔ descending sort on its key.
+function SortableTh({ label, k, sort, onSort, width, align = 'left' }: {
+  label: string;
+  k: SortKey;
+  sort: { key: SortKey; dir: SortDir };
+  onSort: (key: SortKey) => void;
+  width?: string;
+  align?: 'left' | 'right' | 'center';
+}) {
+  const active = sort.key === k;
+  const Icon = !active ? ChevronsUpDown : sort.dir === 'asc' ? ArrowUp : ArrowDown;
+  const alignTh = align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left';
+  return (
+    <th className={`${alignTh} px-4 py-3 ${width ?? ''}`}>
+      <button
+        type="button"
+        onClick={() => onSort(k)}
+        className="inline-flex items-center gap-1 font-semibold text-(--rs-neutral-grey-600) hover:text-(--rs-neutral-grey-900) transition-colors"
+        title={`Sort by ${label} (${active && sort.dir === 'asc' ? 'descending' : 'ascending'})`}
+        aria-label={`Sort by ${label}`}
+      >
+        <span>{label}</span>
+        <Icon className={`w-3.5 h-3.5 ${active ? 'text-(--rs-primary-500)' : 'text-(--rs-neutral-grey-300)'}`} />
+      </button>
+    </th>
   );
 }

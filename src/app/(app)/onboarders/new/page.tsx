@@ -7,13 +7,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { APP_DEPARTMENTS } from '@/lib/orgchart';
 import { createOnboarder } from '../actions';
 
 export default async function NewOnboarderPage() {
   const session = await getSession();
-  if (!session || !canAccessLeadTool('onboarding', session.role, session.team)) {
+  if (!session || !hasToolAccess('onboarding', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
 

@@ -3,13 +3,13 @@
 import { revalidatePath } from 'next/cache';
 import { generateBriefing, yesterdayPht } from '@/lib/briefing';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 export async function regenerateTodaysBriefing() {
   const session = await getSession();
   if (!session) throw new Error('Not authenticated');
-  if (!canAccessLeadTool('ceo', session.role, session.team)) {
+  if (!hasToolAccess('ceo', session.role, session.toolAccess)) {
     throw new Error('Not authorized');
   }
 
@@ -34,7 +34,7 @@ const DELETE_BRIEFINGS_CONFIRMATION = 'DELETE BRIEFINGS';
 export async function deleteAllBriefings(confirmation: string) {
   const session = await getSession();
   if (!session) throw new Error('Not authenticated');
-  if (!canAccessLeadTool('ceo', session.role, session.team)) {
+  if (!hasToolAccess('ceo', session.role, session.toolAccess)) {
     throw new Error('Not authorized');
   }
   if (confirmation !== DELETE_BRIEFINGS_CONFIRMATION) {

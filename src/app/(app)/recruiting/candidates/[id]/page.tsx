@@ -1,6 +1,8 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { getSession } from '@/lib/session';
+import { hasToolAccess, defaultLandingPath } from '@/lib/rbac';
 import { Card, CardContent } from '@/components/ui/card';
 import {
   ArrowLeft, Mail, Phone, MapPin, Link2, Globe, Briefcase,
@@ -111,6 +113,11 @@ export default async function CandidateDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const session = await getSession();
+  if (!session || !hasToolAccess('recruiting', session.role, session.toolAccess)) {
+    redirect(session ? defaultLandingPath(session.role) : '/login');
+  }
+
   const { id: idParam } = await params;
   const id = parseInt(idParam, 10);
   if (!Number.isInteger(id) || id <= 0) notFound();

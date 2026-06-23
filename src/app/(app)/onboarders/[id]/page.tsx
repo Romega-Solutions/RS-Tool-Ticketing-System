@@ -8,7 +8,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { getPhotoResolver } from '@/lib/orgchart';
 import { refreshOnboarderSignedUrl } from '@/lib/storage';
 import {
@@ -181,7 +181,7 @@ export default async function OnboarderDetailPage({
   searchParams: Promise<{ tab?: string }>;
 }) {
   const session = await getSession();
-  if (!session || !canAccessLeadTool('onboarding', session.role, session.team)) {
+  if (!session || !hasToolAccess('onboarding', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
 

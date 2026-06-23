@@ -22,6 +22,20 @@
       "when": 1782142115156,
       "tag": "0002_broken_retro_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782221333646,
+      "tag": "0003_nasty_lord_hawal",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782223526761,
+      "tag": "0004_serious_doctor_octopus",
+      "breakpoints": true
     }
   ]
 }

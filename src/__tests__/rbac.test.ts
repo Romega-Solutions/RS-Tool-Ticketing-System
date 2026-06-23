@@ -4,6 +4,7 @@ import {
   canAccessReports,
   canAccessAdmin,
   canAccessPath,
+  hasToolAccess,
   defaultLandingPath,
   roleLabel,
   isHrTeam,
@@ -60,20 +61,44 @@ describe('canAccessAdmin', () => {
   });
 });
 
+describe('hasToolAccess', () => {
+  it('grants a tool only when it is in the user\'s tool_access set', () => {
+    expect(hasToolAccess('sales', 'lead', ['sales'])).toBe(true);
+    expect(hasToolAccess('sales', 'lead', ['marketing'])).toBe(false);
+    expect(hasToolAccess('sales', 'ic', [])).toBe(false);
+  });
+
+  it('admins always have every tool regardless of the stored set', () => {
+    expect(hasToolAccess('recruiting', 'admin', [])).toBe(true);
+    expect(hasToolAccess('ceo', 'admin', [])).toBe(true);
+  });
+
+  it('treats a missing/invalid set as no access', () => {
+    expect(hasToolAccess('projects', 'ic', null)).toBe(false);
+    expect(hasToolAccess('projects', 'ic', undefined)).toBe(false);
+  });
+});
+
 describe('canAccessPath', () => {
-  it('blocks /admin/* for non-admin', () => {
+  it('blocks /admin/* and /rates for non-admin (role-based, not grantable)', () => {
     expect(canAccessPath('/admin/users', 'ic')).toBe(false);
-    expect(canAccessPath('/admin/users', 'lead')).toBe(false);
+    expect(canAccessPath('/admin/users', 'lead', ['projects', 'attendance'])).toBe(false);
     expect(canAccessPath('/admin/users', 'admin')).toBe(true);
+    expect(canAccessPath('/rates', 'lead')).toBe(false);
+    expect(canAccessPath('/rates', 'admin')).toBe(true);
   });
 
-  it('blocks /attendance/* for ic', () => {
-    expect(canAccessPath('/attendance', 'ic')).toBe(false);
-    expect(canAccessPath('/attendance', 'lead')).toBe(true);
-    expect(canAccessPath('/attendance', 'admin')).toBe(true);
+  it('gates the 8 tools by the per-user tool_access set', () => {
+    expect(canAccessPath('/attendance', 'lead', [])).toBe(false);
+    expect(canAccessPath('/attendance', 'lead', ['attendance'])).toBe(true);
+    expect(canAccessPath('/attendance', 'admin', [])).toBe(true);            // admin bypass
+    expect(canAccessPath('/sales/leads', 'ic', ['sales'])).toBe(true);
+    expect(canAccessPath('/sales/leads', 'ic', [])).toBe(false);
+    expect(canAccessPath('/projects', 'ic', ['projects'])).toBe(true);
+    expect(canAccessPath('/projects', 'ic', [])).toBe(false);
   });
 
-  it('allows any other path for all roles', () => {
+  it('allows any non-gated path for all roles', () => {
     expect(canAccessPath('/dashboard', 'ic')).toBe(true);
     expect(canAccessPath('/my-tasks', 'ic')).toBe(true);
     expect(canAccessPath('/profile', 'lead')).toBe(true);

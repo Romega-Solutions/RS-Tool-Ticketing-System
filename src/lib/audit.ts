@@ -5,6 +5,7 @@ export type AuditAction =
   | 'user.role_changed'
   | 'user.deactivated'
   | 'user.reactivated'
+  | 'user.tool_access_changed'
   | 'user.updated';
 
 // Best-effort audit write: logs failures but NEVER throws — an audit insert must
@@ -53,6 +54,14 @@ export function describeAudit(action: string, details: Record<string, unknown> |
       : "Changed a user's role";
     case 'user.deactivated':  return 'Deactivated a user';
     case 'user.reactivated':  return 'Reactivated a user';
+    case 'user.tool_access_changed': {
+      const added = Array.isArray(details?.added) ? (details.added as unknown[]) : [];
+      const removed = Array.isArray(details?.removed) ? (details.removed as unknown[]) : [];
+      const parts: string[] = [];
+      if (added.length) parts.push(`+${added.join(', ')}`);
+      if (removed.length) parts.push(`−${removed.join(', ')}`);
+      return parts.length ? `Changed a user's tool access (${parts.join('; ')})` : "Changed a user's tool access";
+    }
     case 'user.updated':      return 'Updated a user account';
     default:                  return `Admin action: ${action}`;
   }

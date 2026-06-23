@@ -10,6 +10,7 @@ const user = (overrides: Partial<SessionUser> = {}): SessionUser => ({
   team: 'Engineering',
   jobTitle: null,
   isOnboarding: false,
+  toolAccess: [],
   ...overrides,
 });
 

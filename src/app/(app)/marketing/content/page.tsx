@@ -3,13 +3,13 @@ import { LeadToolHeader } from '@/components/lead-tool-header';
 import { ToolResetButton } from '@/components/tool-reset-button';
 import { getRecentContentDrafts } from '@/lib/content-repurposer';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { ContentRepurposerClient } from './content-repurposer-client';
 import { deleteAllContentDrafts } from './actions';
 
 export default async function ContentRepurposerPage() {
   const session = await getSession();
-  if (!session || !canAccessLeadTool('marketing', session.role, session.team)) {
+  if (!session || !hasToolAccess('marketing', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
 

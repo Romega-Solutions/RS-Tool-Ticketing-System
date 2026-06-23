@@ -6,7 +6,7 @@ import { Users2, UserCheck, MessagesSquare, Trophy, AlertCircle, Sparkles, Searc
 import { LeadToolHeader, StatCard } from '@/components/lead-tool-header';
 import { ToolResetButton } from '@/components/tool-reset-button';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { CandidateForm } from './candidate-form';
 import { CandidateStatus, CandidateRating, CandidateDelete } from './candidate-row';
 import { ResumeUploadButton } from './resume-upload';
@@ -78,7 +78,7 @@ type PageProps = {
 
 export default async function CandidatesPage({ searchParams }: PageProps) {
   const session = await getSession();
-  if (!session || !canAccessLeadTool('recruiting', session.role, session.team)) {
+  if (!session || !hasToolAccess('recruiting', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
 

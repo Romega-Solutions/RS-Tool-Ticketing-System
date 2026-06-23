@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual as nodeTimingSafeEqual } from 'crypto';
 import { getSession, type SessionUser } from '@/lib/session';
-import { canAccessAdmin, canAccessReports } from '@/lib/rbac';
+import { canAccessAdmin, canAccessReports, hasToolAccess, type GateableToolKey } from '@/lib/rbac';
 import { HttpError, unauthorized, forbidden } from './errors';
 
 // Constant-time string compare. Both inputs are hashed to a fixed 32-byte
@@ -40,6 +40,13 @@ export function assertReports(session: SessionUser | null): SessionUser {
   return s;
 }
 
+// Per-user tool gate for API routes (mirrors the page/action hasToolAccess check).
+export function assertToolAccess(tool: GateableToolKey, session: SessionUser | null): SessionUser {
+  const s = assertSession(session);
+  if (!hasToolAccess(tool, s.role, s.toolAccess)) throw forbidden();
+  return s;
+}
+
 // ── Async guards that fetch the live session ───────────────────────────────
 export async function requireSession(): Promise<SessionUser> {
   return assertSession(await getSession());
@@ -55,6 +62,10 @@ export async function requireAdmin(): Promise<SessionUser> {
 
 export async function requireReports(): Promise<SessionUser> {
   return assertReports(await getSession());
+}
+
+export async function requireTool(tool: GateableToolKey): Promise<SessionUser> {
+  return assertToolAccess(tool, await getSession());
 }
 
 export function requireBearer(req: Request, secret: string | undefined): void {

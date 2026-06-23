@@ -3,13 +3,13 @@
 import { revalidatePath } from 'next/cache';
 import { generateStatusDraft, currentWeekStartPht } from '@/lib/status-drafter';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 export async function regenerateCurrentWeekStatusDraft() {
   const session = await getSession();
   if (!session) throw new Error('Not authenticated');
-  if (!canAccessLeadTool('pm', session.role, session.team)) {
+  if (!hasToolAccess('pm', session.role, session.toolAccess)) {
     throw new Error('Not authorized');
   }
 
@@ -34,7 +34,7 @@ const DELETE_STATUS_DRAFTS_CONFIRMATION = 'DELETE STATUS DRAFTS';
 export async function deleteAllStatusDrafts(confirmation: string) {
   const session = await getSession();
   if (!session) throw new Error('Not authenticated');
-  if (!canAccessLeadTool('pm', session.role, session.team)) {
+  if (!hasToolAccess('pm', session.role, session.toolAccess)) {
     throw new Error('Not authorized');
   }
   if (confirmation !== DELETE_STATUS_DRAFTS_CONFIRMATION) {

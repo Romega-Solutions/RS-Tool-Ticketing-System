@@ -1,7 +1,7 @@
 import { cache } from 'react';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { normalizeRole, type AppRole } from '@/lib/rbac';
+import { normalizeRole, isGateableToolKey, type AppRole } from '@/lib/rbac';
 
 export type SessionUser = {
   id: number;
@@ -12,6 +12,7 @@ export type SessionUser = {
   team: string | null;
   jobTitle: string | null;
   isOnboarding: boolean;
+  toolAccess: string[];
 };
 
 // Wrapped in React.cache so the two network round-trips (Supabase auth.getUser
@@ -27,7 +28,7 @@ export const getSession = cache(async (): Promise<SessionUser | null> => {
     const admin = createAdminClient();
     const { data: dbUser } = await admin
       .from('users')
-      .select('id, email, name, username, role, team, job_title, is_active, is_onboarding')
+      .select('id, email, name, username, role, team, job_title, is_active, is_onboarding, tool_access')
       .eq('email', user.email)
       .maybeSingle();
 
@@ -42,6 +43,9 @@ export const getSession = cache(async (): Promise<SessionUser | null> => {
       team: dbUser.team ?? null,
       jobTitle: dbUser.job_title ?? null,
       isOnboarding: Boolean(dbUser.is_onboarding),
+      toolAccess: Array.isArray(dbUser.tool_access)
+        ? (dbUser.tool_access as unknown[]).filter(isGateableToolKey)
+        : [],
     };
   } catch {
     return null;

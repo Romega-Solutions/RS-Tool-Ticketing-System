@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { LeadToolHeader, StatCard } from '@/components/lead-tool-header';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { AtsTabs } from '../ats-tabs';
 
 type WebhookEntry = {
@@ -30,7 +30,7 @@ function isConfigured(envKey: string): boolean {
 
 export default async function AutomationsPage() {
   const session = await getSession();
-  if (!session || !canAccessLeadTool('recruiting', session.role, session.team)) {
+  if (!session || !hasToolAccess('recruiting', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
 

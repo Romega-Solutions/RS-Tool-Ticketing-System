@@ -1,6 +1,8 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems } from '@/lib/tickets';
 import { getSession } from '@/lib/session';
+import { hasToolAccess, defaultLandingPath } from '@/lib/rbac';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Briefcase } from 'lucide-react';
 import { NewProjectButton } from '@/components/new-project-button';
@@ -11,6 +13,9 @@ export default async function ProjectsPage({
   searchParams: Promise<{ team?: string }>;
 }) {
   const session = await getSession();
+  if (!session || !hasToolAccess('projects', session.role, session.toolAccess)) {
+    redirect(session ? defaultLandingPath(session.role) : '/login');
+  }
   const { team: teamParam } = await searchParams;
 
   // Default-filter: leads with a team set see only their team's projects unless

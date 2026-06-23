@@ -1,6 +1,73 @@
 export type AppRole = 'intern' | 'ic' | 'lead' | 'admin';
 export type LeadToolKey = 'ceo' | 'pm' | 'sales' | 'marketing' | 'recruiting' | 'onboarding';
 
+// ── Per-user tool access (checkbox-driven) ───────────────────────────────────
+// The canonical list of tools an admin can grant/revoke per user from the
+// Tool Access matrix in User Management. Each user stores an array of these
+// keys in users.tool_access; access = membership in that array (admins bypass).
+// Sensitive admin tools (/admin/*, /rates, overtime, manage-learning, dev tools)
+// are intentionally NOT here — they stay strictly admin-role only.
+export type GateableToolKey =
+  | 'projects' | 'attendance' | 'recruiting' | 'sales'
+  | 'marketing' | 'pm' | 'ceo' | 'onboarding';
+
+export const GATEABLE_TOOLS: ReadonlyArray<{
+  key: GateableToolKey;
+  label: string;
+  prefixes: string[];   // path prefixes this tool guards
+}> = [
+  { key: 'projects',   label: 'Projects',         prefixes: ['/projects'] },
+  { key: 'attendance', label: 'Attendance',       prefixes: ['/attendance'] },   // /attendance + /attendance/requests
+  { key: 'recruiting', label: 'Recruiting (ATS)', prefixes: ['/recruiting'] },
+  { key: 'sales',      label: 'Sales',            prefixes: ['/sales'] },
+  { key: 'marketing',  label: 'Marketing',        prefixes: ['/marketing'] },
+  { key: 'pm',         label: 'PM',               prefixes: ['/pm'] },
+  { key: 'ceo',        label: 'CEO Briefing',     prefixes: ['/ceo'] },
+  { key: 'onboarding', label: 'Onboarding',       prefixes: ['/onboarders'] },
+];
+
+export const GATEABLE_TOOL_KEYS: GateableToolKey[] = GATEABLE_TOOLS.map((t) => t.key);
+
+export function isGateableToolKey(value: unknown): value is GateableToolKey {
+  return typeof value === 'string' && (GATEABLE_TOOL_KEYS as string[]).includes(value);
+}
+
+// Runtime gate: does this user have the tool ticked? Admins always do.
+export function hasToolAccess(
+  tool: GateableToolKey,
+  role: AppRole,
+  toolAccess: string[] | null | undefined,
+): boolean {
+  if (role === 'admin') return true;                       // admins bypass = all tools
+  return Array.isArray(toolAccess) && toolAccess.includes(tool);
+}
+
+// Default Access: which tool(s) a department's members get out of the box.
+// Used to pre-fill tool_access when a user is created (admins can adjust after).
+// Keyed by the canonical department names (lowercased); a couple of aliases are
+// included for robustness against older team strings.
+const DEPARTMENT_TOOLS: Record<string, GateableToolKey[]> = {
+  'executive':       ['ceo'],
+  'finance':         [],
+  'human resource':  ['recruiting', 'onboarding'],
+  'human resources': ['recruiting', 'onboarding'],
+  'marketing':       ['marketing'],
+  'sales':           ['sales'],
+  'technical':       ['pm'],
+};
+
+// Compute the day-one tool set for a new user from role + department:
+//   IC / Intern → Projects + their department's tool(s)
+//   Lead        → the above + Attendance (team overview)
+//   Admin       → everything (they bypass at runtime anyway)
+export function defaultToolAccess(role: AppRole, team: string | null): GateableToolKey[] {
+  if (role === 'admin') return [...GATEABLE_TOOL_KEYS];
+  const set = new Set<GateableToolKey>(['projects']);      // everyone gets Projects
+  for (const t of DEPARTMENT_TOOLS[String(team ?? '').trim().toLowerCase()] ?? []) set.add(t);
+  if (role === 'lead') set.add('attendance');              // leads get the team overview
+  return [...set];
+}
+
 export function normalizeRole(role: unknown): AppRole {
   const value = String(role || '').trim().toLowerCase();
 
@@ -27,6 +94,9 @@ export function canAccessAdmin(role: AppRole): boolean {
   return role === 'admin';
 }
 
+// NOTE: as of the per-user Tool Access feature, this team-based gate is used
+// ONLY to compute each user's day-one seed (scripts/seed-tool-access.ts).
+// Runtime access is decided by hasToolAccess() against users.tool_access.
 export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string | null): boolean {
   // Admins see every tool; a lead sees a tool only if their team is in that
   // tool's allowlist. The Onboarding Lead keeps access via the 'hr' / 'human
@@ -89,18 +159,17 @@ export function emailSignatureAccess(role: AppRole, team: string | null): Signat
   return 'visitor';
 }
 
-export function canAccessPath(pathname: string, role: AppRole, team: string | null = null): boolean {
-  // /admin/* (including /admin/learning) is admin-only. /learning and
-  // /learning/certificates are open to all signed-in users.
-  if (pathname.startsWith('/admin'))      return canAccessAdmin(role);
-  if (pathname.startsWith('/rates'))      return canAccessAdmin(role);
-  if (pathname.startsWith('/attendance')) return canAccessReports(role);
-  if (pathname.startsWith('/ceo/'))       return canAccessLeadTool('ceo', role, team);
-  if (pathname.startsWith('/pm/'))        return canAccessLeadTool('pm', role, team);
-  if (pathname.startsWith('/sales/'))     return canAccessLeadTool('sales', role, team);
-  if (pathname.startsWith('/marketing/')) return canAccessLeadTool('marketing', role, team);
-  if (pathname.startsWith('/recruiting/')) return canAccessLeadTool('recruiting', role, team);
-  if (pathname.startsWith('/onboarders'))  return canAccessLeadTool('onboarding', role, team);
+export function canAccessPath(pathname: string, role: AppRole, toolAccess: string[] = []): boolean {
+  // /admin/* (including /admin/learning) and /rates stay strictly admin-only.
+  // /learning and /learning/certificates are open to all signed-in users.
+  if (pathname.startsWith('/admin')) return canAccessAdmin(role);
+  if (pathname.startsWith('/rates')) return canAccessAdmin(role);
+  // The 8 checkbox-gated tools: access is per-user (users.tool_access).
+  for (const tool of GATEABLE_TOOLS) {
+    if (tool.prefixes.some((p) => pathname.startsWith(p))) {
+      return hasToolAccess(tool.key, role, toolAccess);
+    }
+  }
   return true;
 }
 

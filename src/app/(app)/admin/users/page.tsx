@@ -11,7 +11,7 @@ export default async function AdminUsersPage() {
   const admin = createAdminClient();
   const { data } = await admin
     .from('users')
-    .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active')
+    .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active, tool_access, date_of_birth, start_date, end_date, drive_url')
     .order('name');
   const rawUsers = data ?? [];
 
@@ -26,6 +26,11 @@ export default async function AdminUsersPage() {
     memberCode:    u.member_code as string | null,
     hourlyRateUsd: u.hourly_rate_usd == null ? null : Number(u.hourly_rate_usd),
     isActive:      Boolean(u.is_active),
+    toolAccess:    Array.isArray(u.tool_access) ? (u.tool_access as string[]) : [],
+    dateOfBirth:   (u.date_of_birth as string | null) ?? null,
+    startDate:     (u.start_date as string | null) ?? null,
+    endDate:       (u.end_date as string | null) ?? null,
+    driveUrl:      (u.drive_url as string | null) ?? null,
   }));
 
   return (

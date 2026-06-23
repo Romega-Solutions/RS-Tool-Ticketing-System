@@ -9,7 +9,7 @@ import {
 import { LeadToolHeader, StatCard } from '@/components/lead-tool-header';
 import { ToolResetButton } from '@/components/tool-reset-button';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import {
   getLatestBriefing,
   getBriefingForDate,
@@ -53,7 +53,7 @@ type PageProps = {
 
 export default async function CeoBriefingPage({ searchParams }: PageProps) {
   const session = await getSession();
-  if (!session || !canAccessLeadTool('ceo', session.role, session.team)) {
+  if (!session || !hasToolAccess('ceo', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
 

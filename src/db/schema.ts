@@ -11,7 +11,18 @@ export const users = pgTable('users', {
   team:          text('team'),
   jobTitle:      text('job_title'),
   memberCode:    text('member_code'),
+  // Personnel info (all optional). Dates stored as 'YYYY-MM-DD' text to match
+  // the rest of the schema's date handling. driveUrl = a Google Drive link to
+  // the person's HR/personnel folder, surfaced as a clickable file icon.
+  dateOfBirth:   text('date_of_birth'),
+  startDate:     text('start_date'),
+  endDate:       text('end_date'),
+  driveUrl:      text('drive_url'),
   hourlyRateUsd: numeric('hourly_rate_usd', { precision: 10, scale: 2 }),
+  // Per-user tool access (checkbox-driven). JSON array of GateableToolKey
+  // strings, e.g. ["projects","attendance","recruiting"]. Admins bypass this
+  // (always all). Seeded once from role+team via scripts/seed-tool-access.ts.
+  toolAccess:    jsonb('tool_access').notNull().default(sql`'[]'::jsonb`),
   isActive:               integer('is_active').notNull().default(1),
   isOnboarding:           integer('is_onboarding').notNull().default(0),
   reminderEnabled:        integer('reminder_enabled').notNull().default(1),

@@ -3,9 +3,11 @@
 import { useState } from 'react';
 import { UserManagementTable, type UserRow } from '@/components/user-management-table';
 import { UserActivityPanel } from '@/components/user-activity-panel';
+import { ToolAccessMatrix } from '@/components/tool-access-matrix';
 
 const TABS = [
-  ['manage', 'Add & Remove Users'],
+  ['manage', 'Users'],
+  ['tool-access', 'Tool Access'],
   ['activity', 'Activity'],
 ] as const;
 
@@ -32,9 +34,9 @@ export function UsersAdminTabs({ initialUsers, currentUserId }: { initialUsers: 
         ))}
       </div>
 
-      {tab === 'manage'
-        ? <UserManagementTable initialUsers={initialUsers} currentUserId={currentUserId} />
-        : <UserActivityPanel users={initialUsers} />}
+      {tab === 'manage' && <UserManagementTable initialUsers={initialUsers} currentUserId={currentUserId} />}
+      {tab === 'tool-access' && <ToolAccessMatrix initialUsers={initialUsers} currentUserId={currentUserId} />}
+      {tab === 'activity' && <UserActivityPanel users={initialUsers} />}
     </div>
   );
 }

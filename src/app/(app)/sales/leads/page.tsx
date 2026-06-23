@@ -6,7 +6,7 @@ import { Users, TrendingUp, Trophy, XCircle, AlertCircle, Search, Filter } from 
 import { LeadToolHeader, StatCard } from '@/components/lead-tool-header';
 import { ToolResetButton } from '@/components/tool-reset-button';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { LeadForm } from './lead-form';
 import { LeadStage, LeadDelete } from './lead-row';
 import { deleteAllLeads } from './actions';
@@ -43,7 +43,7 @@ type PageProps = {
 
 export default async function LeadsPage({ searchParams }: PageProps) {
   const session = await getSession();
-  if (!session || !canAccessLeadTool('sales', session.role, session.team)) {
+  if (!session || !hasToolAccess('sales', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
 

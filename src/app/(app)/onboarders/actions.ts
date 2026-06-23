@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession, type SessionUser } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { toProperName, formatPhoneNumber } from '@/lib/format';
 import { APP_DEPARTMENTS } from '@/lib/orgchart';
 import {
@@ -49,7 +49,7 @@ type AdminClient = ReturnType<typeof createAdminClient>;
 async function requireSession() {
   const session = await getSession();
   if (!session) throw new Error('Not authenticated');
-  if (!canAccessLeadTool('onboarding', session.role, session.team)) {
+  if (!hasToolAccess('onboarding', session.role, session.toolAccess)) {
     throw new Error('Not authorized');
   }
   return session;

@@ -10,6 +10,7 @@ const sender: SessionUser = {
   team: null,
   jobTitle: null,
   isOnboarding: false,
+  toolAccess: [],
 };
 
 const decoder = new TextDecoder();

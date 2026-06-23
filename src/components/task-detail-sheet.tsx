@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Loader2, MessageSquare, Activity as ActivityIcon, FileText, ImagePlus, Save, Trash2, X } from 'lucide-react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { ChevronLeft, ChevronRight, Loader2, MessageSquare, Activity as ActivityIcon, FileText, ImagePlus, Save, Trash2, X, Maximize2, Minimize2 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { extractTaskDescriptionImageUrls } from '@/lib/task-description-images';
 import {
@@ -91,6 +91,53 @@ export function TaskDetailSheet({
   onArchived?: (itemId: string) => void;
 }) {
   const [tab, setTab] = useState<'details' | 'comments' | 'activity'>('details');
+
+  // ── Resizable panel width ──────────────────────────────────────────────────
+  // Drag the left edge to set whatever width you want (remembered per browser).
+  // The maximize button is a quick preset. maxWidth caps it at 95vw, so on small
+  // screens it still behaves like a full-width drawer.
+  const DEFAULT_PANEL_WIDTH = 672;   // = the old max-w-2xl default
+  const MIN_PANEL_WIDTH = 420;
+  // Lazy init from localStorage (client only). No effect → no setState-in-effect,
+  // and no hydration mismatch since the width only affects the panel, which
+  // mounts when the sheet opens (after hydration).
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    if (typeof window === 'undefined') return DEFAULT_PANEL_WIDTH;
+    const saved = Number(localStorage.getItem('taskPanelWidth'));
+    return Number.isFinite(saved) && saved >= MIN_PANEL_WIDTH ? saved : DEFAULT_PANEL_WIDTH;
+  });
+  const widthRef = useRef(panelWidth);
+  const draggingRef = useRef(false);
+
+  const clampWidth = (w: number) =>
+    Math.min(Math.max(w, MIN_PANEL_WIDTH), typeof window !== 'undefined' ? window.innerWidth - 32 : w);
+  const applyWidth = (w: number) => { const c = clampWidth(w); setPanelWidth(c); widthRef.current = c; };
+  const persistWidth = () => { try { localStorage.setItem('taskPanelWidth', String(Math.round(widthRef.current))); } catch { /* ignore */ } };
+
+  const onResizeStart = (e: React.PointerEvent) => {
+    draggingRef.current = true;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'ew-resize';
+  };
+  const onResizeMove = (e: React.PointerEvent) => {
+    if (!draggingRef.current) return;
+    applyWidth(window.innerWidth - e.clientX);   // panel is anchored to the right edge
+  };
+  const onResizeEnd = () => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    document.body.style.userSelect = '';
+    document.body.style.cursor = '';
+    persistWidth();
+  };
+
+  const isWide = panelWidth >= 900;   // enlarge title/description once it's roomy
+  const toggleWide = () => {
+    const wide = clampWidth(typeof window !== 'undefined' ? window.innerWidth * 0.94 : 1120);
+    applyWidth(isWide ? DEFAULT_PANEL_WIDTH : wide);
+    persistWidth();
+  };
   const [loading, setLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('Loading task...');
   const [error, setError] = useState('');
@@ -422,9 +469,28 @@ export function TaskDetailSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full max-w-full sm:max-w-2xl flex flex-col gap-0 p-0">
+      <SheetContent
+        side="right"
+        style={{ width: `${panelWidth}px`, maxWidth: '95vw' }}
+        className="w-full max-w-full flex flex-col gap-0 p-0"
+      >
+        {/* Drag the left edge to resize the panel to any width (double-click to reset). */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize panel — drag to change width"
+          onPointerDown={onResizeStart}
+          onPointerMove={onResizeMove}
+          onPointerUp={onResizeEnd}
+          onPointerCancel={onResizeEnd}
+          onDoubleClick={() => { applyWidth(DEFAULT_PANEL_WIDTH); persistWidth(); }}
+          className="group absolute left-0 top-0 z-30 hidden h-full w-2 cursor-ew-resize touch-none sm:block"
+          title="Drag to resize · double-click to reset"
+        >
+          <span className="absolute inset-y-0 left-0 w-1 bg-(--rs-neutral-grey-200) opacity-0 transition-opacity group-hover:opacity-100" />
+        </div>
         <SheetHeader className="border-b border-(--rs-neutral-grey-100) px-5 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <span className="text-xs font-mono text-(--rs-neutral-grey-400) shrink-0">
                 #{item?.sequence_id ?? '—'}
@@ -433,6 +499,17 @@ export function TaskDetailSheet({
                 {item?.name ?? 'Task'}
               </SheetTitle>
             </div>
+            {/* Expand / collapse the panel (sits left of the close ✕). */}
+            <button
+              type="button"
+              onClick={toggleWide}
+              className="mr-7 shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-md text-(--rs-neutral-grey-400) transition-colors hover:bg-(--rs-neutral-grey-100) hover:text-(--rs-neutral-grey-700)"
+              title={isWide ? 'Shrink panel' : 'Widen panel (or drag the left edge)'}
+              aria-label={isWide ? 'Shrink panel' : 'Widen panel'}
+              aria-pressed={isWide}
+            >
+              {isWide ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </button>
           </div>
         </SheetHeader>
 
@@ -504,7 +581,7 @@ export function TaskDetailSheet({
                 <input
                   value={name}
                   onChange={e => setName(e.target.value)}
-                  className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none"
+                  className={`w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 focus:border-(--rs-primary-400) focus:outline-none ${isWide ? 'text-lg font-medium' : 'text-sm'}`}
                 />
               </Field>
 
@@ -512,9 +589,9 @@ export function TaskDetailSheet({
                 <textarea
                   value={description}
                   onChange={e => setDescription(e.target.value)}
-                  rows={4}
+                  rows={isWide ? 14 : 4}
                   placeholder="Add a description…"
-                  className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm resize-y focus:border-(--rs-primary-400) focus:outline-none"
+                  className={`w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 resize-y focus:border-(--rs-primary-400) focus:outline-none ${isWide ? 'text-[15px] leading-relaxed' : 'text-sm'}`}
                 />
                 {descriptionImageUrls.length > 0 && (
                   <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">

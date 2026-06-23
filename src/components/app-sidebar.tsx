@@ -9,7 +9,7 @@ import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from 
 import { Button } from "@/components/ui/button";
 import { PersonAvatar } from "@/components/person-avatar";
 import type { AppRole } from "@/lib/rbac";
-import { canAccessReports, canAccessAdmin, canAccessLeadTool, roleLabel } from "@/lib/rbac";
+import { hasToolAccess, canAccessAdmin, roleLabel } from "@/lib/rbac";
 
 const navItems = [
   { href: "/dashboard",         label: "Dashboard",      icon: LayoutDashboard, category: "main"      },
@@ -114,19 +114,23 @@ function NavSection({
   );
 }
 
-function NavLinks({ collapsed = false, role, team }: { collapsed?: boolean; role: AppRole; team: string | null }) {
+function NavLinks({ collapsed = false, role, toolAccess }: { collapsed?: boolean; role: AppRole; toolAccess: string[] }) {
   const pathname = usePathname();
 
-  const mainItems     = navItems.filter(i => i.category === "main");
-  const reportItems   = navItems.filter(i => i.category === "reports" && canAccessReports(role));
+  const mainItems     = navItems.filter(i => {
+    if (i.category !== "main") return false;
+    if (i.href === "/projects") return hasToolAccess('projects', role, toolAccess);
+    return true;
+  });
+  const reportItems   = navItems.filter(i => i.category === "reports" && hasToolAccess('attendance', role, toolAccess));
   const leadToolItems = navItems.filter(i => {
     if (i.category !== "leadTools") return false;
-    if (i.href.startsWith('/sales/')) return canAccessLeadTool('sales', role, team);
-    if (i.href.startsWith('/recruiting/')) return canAccessLeadTool('recruiting', role, team);
-    if (i.href.startsWith('/onboarders')) return canAccessLeadTool('onboarding', role, team);
-    if (i.href.startsWith('/pm/')) return canAccessLeadTool('pm', role, team);
-    if (i.href.startsWith('/ceo/')) return canAccessLeadTool('ceo', role, team);
-    if (i.href.startsWith('/marketing/')) return canAccessLeadTool('marketing', role, team);
+    if (i.href.startsWith('/sales/')) return hasToolAccess('sales', role, toolAccess);
+    if (i.href.startsWith('/recruiting/')) return hasToolAccess('recruiting', role, toolAccess);
+    if (i.href.startsWith('/onboarders')) return hasToolAccess('onboarding', role, toolAccess);
+    if (i.href.startsWith('/pm/')) return hasToolAccess('pm', role, toolAccess);
+    if (i.href.startsWith('/ceo/')) return hasToolAccess('ceo', role, toolAccess);
+    if (i.href.startsWith('/marketing/')) return hasToolAccess('marketing', role, toolAccess);
     return false;
   });
   const adminItems    = navItems.filter(i => i.category === "admin" && canAccessAdmin(role));
@@ -243,7 +247,7 @@ function LogoutButton({ collapsed = false }: { collapsed?: boolean }) {
   );
 }
 
-export function AppSidebar({ role, userName, team, photoUrl }: { role: AppRole; userName: string; team: string | null; photoUrl?: string | null }) {
+export function AppSidebar({ role, userName, team, toolAccess, photoUrl }: { role: AppRole; userName: string; team: string | null; toolAccess: string[]; photoUrl?: string | null }) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -300,7 +304,7 @@ export function AppSidebar({ role, userName, team, photoUrl }: { role: AppRole; 
 
       {/* Nav */}
       <div className={`flex-1 ${collapsed ? "px-2 py-3" : "px-3 py-3"} flex flex-col overflow-hidden`}>
-        <NavLinks collapsed={collapsed} role={role} team={team} />
+        <NavLinks collapsed={collapsed} role={role} toolAccess={toolAccess} />
       </div>
 
       {/* Footer */}
@@ -350,7 +354,7 @@ export function AppSidebar({ role, userName, team, photoUrl }: { role: AppRole; 
   );
 }
 
-export function MobileNav({ role, team }: { role: AppRole; team: string | null }) {
+export function MobileNav({ role, toolAccess }: { role: AppRole; toolAccess: string[] }) {
   return (
     <Sheet>
       <SheetTrigger render={<Button variant="ghost" size="icon" className="md:hidden" aria-label="Open navigation menu" />}>
@@ -376,7 +380,7 @@ export function MobileNav({ role, team }: { role: AppRole; team: string | null }
           </div>
 
           <div className="flex-1 px-3 py-3 overflow-y-auto flex flex-col">
-            <NavLinks role={role} team={team} />
+            <NavLinks role={role} toolAccess={toolAccess} />
             <div className="mt-auto pt-4 border-t border-white/10 space-y-0.5">
               <Link
                 href="/profile"

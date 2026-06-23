@@ -18,7 +18,7 @@ import type { SessionUser } from '@/lib/session';
 
 const sessionOf = (role: SessionUser['role']): SessionUser => ({
   id: 1, email: 'a@b.com', name: 'A', username: 'a',
-  role, team: null, jobTitle: null, isOnboarding: false,
+  role, team: null, jobTitle: null, isOnboarding: false, toolAccess: [],
 });
 
 describe('HttpError factories', () => {

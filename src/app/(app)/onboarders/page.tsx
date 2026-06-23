@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { LeadToolHeader, StatCard } from '@/components/lead-tool-header';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
-import { canAccessLeadTool } from '@/lib/rbac';
+import { hasToolAccess } from '@/lib/rbac';
 import { APP_DEPARTMENTS } from '@/lib/orgchart';
 import {
   ALLOWED_STATUSES,
@@ -88,7 +88,7 @@ type PageProps = {
 
 export default async function OnboardingPage({ searchParams }: PageProps) {
   const session = await getSession();
-  if (!session || !canAccessLeadTool('onboarding', session.role, session.team)) {
+  if (!session || !hasToolAccess('onboarding', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
 
