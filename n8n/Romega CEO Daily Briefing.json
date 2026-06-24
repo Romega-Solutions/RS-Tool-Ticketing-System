@@ -45,7 +45,7 @@
     },
     {
       "parameters": {
-        "content": "## Romega CEO Daily Briefing\n\n**Schedule:** every day at 23:00 UTC = 07:00 PHT.\n\n**What it does:** POSTs to the Romega Ticketing System's `/api/ceo/briefing/generate?for=yesterday` endpoint. That endpoint aggregates yesterday's stats from Supabase, calls Groq (Llama-3.3-70B) once for the narrative, and saves the row to the `briefings` table.\n\n**Required env vars** on this n8n container (set in easypanel → service → environment):\n- `APP_BASE_URL` — public URL of the Romega Ticketing System (e.g. https://romega-tickets.vercel.app)\n- `N8N_BRIEFING_SECRET` — same value as in the app's .env\n\n**Token cost per run:** ~700 Groq tokens (~$0.0006 if on paid tier).",
+        "content": "## Romega CEO Daily Briefing\n\n**Schedule:** every day at 23:00 UTC = 07:00 PHT.\n\n**What it does:** POSTs to the Romega Ticketing System's `/api/ceo/briefing/generate?for=yesterday` endpoint. That endpoint aggregates yesterday's stats from Supabase, calls Groq (Llama-3.3-70B) once for the narrative, and saves the row to the `briefings` table.\n\n**Required env vars** on this n8n container (set in easypanel → service → environment):\n- `APP_BASE_URL` — public URL of the Romega Ticketing System (e.g. https://rs-tool-ticketing-system.vercel.app)\n- `N8N_BRIEFING_SECRET` — same value as in the app's .env\n\n**Token cost per run:** ~700 Groq tokens (~$0.0006 if on paid tier).",
         "height": 320,
         "width": 480
       },
