@@ -22,7 +22,8 @@ export const GET = route(async (_req: Request, { params }: { params: Promise<{ p
 
 export const POST = route(async (req: Request, { params }: { params: Promise<{ projectId: string }> }) => {
   const session = await requireSession();
-  if (!canManageProject(session)) {
+  const { projectId } = await params;
+  if (!(await canManageProject(session, Number(projectId)))) {
     throw forbidden('Lead+ only');
   }
 
@@ -30,7 +31,6 @@ export const POST = route(async (req: Request, { params }: { params: Promise<{ p
   const name = (body.name ?? '').trim();
   if (!name) throw badRequest('name is required');
 
-  const { projectId } = await params;
   try {
     return NextResponse.json(await createLabel(projectId, name, body.color ?? '#6b7280'));
   } catch (err) {

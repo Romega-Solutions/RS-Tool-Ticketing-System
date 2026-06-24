@@ -8,7 +8,7 @@ import {
   diffActivity,
   logActivity,
 } from '@/lib/tickets';
-import { canEditWorkItem, canViewProject } from '@/lib/permissions';
+import { canEditWorkItem, canViewProject, canCreateWorkItem, getProjectCaps } from '@/lib/permissions';
 import { route, requireSession, parseBody, badRequest, forbidden, notFound } from '@/lib/api';
 
 export const runtime = 'nodejs';
@@ -57,7 +57,7 @@ export const POST = route(async (req: Request) => {
   const session = await requireSession();
 
   const { projectId, name, state, priority } = await parseBody(req, createSchema);
-  if (!(await canViewProject(session, Number(projectId)))) throw forbidden();
+  if (!(await canCreateWorkItem(session, Number(projectId)))) throw forbidden();
 
   try {
     const created = await createWorkItem(projectId, { name, state, priority });
@@ -84,6 +84,11 @@ export const PATCH = route(async (req: Request) => {
   if (!(await canEditWorkItem(session, { id: before.id, projectId: before.project_id }))) {
     throw forbidden();
   }
+
+  // Members may move/edit items but not the due date or assignees (Lead/admin only).
+  const caps = await getProjectCaps(session, before.project_id);
+  if (!caps.canEditDates) delete patch.target_date;
+  if (!caps.canEditAssignees) delete patch.assigneeUserIds;
 
   try {
     await patchWorkItem(itemId, patch);

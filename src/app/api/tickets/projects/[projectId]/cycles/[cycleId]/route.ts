@@ -17,13 +17,13 @@ const patchCycleSchema = z.object({
 
 export const PATCH = route(async (req: Request, ctx: CycleCtx) => {
   const session = await requireSession();
-  if (!canManageProject(session)) {
+  const { projectId, cycleId } = await ctx.params;
+  if (!(await canManageProject(session, Number(projectId)))) {
     throw forbidden('Lead+ only');
   }
 
   const body = await parseBody(req, patchCycleSchema);
 
-  const { cycleId } = await ctx.params;
   try {
     await updateCycle(cycleId, body);
     return NextResponse.json({ ok: true });
@@ -37,10 +37,10 @@ export const PATCH = route(async (req: Request, ctx: CycleCtx) => {
 
 export const DELETE = route(async (_req: Request, ctx: CycleCtx) => {
   const session = await requireSession();
-  if (!canManageProject(session)) {
+  const { projectId, cycleId } = await ctx.params;
+  if (!(await canManageProject(session, Number(projectId)))) {
     throw forbidden('Lead+ only');
   }
-  const { cycleId } = await ctx.params;
   try {
     await deleteCycle(cycleId);
     return NextResponse.json({ ok: true });

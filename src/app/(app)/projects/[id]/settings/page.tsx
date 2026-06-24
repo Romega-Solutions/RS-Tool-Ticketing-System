@@ -11,9 +11,10 @@ export default async function ProjectSettingsPage({
 }) {
   const session = await getSession();
   if (!session) redirect('/login');
-  if (!canManageProject(session)) redirect(`/projects/${(await params).id}`);
 
   const { id } = await params;
+  if (!(await canManageProject(session, Number(id)))) redirect(`/projects/${id}`);
+
   const projects = await getProjects();
   const project = projects.find(p => p.id === id);
   if (!project) notFound();
@@ -42,7 +43,7 @@ export default async function ProjectSettingsPage({
           description: project.description,
           team: project.team,
         }}
-        canReteam={canReteamProject(session)}
+        canReteam={await canReteamProject(session, Number(id))}
         initialLabels={labels}
         initialMembers={members}
         initialCycles={cycles}

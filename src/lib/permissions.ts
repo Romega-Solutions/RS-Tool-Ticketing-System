@@ -1,102 +1,124 @@
 // Server-only permission helpers for the internal PM features.
-// Used by /api/tickets/* routes. See docs/INTERNAL_PM_BUILD_PLAN.md § 7.
+// Used by /api/tickets/* routes and the project pages.
+//
+// Access is governed by a per-project role (project_members.role):
+//   viewer → view + comment/@mention only
+//   member → viewer + create/edit items (NOT due date, NOT assignees) ; no settings
+//   lead   → member + due date + assignees + project settings (everything)
+// Global ADMINS bypass and are always treated as project leads. Everyone else
+// (including org/team leads) is governed by their stored project role.
 
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { SessionUser } from '@/lib/session';
 
-async function isProjectMember(userId: number, projectId: number): Promise<boolean> {
-  const sb = createAdminClient();
-  const { data } = await sb
-    .from('project_members')
-    .select('id')
-    .eq('project_id', projectId)
-    .eq('user_id', userId)
-    .maybeSingle();
-  return !!data;
+export type ProjectRole = 'lead' | 'member' | 'viewer';
+
+export interface ProjectCaps {
+  canView: boolean;
+  canComment: boolean;       // post comments + @mention members
+  canCreateItem: boolean;    // create work items
+  canEditItem: boolean;      // title, description, state (kanban move), priority, cycle, labels, parent
+  canEditDates: boolean;     // target_date (due date)
+  canEditAssignees: boolean; // work_item_assignees
+  canArchiveItem: boolean;   // soft-delete a work item
+  canManage: boolean;        // project settings: rename, states, labels, cycles, members, archive, re-team
+}
+
+const NONE: ProjectCaps = {
+  canView: false, canComment: false, canCreateItem: false, canEditItem: false,
+  canEditDates: false, canEditAssignees: false, canArchiveItem: false, canManage: false,
+};
+
+/**
+ * Pure capability matrix — the single source of truth for what each project
+ * role can do. Global admins are resolved to 'lead' before reaching here.
+ */
+export function projectCaps(role: ProjectRole | null): ProjectCaps {
+  switch (role) {
+    case 'lead':
+      return { canView: true, canComment: true, canCreateItem: true, canEditItem: true,
+               canEditDates: true, canEditAssignees: true, canArchiveItem: true, canManage: true };
+    case 'member':
+      return { canView: true, canComment: true, canCreateItem: true, canEditItem: true,
+               canEditDates: false, canEditAssignees: false, canArchiveItem: false, canManage: false };
+    case 'viewer':
+      return { canView: true, canComment: true, canCreateItem: false, canEditItem: false,
+               canEditDates: false, canEditAssignees: false, canArchiveItem: false, canManage: false };
+    default:
+      return NONE;
+  }
+}
+
+/** Coerce a stored role string to a known ProjectRole (unknown → 'member'). */
+export function normalizeProjectRole(role: unknown): ProjectRole {
+  const v = String(role ?? '').trim().toLowerCase();
+  return v === 'lead' || v === 'viewer' ? v : 'member';
 }
 
 /**
- * View / read access. Admin and lead see everything; members see their own
- * projects. If the project has zero recorded members we fail open (legacy
- * projects from before the project_members table existed).
+ * Effective project role for a user. Global admins bypass (always 'lead').
+ * Everyone else is governed by their project_members.role. A non-member on a
+ * project that HAS members gets null (no access). Legacy projects with zero
+ * recorded members fail open to 'lead' (pre-membership behaviour).
  */
-export async function canViewProject(user: SessionUser, projectId: number): Promise<boolean> {
-  if (user.role === 'admin' || user.role === 'lead') return true;
-  if (await isProjectMember(user.id, projectId)) return true;
-
+export async function getProjectRole(user: SessionUser, projectId: number | string): Promise<ProjectRole | null> {
+  if (user.role === 'admin') return 'lead';
   const sb = createAdminClient();
+  const pid = Number(projectId);
+  const { data: pm } = await sb
+    .from('project_members').select('role')
+    .eq('project_id', pid).eq('user_id', user.id).maybeSingle();
+  if (pm) return normalizeProjectRole(pm.role);
+
   const { count } = await sb
-    .from('project_members')
-    .select('id', { count: 'exact', head: true })
-    .eq('project_id', projectId);
-  return (count ?? 0) === 0;
+    .from('project_members').select('id', { count: 'exact', head: true }).eq('project_id', pid);
+  return (count ?? 0) === 0 ? 'lead' : null;   // legacy fail-open
 }
 
-/**
- * Project-level admin actions: create/rename states, manage labels, add/remove
- * members, archive project. Leads and admins only.
- */
-export function canManageProject(user: SessionUser): boolean {
-  return user.role === 'admin' || user.role === 'lead';
+/** Resolve the full capability set for a user on a project in one call. */
+export async function getProjectCaps(user: SessionUser, projectId: number | string): Promise<ProjectCaps> {
+  return projectCaps(await getProjectRole(user, projectId));
 }
 
-/**
- * Comments — § 10 Q2: any project member can comment. Admin/lead always.
- */
+// ── Convenience wrappers (project-role aware) ────────────────────────────────
+
+export async function canViewProject(user: SessionUser, projectId: number): Promise<boolean> {
+  return (await getProjectCaps(user, projectId)).canView;
+}
 export async function canCommentOnProject(user: SessionUser, projectId: number): Promise<boolean> {
-  return canViewProject(user, projectId);
+  return (await getProjectCaps(user, projectId)).canComment;
 }
-
-/**
- * Edit a work item: admin/lead any item; ICs may edit only items they are
- * assigned to, or items in projects where they are listed as `role='lead'`.
- */
+export async function canCreateWorkItem(user: SessionUser, projectId: number): Promise<boolean> {
+  return (await getProjectCaps(user, projectId)).canCreateItem;
+}
 export async function canEditWorkItem(
   user: SessionUser,
   workItem: { id: number | string; projectId: number },
 ): Promise<boolean> {
-  if (user.role === 'admin' || user.role === 'lead') return true;
-
-  const sb = createAdminClient();
-
-  const { data: pm } = await sb
-    .from('project_members')
-    .select('role')
-    .eq('project_id', workItem.projectId)
-    .eq('user_id', user.id)
-    .maybeSingle();
-  if (pm?.role === 'lead') return true;
-
-  const { data: assignee } = await sb
-    .from('work_item_assignees')
-    .select('id')
-    .eq('work_item_id', Number(workItem.id))
-    .eq('user_id', user.id)
-    .maybeSingle();
-  return !!assignee;
+  return (await getProjectCaps(user, workItem.projectId)).canEditItem;
+}
+export async function canArchiveWorkItem(user: SessionUser, projectId: number): Promise<boolean> {
+  return (await getProjectCaps(user, projectId)).canArchiveItem;
 }
 
-/** Delete = archive. Admin only (§ 7). */
-export function canArchiveWorkItem(user: SessionUser): boolean {
-  return user.role === 'admin';
+/** Project settings (members, labels, cycles, states, archive). Project lead / admin. */
+export async function canManageProject(user: SessionUser, projectId: number): Promise<boolean> {
+  return (await getProjectCaps(user, projectId)).canManage;
+}
+/** Editing a project's own fields (name/description) is a settings action. */
+export async function canEditProject(user: SessionUser, projectId: number): Promise<boolean> {
+  return (await getProjectCaps(user, projectId)).canManage;
+}
+/** Re-teaming a project. Project lead / admin. */
+export async function canReteamProject(user: SessionUser, projectId: number): Promise<boolean> {
+  return (await getProjectCaps(user, projectId)).canManage;
+}
+/** Archiving / deleting a project. Project lead / admin. */
+export async function canArchiveProject(user: SessionUser, projectId: number): Promise<boolean> {
+  return (await getProjectCaps(user, projectId)).canManage;
 }
 
 /** Anyone authenticated can create a project (auto-tagged to their team). */
 export function canCreateProject(user: SessionUser): boolean {
   return !!user;
-}
-
-/** Anyone authenticated can edit basic project fields (name, description). */
-export function canEditProject(user: SessionUser): boolean {
-  return !!user;
-}
-
-/** Re-teaming (moving a project to a different team) is a lead/admin action. */
-export function canReteamProject(user: SessionUser): boolean {
-  return user.role === 'admin' || user.role === 'lead';
-}
-
-/** Archiving / deleting a project: lead or admin only. */
-export function canArchiveProject(user: SessionUser): boolean {
-  return user.role === 'admin' || user.role === 'lead';
 }

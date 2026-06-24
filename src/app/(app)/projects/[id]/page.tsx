@@ -1,6 +1,6 @@
 import { getProjects, getProjectStates, getWorkItems, getCycles, buildStateLookup, enrichWorkItems } from '@/lib/tickets';
 import { getSession } from '@/lib/session';
-import { canManageProject } from '@/lib/permissions';
+import { getProjectCaps } from '@/lib/permissions';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { AlertCircle, Settings } from 'lucide-react';
@@ -16,6 +16,10 @@ export default async function ProjectBoardPage({
   const { id } = await params;
   const session = await getSession();
   if (!session) redirect('/login');   // Projects is a Workspace tool — open to all
+
+  // Per-project access: members/leads (+ admins) only; non-members are bounced.
+  const caps = await getProjectCaps(session, Number(id));
+  if (!caps.canView) redirect('/projects');
 
   let projectName = '';
   let states: Awaited<ReturnType<typeof getProjectStates>> = [];
@@ -56,7 +60,7 @@ export default async function ProjectBoardPage({
             {!loadError && ' · Scroll sideways to review states · Drag cards to move them'}
           </p>
         </div>
-        {canManageProject(session) && (
+        {caps.canManage && (
           <Link
             href={`/projects/${id}/settings`}
             className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm text-(--rs-neutral-grey-600) transition-colors hover:border-(--rs-primary-300) hover:text-(--rs-primary-700)"
@@ -87,6 +91,7 @@ export default async function ProjectBoardPage({
             projectId={id}
             currentUserId={session.id}
             isAdmin={session.role === 'admin'}
+            caps={caps}
             cycles={cycles}
           />
         </div>

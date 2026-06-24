@@ -308,9 +308,35 @@ function MembersSection({
   const [userId, setUserId] = useState('');
   const [role, setRole]     = useState('member');
   const [busy, setBusy]     = useState(false);
+  const [savingId, setSavingId] = useState<number | null>(null);
+  const [error, setError]   = useState('');
 
   const memberIds = new Set(members.map(m => m.user_id));
   const candidates = allUsers.filter(u => !memberIds.has(u.id));
+
+  // Change an existing member's project role (optimistic; revert on failure).
+  const changeRole = async (memberUserId: number, newRole: string) => {
+    const snapshot = members;
+    setSavingId(memberUserId);
+    setError('');
+    setMembers(members.map(m => (m.user_id === memberUserId ? { ...m, role: newRole } : m)));
+    try {
+      const res = await fetch(`/api/tickets/projects/${projectId}/members/${memberUserId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole }),
+      });
+      if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        setMembers(snapshot);
+        setError(d.error ?? 'Could not change role.');
+      }
+    } catch {
+      setMembers(snapshot);
+      setError('Network error — role not changed.');
+    } finally {
+      setSavingId(null);
+    }
+  };
 
   const add = async () => {
     if (!userId) return;
@@ -335,20 +361,44 @@ function MembersSection({
 
   return (
     <Card title="Members">
+      <p className="mb-2 text-xs text-(--rs-neutral-grey-500)">
+        <strong>Lead</strong> can edit everything incl. due dates, assignees &amp; settings ·{' '}
+        <strong>Member</strong> edits items (not due date/assignees) ·{' '}
+        <strong>Viewer</strong> can view &amp; comment only.
+      </p>
+      {error && <p className="mb-2 text-xs text-red-600" role="alert">{error}</p>}
       <div className="space-y-1.5 mb-3">
         {members.length === 0 && <p className="text-xs text-(--rs-neutral-grey-400) italic">No members yet.</p>}
         {members.map(m => (
-          <div key={m.id} className="flex items-center justify-between px-3 py-2 bg-white border border-(--rs-neutral-grey-100) rounded-lg">
+          <div key={m.id} className="flex items-center gap-2 px-3 py-2 bg-white border border-(--rs-neutral-grey-100) rounded-lg">
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium text-(--rs-neutral-grey-900) truncate">{m.name}</div>
               <div className="text-xs text-(--rs-neutral-grey-500) truncate">{m.email}</div>
             </div>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-700) capitalize">
-              {m.role}
-            </span>
-            <button onClick={() => remove(m.user_id)} className="ml-2 text-(--rs-neutral-grey-400) hover:text-red-500">
-              <Trash2 className="w-4 h-4" />
-            </button>
+            <label htmlFor={`member-role-${m.user_id}`} className="sr-only">Project role for {m.name}</label>
+            <select
+              id={`member-role-${m.user_id}`}
+              value={m.role}
+              disabled={savingId === m.user_id}
+              onChange={e => changeRole(m.user_id, e.target.value)}
+              aria-label={`Project role for ${m.name}`}
+              className="cursor-pointer rounded-md border border-(--rs-neutral-grey-200) bg-white px-2 py-1.5 text-xs capitalize outline-none focus:border-(--rs-primary-400) focus:ring-2 focus:ring-(--rs-primary-200) disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value="lead">Lead</option>
+              <option value="member">Member</option>
+              <option value="viewer">Viewer</option>
+            </select>
+            {savingId === m.user_id ? (
+              <Loader2 className="w-4 h-4 shrink-0 animate-spin text-(--rs-neutral-grey-400)" aria-label="Saving role" />
+            ) : (
+              <button
+                onClick={() => remove(m.user_id)}
+                aria-label={`Remove ${m.name} from project`}
+                className="shrink-0 rounded-md p-1 text-(--rs-neutral-grey-400) transition-colors hover:bg-red-50 hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
           </div>
         ))}
       </div>

@@ -18,20 +18,20 @@ const patchProjectSchema = z.object({
 
 // PATCH /api/tickets/projects/[projectId]
 // Body: { name?, description?, team? }
-// Any authenticated user can edit name/description. Only lead/admin can re-team.
+// Editing project fields is a settings action — project lead / admin only.
 export const PATCH = route(async (req: Request, { params }: { params: Promise<{ projectId: string }> }) => {
   const session = await requireSession();
-  if (!canEditProject(session)) {
+  const { projectId } = await params;
+  if (!(await canEditProject(session, Number(projectId)))) {
     throw forbidden();
   }
 
   const body = await parseBody(req, patchProjectSchema);
 
-  if (body.team !== undefined && !canReteamProject(session)) {
+  if (body.team !== undefined && !(await canReteamProject(session, Number(projectId)))) {
     throw forbidden('Only leads/admins can change a project team');
   }
 
-  const { projectId } = await params;
   try {
     await updateProject(projectId, body);
     return NextResponse.json({ ok: true });
@@ -46,11 +46,11 @@ export const PATCH = route(async (req: Request, { params }: { params: Promise<{ 
 // DELETE /api/tickets/projects/[projectId]  — soft-delete (archive). Lead/admin only.
 export const DELETE = route(async (_req: Request, { params }: { params: Promise<{ projectId: string }> }) => {
   const session = await requireSession();
-  if (!canArchiveProject(session)) {
+  const { projectId } = await params;
+  if (!(await canArchiveProject(session, Number(projectId)))) {
     throw forbidden('Only leads/admins can archive a project');
   }
 
-  const { projectId } = await params;
   try {
     await archiveProject(projectId);
     return NextResponse.json({ ok: true });

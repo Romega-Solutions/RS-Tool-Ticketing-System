@@ -23,13 +23,13 @@ export const GET = route(async (_req: Request, { params }: { params: Promise<{ p
 
 export const POST = route(async (req: Request, { params }: { params: Promise<{ projectId: string }> }) => {
   const session = await requireSession();
-  if (!canManageProject(session)) {
+  const { projectId } = await params;
+  if (!(await canManageProject(session, Number(projectId)))) {
     throw forbidden('Lead+ only');
   }
 
   const body = await parseBody(req, memberSchema);
 
-  const { projectId } = await params;
   if (!body.userId) throw badRequest('userId is required');
 
   try {

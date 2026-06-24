@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Loader2, MessageSquare, Activity as ActivityIcon, FileText, ImagePlus, Save, Trash2, X, Maximize2, Minimize2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, MessageSquare, Activity as ActivityIcon, FileText, ImagePlus, Save, Trash2, X, Maximize2, Minimize2, Eye, Lock } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { extractTaskDescriptionImageUrls } from '@/lib/task-description-images';
 import {
@@ -12,6 +12,7 @@ import {
 } from '@/lib/task-detail-navigation';
 import { isAllowedTaskImageUpload } from '@/lib/task-image-uploads';
 import { MentionTextarea, extractMentionedIds } from '@/components/mention-textarea.client';
+import type { ProjectCaps } from '@/lib/permissions';
 
 // ── Shape we get from /api/tickets/work-items/[id] ─────────────────────────
 export interface SheetWorkItem {
@@ -78,6 +79,7 @@ export function TaskDetailSheet({
   states,
   currentUserId,
   isAdmin,
+  caps,
   onSaved,
   onArchived,
 }: {
@@ -87,9 +89,14 @@ export function TaskDetailSheet({
   states: StateOption[];
   currentUserId: number;
   isAdmin: boolean;
+  caps: ProjectCaps;
   onSaved?: (updated: SheetWorkItem) => void;
   onArchived?: (itemId: string) => void;
 }) {
+  // Per-project capabilities drive which controls are editable.
+  const canEdit = caps.canEditItem;            // member+ : general fields
+  const canEditDates = caps.canEditDates;      // lead    : due date
+  const canEditAssignees = caps.canEditAssignees; // lead : assignees
   const [tab, setTab] = useState<'details' | 'comments' | 'activity'>('details');
 
   // ── Resizable panel width ──────────────────────────────────────────────────
@@ -265,9 +272,10 @@ export function TaskDetailSheet({
           description,
           priority,
           state: stateId,
-          target_date: targetDate || null,
           cycle_id: cycleId ? Number(cycleId) : null,
-          assigneeUserIds: assigneeIds,
+          // Restricted fields are sent only when permitted (server also strips).
+          ...(canEditDates ? { target_date: targetDate || null } : {}),
+          ...(canEditAssignees ? { assigneeUserIds: assigneeIds } : {}),
         }),
       });
       if (!res.ok) {
@@ -577,11 +585,18 @@ export function TaskDetailSheet({
 
           {!loading && item && tab === 'details' && (
             <div className="space-y-4">
+              {!canEdit && (
+                <div className="flex items-center gap-2 rounded-lg border border-(--rs-accent-200) bg-(--rs-accent-50) px-3 py-2 text-xs text-(--rs-accent-800)">
+                  <Eye className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span><strong>View only.</strong> You can read this task and add comments, but not edit it.</span>
+                </div>
+              )}
               <Field label="Title">
                 <input
                   value={name}
                   onChange={e => setName(e.target.value)}
-                  className={`w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 focus:border-(--rs-primary-400) focus:outline-none ${isWide ? 'text-lg font-medium' : 'text-sm'}`}
+                  disabled={!canEdit}
+                  className={`w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 focus:border-(--rs-primary-400) focus:outline-none disabled:cursor-not-allowed disabled:bg-(--rs-neutral-grey-50) disabled:opacity-70 ${isWide ? 'text-lg font-medium' : 'text-sm'}`}
                 />
               </Field>
 
@@ -590,8 +605,9 @@ export function TaskDetailSheet({
                   value={description}
                   onChange={e => setDescription(e.target.value)}
                   rows={isWide ? 14 : 4}
-                  placeholder="Add a description…"
-                  className={`w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 resize-y focus:border-(--rs-primary-400) focus:outline-none ${isWide ? 'text-[15px] leading-relaxed' : 'text-sm'}`}
+                  disabled={!canEdit}
+                  placeholder={canEdit ? 'Add a description…' : 'No description'}
+                  className={`w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 resize-y focus:border-(--rs-primary-400) focus:outline-none disabled:cursor-not-allowed disabled:bg-(--rs-neutral-grey-50) disabled:opacity-70 ${isWide ? 'text-[15px] leading-relaxed' : 'text-sm'}`}
                 />
                 {descriptionImageUrls.length > 0 && (
                   <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -623,7 +639,7 @@ export function TaskDetailSheet({
                       <p className="text-sm font-medium text-(--rs-neutral-grey-800)">Upload task images</p>
                       <p className="text-xs text-(--rs-neutral-grey-500)">JPG and PNG files only.</p>
                     </div>
-                    <label className="inline-flex min-h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-(--rs-primary-200) bg-white px-3 text-xs font-medium text-(--rs-primary-700) transition-colors hover:bg-(--rs-primary-50)">
+                    <label className={`inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-(--rs-primary-200) bg-white px-3 text-xs font-medium text-(--rs-primary-700) transition-colors hover:bg-(--rs-primary-50) ${canEdit ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}>
                       {imageUploading ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
@@ -634,7 +650,7 @@ export function TaskDetailSheet({
                         type="file"
                         accept="image/jpeg,image/png,.jpg,.jpeg,.png"
                         multiple
-                        disabled={imageUploading}
+                        disabled={imageUploading || !canEdit}
                         onChange={e => {
                           void handleImageUpload(e.target.files);
                           e.currentTarget.value = '';
@@ -659,7 +675,8 @@ export function TaskDetailSheet({
                   <select
                     value={stateId}
                     onChange={e => setStateId(e.target.value)}
-                    className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none"
+                    disabled={!canEdit}
+                    className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none disabled:cursor-not-allowed disabled:bg-(--rs-neutral-grey-50) disabled:opacity-70"
                   >
                     {states.map(s => (
                       <option key={s.id} value={s.id}>{s.name}</option>
@@ -671,7 +688,8 @@ export function TaskDetailSheet({
                   <select
                     value={priority}
                     onChange={e => setPriority(e.target.value as SheetWorkItem['priority'])}
-                    className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none"
+                    disabled={!canEdit}
+                    className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none disabled:cursor-not-allowed disabled:bg-(--rs-neutral-grey-50) disabled:opacity-70"
                   >
                     {PRIORITIES.map(p => (
                       <option key={p.value} value={p.value}>{p.label}</option>
@@ -679,12 +697,13 @@ export function TaskDetailSheet({
                   </select>
                 </Field>
 
-                <Field label="Due date">
+                <Field label={<span className="inline-flex items-center gap-1">Due date{!canEditDates && <span className="inline-flex items-center gap-0.5 text-(--rs-neutral-grey-400)"><Lock className="h-2.5 w-2.5" aria-hidden="true" />Leads only</span>}</span>}>
                   <input
                     type="date"
                     value={targetDate ?? ''}
                     onChange={e => setTargetDate(e.target.value)}
-                    className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none"
+                    disabled={!canEdit || !canEditDates}
+                    className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none disabled:cursor-not-allowed disabled:bg-(--rs-neutral-grey-50) disabled:opacity-70"
                   />
                 </Field>
 
@@ -692,7 +711,8 @@ export function TaskDetailSheet({
                   <select
                     value={cycleId}
                     onChange={e => setCycleId(e.target.value)}
-                    className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-sm"
+                    disabled={!canEdit}
+                    className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-sm disabled:cursor-not-allowed disabled:bg-(--rs-neutral-grey-50) disabled:opacity-70"
                   >
                     <option value="">No cycle</option>
                     {projectCycles.map(c => (
@@ -707,7 +727,7 @@ export function TaskDetailSheet({
                 <span className="text-xs text-(--rs-neutral-grey-500) capitalize">{priority} priority</span>
               </div>
 
-              <Field label="Assignees">
+              <Field label={<span className="inline-flex items-center gap-1">Assignees{!canEditAssignees && <span className="inline-flex items-center gap-0.5 text-(--rs-neutral-grey-400)"><Lock className="h-2.5 w-2.5" aria-hidden="true" />Leads only</span>}</span>}>
                 {members.length === 0 ? (
                   <p className="text-xs text-(--rs-neutral-grey-400) italic">
                     No project members yet. Add some in project settings.
@@ -720,10 +740,11 @@ export function TaskDetailSheet({
                         <button
                           key={m.user_id}
                           onClick={() => toggleAssignee(m.user_id)}
-                          className={`min-h-9 rounded-full border px-3 py-1 text-xs transition-colors ${
+                          disabled={!canEditAssignees}
+                          className={`min-h-9 rounded-full border px-3 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                             on
                               ? 'bg-(--rs-primary-50) border-(--rs-primary-300) text-(--rs-primary-800)'
-                              : 'bg-white border-(--rs-neutral-grey-200) text-(--rs-neutral-grey-600) hover:border-(--rs-neutral-grey-400)'
+                              : 'bg-white border-(--rs-neutral-grey-200) text-(--rs-neutral-grey-600) enabled:hover:border-(--rs-neutral-grey-400)'
                           }`}
                         >
                           {m.name}
@@ -747,8 +768,9 @@ export function TaskDetailSheet({
                         <button
                           key={l.id}
                           onClick={() => toggleLabel(l.id)}
-                          className={`min-h-8 rounded-full border px-3 py-1 text-xs transition-opacity ${
-                            applied ? 'text-white' : 'text-(--rs-neutral-grey-600) bg-white opacity-60 hover:opacity-100'
+                          disabled={!canEdit}
+                          className={`min-h-8 rounded-full border px-3 py-1 text-xs transition-opacity disabled:cursor-not-allowed ${
+                            applied ? 'text-white' : `text-(--rs-neutral-grey-600) bg-white opacity-60 ${canEdit ? 'hover:opacity-100' : ''}`
                           }`}
                           style={applied
                             ? { background: l.color, borderColor: l.color }
@@ -811,11 +833,12 @@ export function TaskDetailSheet({
                     onChange={e => setNewSub(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && addSubIssue()}
                     placeholder="Add a sub-issue…"
-                    className="min-h-10 flex-1 rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-xs focus:border-(--rs-primary-400) focus:outline-none"
+                    disabled={!canEdit}
+                    className="min-h-10 flex-1 rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-xs focus:border-(--rs-primary-400) focus:outline-none disabled:cursor-not-allowed disabled:bg-(--rs-neutral-grey-50) disabled:opacity-70"
                   />
                   <button
                     onClick={addSubIssue}
-                    disabled={addingSub || !newSub.trim()}
+                    disabled={addingSub || !newSub.trim() || !canEdit}
                     className="flex min-h-10 items-center justify-center gap-1 rounded-md px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
                     style={{ background: 'var(--rs-primary-500)' }}
                   >
@@ -827,20 +850,22 @@ export function TaskDetailSheet({
 
               <div className="flex flex-col gap-3 border-t border-(--rs-neutral-grey-100) pt-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    onClick={handleSave}
-                    disabled={saving || !name.trim()}
-                    className="flex min-h-10 items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                    style={{ background: 'var(--rs-primary-500)' }}
-                  >
-                    {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                    Save
-                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={handleSave}
+                      disabled={saving || !name.trim()}
+                      className="flex min-h-10 items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                      style={{ background: 'var(--rs-primary-500)' }}
+                    >
+                      {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                      Save
+                    </button>
+                  )}
                   <span className="text-xs text-(--rs-neutral-grey-400)">
                     Updated {fmt(item.completed_at ?? '')}
                   </span>
                 </div>
-                {isAdmin && (
+                {caps.canArchiveItem && (
                   <button
                     onClick={handleArchive}
                     className="flex min-h-10 items-center justify-center gap-1.5 rounded-md px-2 text-xs text-red-500 hover:bg-red-50 hover:text-red-700 sm:justify-start"
@@ -926,7 +951,7 @@ export function TaskDetailSheet({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <div>
       <label className="block text-xs font-medium text-(--rs-neutral-grey-500) mb-1">{label}</label>

@@ -20,6 +20,7 @@ import {
 } from '@dnd-kit/core';
 import { AlertTriangle, GripVertical, Plus, Loader2, X } from 'lucide-react';
 import { TaskDetailSheet, type SheetWorkItem } from '@/components/task-detail-sheet';
+import type { ProjectCaps } from '@/lib/permissions';
 import {
   getKanbanDragAnnouncement,
   getKanbanDragHandleLabel,
@@ -164,9 +165,10 @@ function CardContent({
 
 // ── Draggable card wrapper ─────────────────────────────────────────────────────
 
-function DraggableCard({ item, isActive, onOpen }: { item: KanbanItem; isActive: boolean; onOpen: (id: string) => void }) {
+function DraggableCard({ item, isActive, onOpen, canMove }: { item: KanbanItem; isActive: boolean; onOpen: (id: string) => void; canMove: boolean }) {
   const { attributes, listeners, setActivatorNodeRef, setNodeRef } = useDraggable({
     id: item.id,
+    disabled: !canMove,
     attributes: {
       roleDescription: 'task move handle',
     },
@@ -182,14 +184,14 @@ function DraggableCard({ item, isActive, onOpen }: { item: KanbanItem; isActive:
         item={item}
         isActive={isActive}
         onOpen={() => onOpen(item.id)}
-        dragHandle={
+        dragHandle={canMove ? (
           <button
             ref={setActivatorNodeRef}
             type="button"
             {...attributes}
             {...listeners}
             aria-label={getKanbanDragHandleLabel(task)}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-(--rs-neutral-grey-400) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-primary-700) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300) focus-visible:ring-offset-2"
+            className="flex h-10 w-10 shrink-0 cursor-grab items-center justify-center rounded-md text-(--rs-neutral-grey-400) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-primary-700) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300) focus-visible:ring-offset-2"
             style={{ touchAction: 'none' }}
             onClick={(event) => {
               event.preventDefault();
@@ -198,7 +200,7 @@ function DraggableCard({ item, isActive, onOpen }: { item: KanbanItem; isActive:
           >
             <GripVertical className="h-4 w-4" aria-hidden="true" />
           </button>
-        }
+        ) : undefined}
       />
     </div>
   );
@@ -308,6 +310,8 @@ function KanbanColumn({
   projectId,
   onAdd,
   onOpen,
+  canMove,
+  canCreate,
 }: {
   state: KanbanState;
   items: KanbanItem[];
@@ -315,6 +319,8 @@ function KanbanColumn({
   projectId: string;
   onAdd: (stateId: string, item: KanbanItem) => void;
   onOpen: (id: string) => void;
+  canMove: boolean;
+  canCreate: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: state.id });
 
@@ -358,6 +364,7 @@ function KanbanColumn({
               item={item}
               isActive={activeId === item.id}
               onOpen={onOpen}
+              canMove={canMove}
             />
           ))}
           {items.length === 0 && (
@@ -371,10 +378,12 @@ function KanbanColumn({
           )}
         </div>
 
-        {/* Add task */}
-        <div className="mt-2 border-t border-(--rs-neutral-grey-200) pt-2">
-          <AddTaskForm stateId={state.id} projectId={projectId} onAdd={onAdd} />
-        </div>
+        {/* Add task — members + leads only */}
+        {canCreate && (
+          <div className="mt-2 border-t border-(--rs-neutral-grey-200) pt-2">
+            <AddTaskForm stateId={state.id} projectId={projectId} onAdd={onAdd} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -388,6 +397,7 @@ export function KanbanBoard({
   projectId,
   currentUserId,
   isAdmin,
+  caps,
   cycles = [],
 }: {
   states: KanbanState[];
@@ -395,6 +405,7 @@ export function KanbanBoard({
   projectId: string;
   currentUserId: number;
   isAdmin: boolean;
+  caps: ProjectCaps;
   cycles?: KanbanCycle[];
 }) {
   // Build state → items map from initial server data
@@ -791,6 +802,8 @@ export function KanbanBoard({
                 projectId={projectId}
                 onAdd={handleTaskAdded}
                 onOpen={setOpenItemId}
+                canMove={caps.canEditItem}
+                canCreate={caps.canCreateItem}
               />
             ))}
           </div>
@@ -808,6 +821,7 @@ export function KanbanBoard({
         states={states.map(s => ({ id: s.id, name: s.name, color: s.color }))}
         currentUserId={currentUserId}
         isAdmin={isAdmin}
+        caps={caps}
         onSaved={(updated) => applySheetUpdate(updated)}
         onArchived={(id) => removeItemFromBoard(id)}
       />

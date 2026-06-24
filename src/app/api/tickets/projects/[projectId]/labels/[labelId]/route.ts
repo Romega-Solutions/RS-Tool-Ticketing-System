@@ -9,11 +9,11 @@ type LabelCtx = { params: Promise<{ projectId: string; labelId: string }> };
 
 export const DELETE = route(async (_req: Request, ctx: LabelCtx) => {
   const session = await requireSession();
-  if (!canManageProject(session)) {
+  const { projectId, labelId } = await ctx.params;
+  if (!(await canManageProject(session, Number(projectId)))) {
     throw forbidden('Lead+ only');
   }
 
-  const { labelId } = await ctx.params;
   try {
     await deleteLabel(labelId);
     return NextResponse.json({ ok: true });

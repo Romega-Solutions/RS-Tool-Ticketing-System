@@ -49,7 +49,9 @@ describe('route hardening coverage', () => {
 
   it('project member creation rejects a non-number userId before mutating membership', async () => {
     const addProjectMember = vi.fn();
-    mockSession(user({ role: 'lead' }));
+    // Global admins bypass the project-role check (no DB needed), so the request
+    // reaches input validation — which is what this test asserts.
+    mockSession(user({ role: 'admin' }));
     vi.doMock('@/lib/tickets', () => ({
       addProjectMember,
       getProjectMembers: vi.fn(),

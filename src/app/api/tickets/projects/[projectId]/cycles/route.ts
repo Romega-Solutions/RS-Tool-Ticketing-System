@@ -23,7 +23,8 @@ export const GET = route(async (_req: Request, { params }: { params: Promise<{ p
 
 export const POST = route(async (req: Request, { params }: { params: Promise<{ projectId: string }> }) => {
   const session = await requireSession();
-  if (!canManageProject(session)) {
+  const { projectId } = await params;
+  if (!(await canManageProject(session, Number(projectId)))) {
     throw forbidden('Lead+ only');
   }
 
@@ -34,7 +35,6 @@ export const POST = route(async (req: Request, { params }: { params: Promise<{ p
     throw badRequest('name, startDate, endDate required');
   }
 
-  const { projectId } = await params;
   try {
     return NextResponse.json(
       await createCycle(projectId, name, body.startDate, body.endDate),

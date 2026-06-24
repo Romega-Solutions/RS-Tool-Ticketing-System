@@ -8,7 +8,7 @@ import {
   logActivity,
   type WorkItemPatch,
 } from '@/lib/tickets';
-import { canEditWorkItem, canArchiveWorkItem, canViewProject } from '@/lib/permissions';
+import { canEditWorkItem, canArchiveWorkItem, canViewProject, getProjectCaps } from '@/lib/permissions';
 import { route, requireSession, parseBody, forbidden, notFound } from '@/lib/api';
 
 export const runtime = 'nodejs';
@@ -53,6 +53,13 @@ export const PATCH = route(async (req: Request, { params }: { params: Promise<{ 
 
   const patch: WorkItemPatch = await parseBody(req, patchSchema);
 
+  // Field-level gate: Members may edit items but not the due date or assignees
+  // (Lead/admin only). The task panel always sends the full payload, so strip
+  // the restricted fields rather than rejecting the whole save.
+  const caps = await getProjectCaps(session, before.project_id);
+  if (!caps.canEditDates) delete patch.target_date;
+  if (!caps.canEditAssignees) delete patch.assigneeUserIds;
+
   try {
     await patchWorkItem(id, patch);
     for (const a of diffActivity(before, patch)) {
@@ -68,13 +75,15 @@ export const PATCH = route(async (req: Request, { params }: { params: Promise<{ 
   }
 });
 
-// DELETE /api/tickets/work-items/[id] — soft delete (archive flag). Admin only.
+// DELETE /api/tickets/work-items/[id] — soft delete (archive flag). Project lead / admin.
 export const DELETE = route(async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const session = await requireSession();
-  if (!canArchiveWorkItem(session)) {
-    throw forbidden('Admin only');
-  }
   const { id } = await params;
+  const item = await getWorkItemDetail(id);
+  if (!item) throw notFound();
+  if (!(await canArchiveWorkItem(session, item.project_id))) {
+    throw forbidden('Lead+ only');
+  }
   try {
     await archiveWorkItem(id);
     await logActivity(Number(id), session.id, 'archived');
