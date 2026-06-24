@@ -12,6 +12,7 @@ import { LiveClock } from "@/components/live-clock";
 import { WhoIsInPanel } from "@/components/who-is-in-panel";
 import { NotificationBell } from "@/components/notification-bell.client";
 import { FloatingGuide } from "@/components/guide/floating-guide.client";
+import { NavProgress } from "@/components/nav-progress.client";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 
@@ -91,6 +92,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-screen bg-(--rs-primary-50) overflow-hidden text-(--rs-neutral-grey-900)">
+      <NavProgress />
       <AppSidebar role={session.role} userName={session.name} team={session.team} toolAccess={session.toolAccess} photoUrl={myPhotoUrl} />
       <main className="flex-1 flex flex-col h-full overflow-hidden w-full">
         <header className="shrink-0 border-b border-[rgba(15,23,42,0.08)] bg-white px-4 py-3 shadow-[0_1px_3px_rgba(15,23,42,0.06)] md:px-8">
