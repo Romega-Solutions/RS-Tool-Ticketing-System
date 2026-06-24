@@ -3,7 +3,20 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { hasSupabaseConfig } from '@/lib/supabase/config';
 
 export async function proxy(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request });
+  const { pathname } = request.nextUrl;
+
+  // App Router doesn't pass the current pathname to layouts, and Next.js 16
+  // dropped the legacy `x-invoke-path` header. Forward it on the request so
+  // server components (e.g. (app)/layout.tsx) can enforce path-based access as
+  // a centralized backstop. Rebuilt from request.headers on each call so the
+  // Supabase cookie refresh in setAll() is preserved.
+  const withPathname = () => {
+    const headers = new Headers(request.headers);
+    headers.set('x-pathname', pathname);
+    return NextResponse.next({ request: { headers } });
+  };
+
+  let supabaseResponse = withPathname();
 
   if (!hasSupabaseConfig()) {
     return supabaseResponse;
@@ -17,7 +30,7 @@ export async function proxy(request: NextRequest) {
         getAll() { return request.cookies.getAll(); },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-          supabaseResponse = NextResponse.next({ request });
+          supabaseResponse = withPathname();
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
           );
@@ -42,7 +55,6 @@ export async function proxy(request: NextRequest) {
     return res;
   }
 
-  const { pathname } = request.nextUrl;
   const isLoginPage = pathname === '/login';
   // Public application form is open to the world — no auth required.
   const isPublicApply = pathname === '/apply' || pathname.startsWith('/apply/');

@@ -32,6 +32,12 @@ describe('normalizeRole', () => {
     expect(normalizeRole('TL')).toBe('lead');
   });
 
+  it('maps intern to intern (not ic)', () => {
+    expect(normalizeRole('intern')).toBe('intern');
+    expect(normalizeRole('Intern')).toBe('intern');
+    expect(normalizeRole('  INTERN ')).toBe('intern');
+  });
+
   it('falls back to ic for any unknown value', () => {
     expect(normalizeRole('ic')).toBe('ic');
     expect(normalizeRole('employee')).toBe('ic');
@@ -106,8 +112,9 @@ describe('canAccessPath', () => {
 });
 
 describe('defaultLandingPath', () => {
-  it('sends ic to /my-tasks', () => {
+  it('sends ic and intern to /my-tasks', () => {
     expect(defaultLandingPath('ic')).toBe('/my-tasks');
+    expect(defaultLandingPath('intern')).toBe('/my-tasks');
   });
 
   it('sends lead and admin to /dashboard', () => {
@@ -121,6 +128,8 @@ describe('roleLabel', () => {
     expect(roleLabel('admin')).toBe('Admin');
     expect(roleLabel('lead')).toBe('Lead');
     expect(roleLabel('ic')).toBe('IC');
+    // Regression: an intern must render "Intern", never "IC".
+    expect(roleLabel('intern')).toBe('Intern');
   });
 });
 

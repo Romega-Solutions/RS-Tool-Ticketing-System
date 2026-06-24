@@ -63,7 +63,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   }
 
   const headersList = await headers();
-  const pathname = headersList.get('x-invoke-path') ?? '';
+  const pathname = headersList.get('x-pathname') ?? '';
   if (pathname && !canAccessPath(pathname, session.role, session.toolAccess)) {
     redirect(defaultLandingPath(session.role));
   }

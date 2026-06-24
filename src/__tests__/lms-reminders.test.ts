@@ -100,7 +100,7 @@ describe('isPathExemptFromHardEnforcement', () => {
     expect(isPathExemptFromHardEnforcement('/projects')).toBe(false);
   });
 
-  it('treats empty path as exempt (no x-invoke-path header)', () => {
+  it('treats empty path as exempt (no x-pathname header)', () => {
     expect(isPathExemptFromHardEnforcement('')).toBe(true);
   });
 });

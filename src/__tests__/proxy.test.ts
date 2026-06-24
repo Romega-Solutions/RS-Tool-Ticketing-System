@@ -26,4 +26,14 @@ describe('proxy', () => {
     expect(response.status).toBe(200);
     expect(createServerClient).not.toHaveBeenCalled();
   });
+
+  it('forwards the request pathname as x-pathname for the layout access guard', async () => {
+    const request = new NextRequest('https://example.com/attendance');
+
+    const response = await proxy(request);
+
+    // NextResponse.next({ request: { headers } }) re-emits forwarded request
+    // headers as x-middleware-request-* so the server render can read them.
+    expect(response.headers.get('x-middleware-request-x-pathname')).toBe('/attendance');
+  });
 });
