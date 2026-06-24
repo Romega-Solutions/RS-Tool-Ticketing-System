@@ -11,27 +11,33 @@ import { PersonAvatar } from "@/components/person-avatar";
 import type { AppRole } from "@/lib/rbac";
 import { hasToolAccess, canAccessAdmin, roleLabel } from "@/lib/rbac";
 
+// Items are listed alphabetically by label within each section. "Workspace"
+// (main) is open to all; "Team Tools" (leadTools) is per-user gated and its
+// order drives the Tool Access matrix columns; "Admin" is admin-only.
 const navItems = [
-  { href: "/dashboard",         label: "Dashboard",      icon: LayoutDashboard, category: "main"      },
-  { href: "/my-tasks",          label: "My Tasks",       icon: CheckSquare,     category: "main"      },
-  { href: "/projects",          label: "Projects",       icon: Briefcase,       category: "main"      },
-  { href: "/learning",          label: "Learning",       icon: BookMarked,      category: "main"      },
-  { href: "/tools",             label: "Tools",          icon: LayoutGrid,      category: "main"      },
-  { href: "/my-time",           label: "My Time",        icon: Timer,           category: "main"      },
-  { href: "/weekly-report",     label: "Weekly Reports", icon: FileText,        category: "main"      },
-  { href: "/attendance",          label: "Attendance",    icon: Calendar,       category: "reports"   },
-  { href: "/attendance/requests", label: "Time Requests", icon: ClipboardList,  category: "reports"   },
-  { href: "/sales/leads",            label: "Sales",      icon: Users2,          category: "leadTools" },
-  { href: "/recruiting/candidates",  label: "Recruiting", icon: UserPlus2,       category: "leadTools" },
-  { href: "/onboarders",             label: "Onboarding", icon: GraduationCap,   category: "leadTools" },
-  { href: "/pm/status-drafter",      label: "PM",         icon: ClipboardList,   category: "leadTools" },
-  { href: "/ceo/briefing",           label: "Briefing",   icon: Sun,             category: "leadTools" },
-  { href: "/marketing/content",      label: "Marketing",  icon: Wand2,           category: "leadTools" },
-  { href: "/admin/users",       label: "Users",          icon: Shield,            category: "admin"     },
-  { href: "/admin/overtime",    label: "Overtime",       icon: Timer,             category: "admin"     },
-  { href: "/admin/presence-pings", label: "Ping Records", icon: BellRing,          category: "admin"     },
-  { href: "/admin/learning",    label: "Manage Learning",icon: BookOpen,          category: "admin"     },
-  { href: "/rates",             label: "Rates",          icon: CircleDollarSign,  category: "admin"     },
+  // ── Workspace — open to all signed-in users
+  { href: "/dashboard",             label: "Dashboard",      icon: LayoutDashboard, category: "main"      },
+  { href: "/learning",              label: "Learning",       icon: BookMarked,      category: "main"      },
+  { href: "/my-tasks",              label: "My Tasks",       icon: CheckSquare,     category: "main"      },
+  { href: "/my-time",               label: "My Time",        icon: Timer,           category: "main"      },
+  { href: "/projects",              label: "Projects",       icon: Briefcase,       category: "main"      },
+  { href: "/attendance/requests",   label: "Time Requests",  icon: ClipboardList,   category: "main"      },
+  { href: "/tools",                 label: "Tools",          icon: LayoutGrid,      category: "main"      },
+  { href: "/weekly-report",         label: "Weekly Reports", icon: FileText,        category: "main"      },
+  // ── Team Tools — per-user gated
+  { href: "/attendance",            label: "Attendance",     icon: Calendar,        category: "leadTools" },
+  { href: "/ceo/briefing",          label: "Briefing",       icon: Sun,             category: "leadTools" },
+  { href: "/marketing/content",     label: "Marketing",      icon: Wand2,           category: "leadTools" },
+  { href: "/onboarders",            label: "Onboarding",     icon: GraduationCap,   category: "leadTools" },
+  { href: "/pm/status-drafter",     label: "PM",             icon: ClipboardList,   category: "leadTools" },
+  { href: "/recruiting/candidates", label: "Recruiting",     icon: UserPlus2,       category: "leadTools" },
+  { href: "/sales/leads",           label: "Sales",          icon: Users2,          category: "leadTools" },
+  // ── Admin — admin only
+  { href: "/admin/learning",        label: "Manage Learning",icon: BookOpen,        category: "admin"     },
+  { href: "/admin/overtime",        label: "Overtime",       icon: Timer,           category: "admin"     },
+  { href: "/admin/presence-pings",  label: "Ping Records",   icon: BellRing,        category: "admin"     },
+  { href: "/rates",                 label: "Rates",          icon: CircleDollarSign,category: "admin"     },
+  { href: "/admin/users",           label: "Users",          icon: Shield,          category: "admin"     },
 ];
 
 function NavPendingDot({ collapsed }: { collapsed: boolean }) {
@@ -117,31 +123,33 @@ function NavSection({
 function NavLinks({ collapsed = false, role, toolAccess }: { collapsed?: boolean; role: AppRole; toolAccess: string[] }) {
   const pathname = usePathname();
 
-  const mainItems     = navItems.filter(i => {
-    if (i.category !== "main") return false;
-    if (i.href === "/projects") return hasToolAccess('projects', role, toolAccess);
-    return true;
-  });
-  const reportItems   = navItems.filter(i => i.category === "reports" && hasToolAccess('attendance', role, toolAccess));
+  const mainItems     = navItems.filter(i => i.category === "main");   // Workspace — open to all
   const leadToolItems = navItems.filter(i => {
     if (i.category !== "leadTools") return false;
-    if (i.href.startsWith('/sales/')) return hasToolAccess('sales', role, toolAccess);
-    if (i.href.startsWith('/recruiting/')) return hasToolAccess('recruiting', role, toolAccess);
-    if (i.href.startsWith('/onboarders')) return hasToolAccess('onboarding', role, toolAccess);
-    if (i.href.startsWith('/pm/')) return hasToolAccess('pm', role, toolAccess);
+    if (i.href === '/attendance') return hasToolAccess('attendance', role, toolAccess);
     if (i.href.startsWith('/ceo/')) return hasToolAccess('ceo', role, toolAccess);
     if (i.href.startsWith('/marketing/')) return hasToolAccess('marketing', role, toolAccess);
+    if (i.href.startsWith('/onboarders')) return hasToolAccess('onboarding', role, toolAccess);
+    if (i.href.startsWith('/pm/')) return hasToolAccess('pm', role, toolAccess);
+    if (i.href.startsWith('/recruiting/')) return hasToolAccess('recruiting', role, toolAccess);
+    if (i.href.startsWith('/sales/')) return hasToolAccess('sales', role, toolAccess);
     return false;
   });
   const adminItems    = navItems.filter(i => i.category === "admin" && canAccessAdmin(role));
 
-  const isActive = (href: string) =>
-    href === "/" ? pathname === "/" : pathname.startsWith(href);
+  const isActive = (href: string) => {
+    if (href === "/") return pathname === "/";
+    // The "Attendance" tool must not light up while on "/attendance/requests"
+    // (Time Requests), which is now a separate Workspace item.
+    if (href === "/attendance")
+      return pathname === "/attendance" ||
+        (pathname.startsWith("/attendance/") && !pathname.startsWith("/attendance/requests"));
+    return pathname.startsWith(href);
+  };
 
   return (
     <nav className="flex-1 overflow-y-auto w-full" aria-label="Main Navigation">
-      <NavSection label="Workspace" items={mainItems}     collapsed={collapsed} isActive={isActive} />
-      <NavSection label="Team"      items={reportItems}   collapsed={collapsed} isActive={isActive} />
+      <NavSection label="Workspace"  items={mainItems}     collapsed={collapsed} isActive={isActive} />
       <NavSection label="Team Tools" items={leadToolItems} collapsed={collapsed} isActive={isActive} />
       <NavSection label="Admin"     items={adminItems}    collapsed={collapsed} isActive={isActive} />
     </nav>

@@ -8,22 +8,24 @@ export type LeadToolKey = 'ceo' | 'pm' | 'sales' | 'marketing' | 'recruiting' | 
 // Sensitive admin tools (/admin/*, /rates, overtime, manage-learning, dev tools)
 // are intentionally NOT here — they stay strictly admin-role only.
 export type GateableToolKey =
-  | 'projects' | 'attendance' | 'recruiting' | 'sales'
-  | 'marketing' | 'pm' | 'ceo' | 'onboarding';
+  | 'attendance' | 'ceo' | 'marketing' | 'onboarding'
+  | 'pm' | 'recruiting' | 'sales';
 
 export const GATEABLE_TOOLS: ReadonlyArray<{
   key: GateableToolKey;
   label: string;
   prefixes: string[];   // path prefixes this tool guards
 }> = [
-  { key: 'projects',   label: 'Projects',         prefixes: ['/projects'] },
-  { key: 'attendance', label: 'Attendance',       prefixes: ['/attendance'] },   // /attendance + /attendance/requests
+  // Ordered to match the "Team Tools" sidebar section (alphabetical by label);
+  // this order also drives the Tool Access matrix columns. Workspace tools
+  // (Projects, Time Requests, …) are open to all and are intentionally NOT here.
+  { key: 'attendance', label: 'Attendance',       prefixes: ['/attendance'] },   // /attendance only — /attendance/requests (Time Requests) is open to all
+  { key: 'ceo',        label: 'Briefing',         prefixes: ['/ceo'] },
+  { key: 'marketing',  label: 'Marketing',        prefixes: ['/marketing'] },
+  { key: 'onboarding', label: 'Onboarding',       prefixes: ['/onboarders'] },
+  { key: 'pm',         label: 'PM',               prefixes: ['/pm'] },
   { key: 'recruiting', label: 'Recruiting (ATS)', prefixes: ['/recruiting'] },
   { key: 'sales',      label: 'Sales',            prefixes: ['/sales'] },
-  { key: 'marketing',  label: 'Marketing',        prefixes: ['/marketing'] },
-  { key: 'pm',         label: 'PM',               prefixes: ['/pm'] },
-  { key: 'ceo',        label: 'CEO Briefing',     prefixes: ['/ceo'] },
-  { key: 'onboarding', label: 'Onboarding',       prefixes: ['/onboarders'] },
 ];
 
 export const GATEABLE_TOOL_KEYS: GateableToolKey[] = GATEABLE_TOOLS.map((t) => t.key);
@@ -47,24 +49,25 @@ export function hasToolAccess(
 // Keyed by the canonical department names (lowercased); a couple of aliases are
 // included for robustness against older team strings.
 const DEPARTMENT_TOOLS: Record<string, GateableToolKey[]> = {
-  'executive':       ['ceo'],
+  'executive':       [],
   'finance':         [],
   'human resource':  ['recruiting', 'onboarding'],
   'human resources': ['recruiting', 'onboarding'],
   'marketing':       ['marketing'],
   'sales':           ['sales'],
-  'technical':       ['pm'],
+  'technical':       [],
 };
 
-// Compute the day-one tool set for a new user from role + department:
-//   IC / Intern → Projects + their department's tool(s)
-//   Lead        → the above + Attendance (team overview)
+// Compute the day-one Team-Tool set for a new user from role + department:
+//   IC / Intern → their department's tool(s) only
+//   Lead        → the above + PM + Briefing + Attendance (cross-team lead tools)
 //   Admin       → everything (they bypass at runtime anyway)
+// Workspace tools (Projects, Time Requests, …) are open to all and never stored.
 export function defaultToolAccess(role: AppRole, team: string | null): GateableToolKey[] {
   if (role === 'admin') return [...GATEABLE_TOOL_KEYS];
-  const set = new Set<GateableToolKey>(['projects']);      // everyone gets Projects
+  const set = new Set<GateableToolKey>();
   for (const t of DEPARTMENT_TOOLS[String(team ?? '').trim().toLowerCase()] ?? []) set.add(t);
-  if (role === 'lead') set.add('attendance');              // leads get the team overview
+  if (role === 'lead') { set.add('pm'); set.add('ceo'); set.add('attendance'); }
   return [...set];
 }
 
@@ -164,7 +167,11 @@ export function canAccessPath(pathname: string, role: AppRole, toolAccess: strin
   // /learning and /learning/certificates are open to all signed-in users.
   if (pathname.startsWith('/admin')) return canAccessAdmin(role);
   if (pathname.startsWith('/rates')) return canAccessAdmin(role);
-  // The 8 checkbox-gated tools: access is per-user (users.tool_access).
+  // Time Requests is a Workspace tool — open to everyone. Checked before the
+  // '/attendance' gate below, whose prefix this path would otherwise match.
+  if (pathname.startsWith('/attendance/requests')) return true;
+  // The checkbox-gated Team Tools: access is per-user (users.tool_access).
+  // Workspace tools (e.g. /projects) aren't listed, so they fall through to open.
   for (const tool of GATEABLE_TOOLS) {
     if (tool.prefixes.some((p) => pathname.startsWith(p))) {
       return hasToolAccess(tool.key, role, toolAccess);

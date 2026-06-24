@@ -5,6 +5,7 @@ import {
   canAccessAdmin,
   canAccessPath,
   hasToolAccess,
+  defaultToolAccess,
   defaultLandingPath,
   roleLabel,
   isHrTeam,
@@ -80,28 +81,34 @@ describe('hasToolAccess', () => {
   });
 
   it('treats a missing/invalid set as no access', () => {
-    expect(hasToolAccess('projects', 'ic', null)).toBe(false);
-    expect(hasToolAccess('projects', 'ic', undefined)).toBe(false);
+    expect(hasToolAccess('attendance', 'ic', null)).toBe(false);
+    expect(hasToolAccess('attendance', 'ic', undefined)).toBe(false);
   });
 });
 
 describe('canAccessPath', () => {
   it('blocks /admin/* and /rates for non-admin (role-based, not grantable)', () => {
     expect(canAccessPath('/admin/users', 'ic')).toBe(false);
-    expect(canAccessPath('/admin/users', 'lead', ['projects', 'attendance'])).toBe(false);
+    expect(canAccessPath('/admin/users', 'lead', ['attendance'])).toBe(false);
     expect(canAccessPath('/admin/users', 'admin')).toBe(true);
     expect(canAccessPath('/rates', 'lead')).toBe(false);
     expect(canAccessPath('/rates', 'admin')).toBe(true);
   });
 
-  it('gates the 8 tools by the per-user tool_access set', () => {
+  it('gates the Team Tools by the per-user tool_access set', () => {
     expect(canAccessPath('/attendance', 'lead', [])).toBe(false);
     expect(canAccessPath('/attendance', 'lead', ['attendance'])).toBe(true);
     expect(canAccessPath('/attendance', 'admin', [])).toBe(true);            // admin bypass
     expect(canAccessPath('/sales/leads', 'ic', ['sales'])).toBe(true);
     expect(canAccessPath('/sales/leads', 'ic', [])).toBe(false);
-    expect(canAccessPath('/projects', 'ic', ['projects'])).toBe(true);
-    expect(canAccessPath('/projects', 'ic', [])).toBe(false);
+  });
+
+  it('treats Workspace tools (Projects, Time Requests) as open to all', () => {
+    expect(canAccessPath('/projects', 'ic', [])).toBe(true);
+    expect(canAccessPath('/projects', 'intern', [])).toBe(true);
+    // open even though the path starts with /attendance (a gated Team Tool)
+    expect(canAccessPath('/attendance/requests', 'ic', [])).toBe(true);
+    expect(canAccessPath('/attendance/requests', 'intern', [])).toBe(true);
   });
 
   it('allows any non-gated path for all roles', () => {
@@ -120,6 +127,41 @@ describe('defaultLandingPath', () => {
   it('sends lead and admin to /dashboard', () => {
     expect(defaultLandingPath('lead')).toBe('/dashboard');
     expect(defaultLandingPath('admin')).toBe('/dashboard');
+  });
+});
+
+describe('defaultToolAccess', () => {
+  it('gives a new HR hire (IC/intern) recruiting + onboarding only', () => {
+    expect(defaultToolAccess('ic', 'Human Resource').sort()).toEqual(['onboarding', 'recruiting']);
+    expect(defaultToolAccess('intern', 'Human Resource').sort()).toEqual(['onboarding', 'recruiting']);
+  });
+
+  it('gives a department IC just their department tool', () => {
+    expect(defaultToolAccess('ic', 'Sales')).toEqual(['sales']);
+    expect(defaultToolAccess('ic', 'Marketing')).toEqual(['marketing']);
+  });
+
+  it('gives departments without a default tool (Technical/Executive/Finance) nothing', () => {
+    expect(defaultToolAccess('ic', 'Technical')).toEqual([]);
+    expect(defaultToolAccess('ic', 'Executive')).toEqual([]);
+    expect(defaultToolAccess('ic', 'Finance')).toEqual([]);
+  });
+
+  it('adds PM + Briefing + Attendance for any lead, on top of their department tool', () => {
+    expect(defaultToolAccess('lead', 'Sales').sort()).toEqual(['attendance', 'ceo', 'pm', 'sales']);
+    expect(defaultToolAccess('lead', 'Technical').sort()).toEqual(['attendance', 'ceo', 'pm']);
+  });
+
+  it('never includes Workspace tools (projects is open to all)', () => {
+    expect(defaultToolAccess('ic', 'Sales')).not.toContain('projects');
+    expect(defaultToolAccess('lead', 'Human Resource')).not.toContain('projects');
+    expect(defaultToolAccess('admin', null)).not.toContain('projects');
+  });
+
+  it('gives admins every gateable tool', () => {
+    expect(defaultToolAccess('admin', null)).toEqual(
+      expect.arrayContaining(['attendance', 'ceo', 'marketing', 'onboarding', 'pm', 'recruiting', 'sales']),
+    );
   });
 });
 

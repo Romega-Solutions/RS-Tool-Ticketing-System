@@ -60,7 +60,7 @@ function TimeCell({ label, current, requested }: { label: string; current: strin
   );
 }
 
-export function RequestsQueueClient({ requests }: { requests: QueueRequest[] }) {
+export function RequestsQueueClient({ requests, canDecide = true }: { requests: QueueRequest[]; canDecide?: boolean }) {
   const router = useRouter();
   const [busyId, setBusyId]   = useState<number | null>(null);
   const [denyId, setDenyId]   = useState<number | null>(null);
@@ -95,7 +95,9 @@ export function RequestsQueueClient({ requests }: { requests: QueueRequest[] }) 
       <header>
         <h1 className="font-serif text-2xl font-semibold text-(--rs-neutral-grey-900)">Time-correction requests</h1>
         <p className="mt-1 text-sm text-(--rs-neutral-grey-500)">
-          Review clock-time corrections from your team. Approving applies the new times to the timesheet; declining requires a reason.
+          {canDecide
+            ? 'Review clock-time corrections from your team. Approving applies the new times to the timesheet; declining requires a reason.'
+            : 'Track the status of the clock-time corrections you’ve submitted for approval.'}
         </p>
       </header>
 
@@ -136,7 +138,9 @@ export function RequestsQueueClient({ requests }: { requests: QueueRequest[] }) 
               </a>
             )}
 
-            {denyId === r.id ? (
+            {!canDecide ? (
+              <p className="text-xs font-medium text-(--rs-accent-700)">Awaiting your team lead’s approval</p>
+            ) : denyId === r.id ? (
               <div className="space-y-2 rounded-lg border border-red-200 bg-red-50/50 p-3">
                 <label htmlFor={`deny-${r.id}`} className="block text-xs font-medium text-(--rs-neutral-grey-700)">
                   Reason for declining <span className="text-red-600">*</span>

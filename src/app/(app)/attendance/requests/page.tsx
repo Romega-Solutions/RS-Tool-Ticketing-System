@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
-import { hasToolAccess, defaultLandingPath } from '@/lib/rbac';
+import { canAccessReports } from '@/lib/rbac';
 import { signTimesheetEditDocument } from '@/lib/storage';
 import { RequestsQueueClient, type QueueRequest } from './requests-queue-client';
 
@@ -10,7 +10,10 @@ export const dynamic = 'force-dynamic';
 export default async function TimeEditRequestsPage() {
   const session = await getSession();
   if (!session) redirect('/login');
-  if (!hasToolAccess('attendance', session.role, session.toolAccess)) redirect(defaultLandingPath(session.role));
+
+  // Open to all (Time Requests is a Workspace tool). Only leads/admins can act
+  // on requests; everyone else just tracks the requests they filed themselves.
+  const canDecide = canAccessReports(session.role);
 
   const admin = createAdminClient();
 
@@ -35,8 +38,10 @@ export default async function TimeEditRequestsPage() {
 
   const isAdmin = session.role === 'admin';
 
-  // Leads only see requests from their own team.
+  // Admins see everything; leads see their own team's requests; everyone else
+  // (IC / intern) sees only the requests they filed themselves.
   const visible = rows.filter((r: Record<string, unknown>) => {
+    if (!canDecide) return (r.user_id as number) === session.id;
     if (isAdmin) return true;
     const requester = userMap.get(r.user_id as number);
     return (requester?.team ?? '') === (session.team ?? '');
@@ -64,5 +69,5 @@ export default async function TimeEditRequestsPage() {
     };
   }));
 
-  return <RequestsQueueClient requests={requests} />;
+  return <RequestsQueueClient requests={requests} canDecide={canDecide} />;
 }

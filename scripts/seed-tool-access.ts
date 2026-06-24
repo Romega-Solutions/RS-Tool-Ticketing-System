@@ -16,11 +16,9 @@ import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import {
   normalizeRole,
-  canAccessReports,
-  canAccessLeadTool,
+  defaultToolAccess,
   GATEABLE_TOOL_KEYS,
   type GateableToolKey,
-  type LeadToolKey,
 } from '../src/lib/rbac';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -36,18 +34,11 @@ const sb = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-const LEAD_TOOLS: LeadToolKey[] = ['recruiting', 'sales', 'marketing', 'pm', 'ceo', 'onboarding'];
-
-// Day-one seed: replicate the pre-feature access rules.
+// Day-one seed = the current default Team-Tool set for this role + department.
+// Single source of truth: defaultToolAccess() in src/lib/rbac.ts. (Workspace
+// tools like Projects / Time Requests are open to all and never stored here.)
 function computeSeed(role: string, team: string | null): GateableToolKey[] {
-  const r = normalizeRole(role);
-  if (r === 'admin') return [...GATEABLE_TOOL_KEYS];     // admins get everything
-  const set: GateableToolKey[] = ['projects'];           // projects was open to all
-  if (canAccessReports(r)) set.push('attendance');       // attendance was lead/admin
-  for (const t of LEAD_TOOLS) {
-    if (canAccessLeadTool(t, r, team)) set.push(t);
-  }
-  return set;
+  return defaultToolAccess(normalizeRole(role), team);
 }
 
 async function main() {
