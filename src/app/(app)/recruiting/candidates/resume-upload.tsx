@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { FileUp, Loader2, Sparkles, RotateCcw, FileText, ChevronRight } from 'lucide-react';
+import { FileUp, Loader2, Sparkles, RotateCcw, FileText, ChevronRight, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -11,7 +11,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { createCandidateFromResume, parseResumeForCandidate, type ParseResumeResult } from './actions';
+import { createCandidateFromResume, parseResumeForCandidate, uploadResumeFile, type ParseResumeResult } from './actions';
 
 type Mode = 'create' | 'reparse';
 type Parser = 'ai' | 'regex';
@@ -32,6 +32,7 @@ const HINT: Record<string, string> = {
   NOT_FOUND:             'Candidate not found.',
   DB_ERROR:              'Database error while saving.',
   INVALID_ID:            'Invalid candidate id.',
+  UPLOAD_FAILED:         'Could not store the resume — try again.',
   UNKNOWN_ERROR:         'Unknown error from n8n.',
 };
 
@@ -201,6 +202,74 @@ function ParserChoice({
       </div>
       <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-(--rs-neutral-grey-300) transition-transform group-hover:translate-x-0.5 group-hover:text-(--rs-primary-500)" />
     </button>
+  );
+}
+
+/**
+ * Store-only resume upload (no parsing). Sets `resume_url` so the candidate's
+ * "Download resume" button appears. Lives in the Actions panel next to Download.
+ */
+export function UploadResumeButton({
+  candidateId,
+  hasResume = false,
+}: {
+  candidateId: number;
+  hasResume?:  boolean;
+}) {
+  const router = useRouter();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [isPending, start] = useTransition();
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  function handleFile(file: File | null) {
+    if (!file) return;
+    setErrorMsg(null);
+
+    start(async () => {
+      const fd = new FormData();
+      fd.append('resume', file);
+
+      let res: Awaited<ReturnType<typeof uploadResumeFile>>;
+      try {
+        res = await uploadResumeFile(candidateId, fd);
+      } catch (err) {
+        setErrorMsg(err instanceof Error ? err.message : 'Upload failed');
+        return;
+      }
+
+      if (inputRef.current) inputRef.current.value = '';
+
+      if (!res.ok) {
+        setErrorMsg(HINT[res.code] ?? res.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <input
+        ref={inputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        className="hidden"
+        onChange={(e) => handleFile(e.target.files?.[0] ?? null)}
+        disabled={isPending}
+      />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={isPending}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-(--rs-neutral-grey-200) bg-white px-3 py-1.5 text-xs font-semibold text-(--rs-neutral-grey-800) hover:bg-(--rs-neutral-grey-50) transition-colors disabled:opacity-60"
+      >
+        {isPending
+          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          : <Upload className="w-3.5 h-3.5" />}
+        {isPending ? 'Uploading…' : hasResume ? 'Replace resume' : 'Upload resume'}
+      </button>
+      {errorMsg && <p className="text-[11px] text-red-600">{errorMsg}</p>}
+    </div>
   );
 }
 

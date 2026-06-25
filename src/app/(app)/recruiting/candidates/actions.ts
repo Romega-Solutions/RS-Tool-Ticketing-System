@@ -872,6 +872,72 @@ export async function parseResumeForCandidate(
   return { ok: true, parsed: result.data, candidateId };
 }
 
+type UploadResumeResult = { ok: true } | { ok: false; code: string; error: string };
+
+/**
+ * Attach a downloadable resume PDF to an existing candidate WITHOUT parsing.
+ * Sets `resume_url`, which is what surfaces the "Download resume" button on the
+ * candidate page. Unlike `parseResumeForCandidate`, this never touches n8n, so
+ * it works for manually-added candidates and when the parser is unavailable.
+ */
+export async function uploadResumeFile(
+  candidateId: number,
+  formData: FormData,
+): Promise<UploadResumeResult> {
+  const session = await requireSession();
+  if (!Number.isInteger(candidateId) || candidateId <= 0) {
+    return { ok: false, code: 'INVALID_ID', error: 'Invalid candidate id' };
+  }
+
+  const file = formData.get('resume');
+  if (!(file instanceof File)) {
+    return { ok: false, code: 'NO_FILE', error: 'No resume file provided' };
+  }
+  if (file.size === 0) {
+    return { ok: false, code: 'EMPTY_FILE', error: 'The file is empty' };
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    return { ok: false, code: 'FILE_TOO_LARGE', error: 'Resume must be under 10 MB' };
+  }
+  const head = new Uint8Array(await file.slice(0, 5).arrayBuffer());
+  const isPdf = head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46 && head[4] === 0x2d;
+  if (!isPdf) {
+    return { ok: false, code: 'INVALID_FILE_TYPE', error: 'Resume must be a valid PDF file' };
+  }
+
+  const supabase = createAdminClient();
+  const { data: existing } = await supabase
+    .from('candidates')
+    .select('full_name, position')
+    .eq('id', candidateId)
+    .maybeSingle();
+  if (!existing) {
+    return { ok: false, code: 'NOT_FOUND', error: 'Candidate not found' };
+  }
+
+  const signedUrl = await tryUploadResume({
+    supabase,
+    candidateId,
+    position: existing.position ?? null,
+    fullName: existing.full_name || 'candidate',
+    file,
+  });
+  if (!signedUrl) {
+    return { ok: false, code: 'UPLOAD_FAILED', error: 'Could not store the resume — try again.' };
+  }
+
+  await writeHistory(supabase, candidateId, session, [{
+    field:    'resume',
+    oldValue: null,
+    newValue: file.name,
+    summary:  `Uploaded resume '${file.name}'`,
+  }]);
+
+  revalidatePath('/recruiting/candidates');
+  revalidatePath(`/recruiting/candidates/${candidateId}`);
+  return { ok: true };
+}
+
 export async function createCandidateFromResume(formData: FormData): Promise<ParseResumeResult> {
   const session = await requireSession();
 

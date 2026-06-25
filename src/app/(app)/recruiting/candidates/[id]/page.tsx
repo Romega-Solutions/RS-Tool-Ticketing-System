@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { CandidateStatus, CandidateRating, CandidateDelete } from '../candidate-row';
 import { TalentConsentPanel } from '../talent-consent-panel';
-import { ResumeUploadCard } from '../resume-upload';
+import { ResumeUploadCard, UploadResumeButton } from '../resume-upload';
 import { CandidateEditForm } from '../candidate-edit-form';
 import { ResendEmailButton } from './resend-email-button';
 import { formatPhoneNumber } from '@/lib/format';
@@ -136,17 +136,27 @@ export default async function CandidateDetailPage({
 
   const c = data as Candidate;
 
-  // Resolve "Added by" name (created_by → users.name; fall back to assigned_to).
+  // "Added by" = the human who manually created the record (created_by).
+  // Public applicants have created_by = null — nobody added them, they applied
+  // themselves — and assigned_to points at the requisition owner instead. We
+  // resolve both so the panel can say "Applied online" + "Assigned to <owner>"
+  // rather than misleadingly crediting the requisition owner as the adder.
   let addedByName: string | null = null;
-  const lookupId = c.created_by ?? c.assigned_to;
-  if (lookupId) {
-    const { data: u } = await supabase
+  let assignedToName: string | null = null;
+  const lookupIds = [c.created_by, c.assigned_to].filter(
+    (v): v is number => typeof v === 'number',
+  );
+  if (lookupIds.length) {
+    const { data: us } = await supabase
       .from('users')
-      .select('name')
-      .eq('id', lookupId)
-      .maybeSingle();
-    addedByName = (u?.name as string | undefined) ?? null;
+      .select('id, name')
+      .in('id', lookupIds);
+    const nameOf = (id: number | null) =>
+      (id != null ? (us?.find((u) => u.id === id)?.name as string | undefined) : undefined) ?? null;
+    addedByName    = nameOf(c.created_by);
+    assignedToName = nameOf(c.assigned_to);
   }
+  const selfApplied = c.created_by == null;
 
   // History feed (newest → oldest). Table may not exist on older deploys.
   let history: HistoryRow[] = [];
@@ -255,11 +265,15 @@ export default async function CandidateDetailPage({
                 <span className="inline-flex items-center gap-1.5">
                   <Calendar className="w-3 h-3" /> Added {formatDate(c.created_at)}
                 </span>
-                {addedByName && (
+                {addedByName ? (
                   <span className="inline-flex items-center gap-1.5">
                     <User2 className="w-3 h-3" /> Added by <strong className="text-(--rs-neutral-grey-700)">{addedByName}</strong>
                   </span>
-                )}
+                ) : selfApplied ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Globe className="w-3 h-3" /> Applied online
+                  </span>
+                ) : null}
                 {c.source && (
                   <span className="inline-flex items-center gap-1.5">
                     <Tag className="w-3 h-3" /> {SOURCE_LABEL[c.source] ?? c.source}
@@ -418,7 +432,19 @@ export default async function CandidateDetailPage({
             <KvRow label="Rating"   value={c.rating ? `${c.rating}/5` : '—'} />
             <KvRow label="Source"   value={c.source ? (SOURCE_LABEL[c.source] ?? c.source) : '—'} />
             <KvRow label="Added"    value={formatDate(c.created_at) ?? '—'} />
-            <KvRow label="Added by" value={addedByName ?? <span className="text-(--rs-neutral-grey-400)">—</span>} />
+            <KvRow
+              label="Added by"
+              value={
+                addedByName
+                  ? addedByName
+                  : selfApplied
+                    ? <span className="text-(--rs-neutral-grey-600)">Applied online</span>
+                    : <span className="text-(--rs-neutral-grey-400)">—</span>
+              }
+            />
+            {assignedToName && c.assigned_to !== c.created_by && (
+              <KvRow label="Assigned to" value={assignedToName} />
+            )}
             <KvRow label="Parsed"   value={c.parsed_at ? formatDate(c.parsed_at) : <span className="text-(--rs-neutral-grey-400)">Not yet</span>} />
             <KvRow
               label="Last email"
@@ -438,8 +464,7 @@ export default async function CandidateDetailPage({
           </div>
 
           {/* Resume + email controls */}
-          {(c.resume_url || lastFailedEmailContext) && (
-            <div className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-4 space-y-2.5">
+          <div className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-4 space-y-2.5">
               <h3 className="text-[10px] font-bold uppercase tracking-widest text-(--rs-neutral-grey-500)">Actions</h3>
               {c.resume_url && (
                 <a
@@ -451,6 +476,7 @@ export default async function CandidateDetailPage({
                   <Download className="w-3.5 h-3.5" /> Download resume
                 </a>
               )}
+              <UploadResumeButton candidateId={c.id} hasResume={!!c.resume_url} />
               {lastFailedEmailContext && (
                 <div className="space-y-1.5">
                   <p className="inline-flex items-center gap-1 text-[11px] text-red-700">
@@ -463,7 +489,6 @@ export default async function CandidateDetailPage({
                 </div>
               )}
             </div>
-          )}
 
           {/* History */}
           <div className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-4">
