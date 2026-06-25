@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { AttendanceExportSheet } from '@/components/attendance-export-sheet';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { PersonAvatar } from '@/components/person-avatar';
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock, Search, X, Pencil, LogOut, Save, Trash2, ShieldCheck, Check, History, AlertTriangle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock, Search, X, Pencil, LogOut, Save, Trash2, ShieldCheck, Check, History } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -191,8 +191,6 @@ function TimesheetDetailPanel({
   const statusChanged = detailDays.some(d => (dayDraft[d.key] ?? null) !== (initialStatuses[d.key] ?? null));
   const notesChanged  = (notesDraft ?? '') !== (notes ?? '');
   const dirty         = statusChanged || notesChanged;
-  // A reason is mandatory only when an attendance status actually changed.
-  const needsNote     = statusChanged && !notesDraft.trim();
 
   useEffect(() => {
     let cancelled = false;
@@ -478,17 +476,11 @@ function TimesheetDetailPanel({
                 )}
                 {isAdmin && (
                   <div className="mt-2 space-y-1.5">
-                    {needsNote && (
-                      <p className="flex items-center gap-1 text-[11px] text-(--rs-accent-700)">
-                        <AlertTriangle className="w-3 h-3 shrink-0" />
-                        A note is required when you change an attendance status.
-                      </p>
-                    )}
                     <div className="flex justify-end">
                       <Button
                         size="sm"
                         onClick={saveAttendance}
-                        disabled={adminBusy || !dirty || needsNote}
+                        disabled={adminBusy || !dirty}
                         className="gap-1.5"
                       >
                         {adminBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
