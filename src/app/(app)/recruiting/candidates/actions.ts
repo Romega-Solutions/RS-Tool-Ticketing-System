@@ -771,6 +771,12 @@ type ParseSuccess = { ok: true;  parsed: ParsedResume; candidateId: number };
 type ParseFailure = { ok: false; error: string; code: string };
 export type ParseResumeResult = ParseSuccess | ParseFailure;
 
+// The recruiter picks 'ai' (Groq) or 'regex' (key-free) in the upload popup.
+// Defaults to 'regex' so any caller that doesn't send the field is unaffected.
+function readParser(formData: FormData): 'regex' | 'ai' {
+  return formData.get('parser') === 'ai' ? 'ai' : 'regex';
+}
+
 function applyParsedFieldsToRow(parsed: ParsedResume, existing: {
   full_name?: string | null;
   email?:     string | null;
@@ -818,7 +824,7 @@ export async function parseResumeForCandidate(
     return { ok: false, code: 'NO_FILE', error: 'No resume file provided' };
   }
 
-  const result = await parseResumeWithN8n(file, candidateId);
+  const result = await parseResumeWithN8n(file, candidateId, readParser(formData));
   if (!result.success) return { ok: false, code: result.code, error: result.error };
 
   const supabase = createAdminClient();
@@ -874,7 +880,7 @@ export async function createCandidateFromResume(formData: FormData): Promise<Par
     return { ok: false, code: 'NO_FILE', error: 'No resume file provided' };
   }
 
-  const result = await parseResumeWithN8n(file);
+  const result = await parseResumeWithN8n(file, undefined, readParser(formData));
   if (!result.success) return { ok: false, code: result.code, error: result.error };
 
   const parsed = result.data;

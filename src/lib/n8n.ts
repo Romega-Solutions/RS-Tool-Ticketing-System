@@ -1,7 +1,10 @@
-// Typed client for the self-hosted n8n "Romega ATS — Resume Extractor (Regex, No API Key)"
-// workflow. No external AI API keys needed — extraction is pure regex inside n8n.
+// Typed client for the self-hosted n8n resume extractors. Two workflows share the
+// same form-trigger contract and {success,data} response shape; the recruiter picks
+// one in the "Add from resume" popup (see ResumeParser):
+//   - 'regex' → "Romega ATS — Resume Extractor (Regex, No API Key)"  (N8N_RESUME_PARSER_URL)
+//   - 'ai'    → "Romega ATS — Resume Extractor (AI / Groq)"          (N8N_RESUME_PARSER_AI_URL)
+//             Groq key lives in an n8n httpHeaderAuth credential, not in this app.
 //
-// Workflow JSON: n8n/Romega ATS — Resume Extractor (Regex, No API Key).json
 // Form trigger fields: "Resume File" (file, required, PDF only), "Candidate ID" (text, optional).
 // PDF only: DOCX text extraction needs node modules (zlib / jszip / adm-zip) that the
 // n8n Code sandbox blocks by default. To allow DOCX, set
@@ -61,12 +64,14 @@ const ALLOWED_MIME_TYPES = new Set([
   'application/pdf',
 ]);
 
-export function getResumeParserUrl(): string {
-  const url = process.env.N8N_RESUME_PARSER_URL;
-  if (!url) {
-    throw new Error('N8N_RESUME_PARSER_URL is not configured. Add it to .env.');
-  }
-  return url;
+// Which n8n extractor to hit. 'regex' = the key-free workflow (default, used by
+// the public /apply intake). 'ai' = the Groq-backed workflow chosen from the
+// recruiter's "Add from resume" popup — far more accurate on varied layouts.
+export type ResumeParser = 'regex' | 'ai';
+
+export function getResumeParserUrl(parser: ResumeParser = 'regex'): string | null {
+  if (parser === 'ai') return process.env.N8N_RESUME_PARSER_AI_URL || null;
+  return process.env.N8N_RESUME_PARSER_URL || null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -295,6 +300,7 @@ export async function notifyOnboardingWebhook(
 export async function parseResumeWithN8n(
   file: File,
   candidateId?: string | number,
+  parser: ResumeParser = 'regex',
 ): Promise<ResumeParseResult> {
   if (!file || file.size === 0) {
     return { success: false, code: 'EMPTY_FILE', error: 'No file provided.' };
@@ -316,7 +322,12 @@ export async function parseResumeWithN8n(
     };
   }
 
-  const url = getResumeParserUrl();
+  const url = getResumeParserUrl(parser);
+  if (!url) {
+    return parser === 'ai'
+      ? { success: false, code: 'AI_NOT_CONFIGURED', error: 'AI parser is not configured (set N8N_RESUME_PARSER_AI_URL).' }
+      : { success: false, code: 'PARSER_NOT_CONFIGURED', error: 'Resume parser is not configured (set N8N_RESUME_PARSER_URL).' };
+  }
 
   // n8n's Form Trigger names binary keys after the visible field labels.
   // The regex workflow uses "Resume File" and "Candidate ID" (with the space).
