@@ -65,6 +65,25 @@ function parseHourlyRate(
   return { ok: true, value: Math.round(n * 100) / 100 };
 }
 
+// Optional whole-number approved weekly hours — the per-user base for the
+// overtime cap/allowance. Defaults to 15 when omitted; bounded 1–60.
+function parseApprovedHours(raw: unknown): { ok: true; value: number } | { ok: false; error: string } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, value: 15 };
+  const n = typeof raw === 'number' ? raw : Number(String(raw).trim());
+  if (!Number.isInteger(n)) return { ok: false, error: 'Approved hours must be a whole number' };
+  if (n < 1 || n > 60) return { ok: false, error: 'Approved hours must be between 1 and 60' };
+  return { ok: true, value: n };
+}
+
+// Optional 'HH:MM' 24-hour PHT schedule time. '' / null clears it.
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+function parseHhmm(raw: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, value: null };
+  const s = String(raw).trim();
+  if (!HHMM_RE.test(s)) return { ok: false, error: 'Schedule time must be HH:MM (24-hour)' };
+  return { ok: true, value: s };
+}
+
 // Find a Supabase Auth user by email. supabase-js admin has no direct email
 // lookup, so we paginate listUsers. Used to recover orphaned auth accounts
 // (in auth.users but with no public.users profile row).
@@ -89,7 +108,7 @@ export const GET = route(async () => {
   const admin = createAdminClient();
   const { data } = await admin
     .from('users')
-    .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active, tool_access, date_of_birth, start_date, end_date, drive_url')
+    .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active, tool_access, date_of_birth, start_date, end_date, drive_url, approved_hours_per_week, schedule_pht_start, schedule_pht_end, setup_email_sent_at')
     .order('name');
   const allUsers = data ?? [];
 
@@ -109,6 +128,10 @@ export const GET = route(async () => {
     startDate:     u.start_date ?? null,
     endDate:       u.end_date ?? null,
     driveUrl:      u.drive_url ?? null,
+    approvedHoursPerWeek: u.approved_hours_per_week == null ? 15 : Number(u.approved_hours_per_week),
+    schedulePhtStart: u.schedule_pht_start ?? null,
+    schedulePhtEnd:   u.schedule_pht_end ?? null,
+    setupEmailSentAt: u.setup_email_sent_at ?? null,
   }));
 
   return NextResponse.json({ users: mapped });
@@ -133,6 +156,9 @@ export const POST = route(async (req: Request) => {
     startDate?: string | null;
     endDate?: string | null;
     driveUrl?: string | null;
+    approvedHoursPerWeek?: number | string | null;
+    schedulePhtStart?: string | null;
+    schedulePhtEnd?: string | null;
   } = {};
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
@@ -148,6 +174,12 @@ export const POST = route(async (req: Request) => {
   if (!end.ok) return NextResponse.json({ error: `End date: ${end.error}` }, { status: 400 });
   const drive = parseDriveUrl(body.driveUrl);
   if (!drive.ok) return NextResponse.json({ error: drive.error }, { status: 400 });
+  const approvedHours = parseApprovedHours(body.approvedHoursPerWeek);
+  if (!approvedHours.ok) return NextResponse.json({ error: approvedHours.error }, { status: 400 });
+  const phtStart = parseHhmm(body.schedulePhtStart);
+  if (!phtStart.ok) return NextResponse.json({ error: `Schedule start: ${phtStart.error}` }, { status: 400 });
+  const phtEnd = parseHhmm(body.schedulePhtEnd);
+  if (!phtEnd.ok) return NextResponse.json({ error: `Schedule end: ${phtEnd.error}` }, { status: 400 });
 
   const email    = body.email?.trim().toLowerCase() ?? '';
   const password = body.password?.trim() ?? '';
@@ -244,12 +276,15 @@ export const POST = route(async (req: Request) => {
         start_date:    start.value,
         end_date:      end.value,
         drive_url:     drive.value,
+        approved_hours_per_week: approvedHours.value,
+        schedule_pht_start: phtStart.value,
+        schedule_pht_end:   phtEnd.value,
         tool_access:   autoToolAccess,
         is_active:  1,
         created_at: now,
         updated_at: now,
       })
-      .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active, tool_access, date_of_birth, start_date, end_date, drive_url')
+      .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active, tool_access, date_of_birth, start_date, end_date, drive_url, approved_hours_per_week, schedule_pht_start, schedule_pht_end, setup_email_sent_at')
       .single();
 
     if (dbErr) throw new Error(dbErr.message);
@@ -278,6 +313,10 @@ export const POST = route(async (req: Request) => {
         startDate:     inserted.start_date ?? null,
         endDate:       inserted.end_date ?? null,
         driveUrl:      inserted.drive_url ?? null,
+        approvedHoursPerWeek: inserted.approved_hours_per_week == null ? 15 : Number(inserted.approved_hours_per_week),
+        schedulePhtStart: inserted.schedule_pht_start ?? null,
+        schedulePhtEnd:   inserted.schedule_pht_end ?? null,
+        setupEmailSentAt: inserted.setup_email_sent_at ?? null,
       },
     }, { status: 201 });
   } catch (err) {
@@ -308,6 +347,9 @@ export const PATCH = route(async (req: Request) => {
     startDate?: string | null;
     endDate?: string | null;
     driveUrl?: string | null;
+    approvedHoursPerWeek?: number | string | null;
+    schedulePhtStart?: string | null;
+    schedulePhtEnd?: string | null;
   } = {};
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
@@ -365,6 +407,21 @@ export const PATCH = route(async (req: Request) => {
     if (!u.ok) return NextResponse.json({ error: u.error }, { status: 400 });
     updates.drive_url = u.value;
   }
+  if (body.approvedHoursPerWeek !== undefined) {
+    const a = parseApprovedHours(body.approvedHoursPerWeek);
+    if (!a.ok) return NextResponse.json({ error: a.error }, { status: 400 });
+    updates.approved_hours_per_week = a.value;
+  }
+  if (body.schedulePhtStart !== undefined) {
+    const t = parseHhmm(body.schedulePhtStart);
+    if (!t.ok) return NextResponse.json({ error: `Schedule start: ${t.error}` }, { status: 400 });
+    updates.schedule_pht_start = t.value;
+  }
+  if (body.schedulePhtEnd !== undefined) {
+    const t = parseHhmm(body.schedulePhtEnd);
+    if (!t.ok) return NextResponse.json({ error: `Schedule end: ${t.error}` }, { status: 400 });
+    updates.schedule_pht_end = t.value;
+  }
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
@@ -384,7 +441,7 @@ export const PATCH = route(async (req: Request) => {
 
   const { data: updated } = await admin
     .from('users')
-    .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active, tool_access, date_of_birth, start_date, end_date, drive_url')
+    .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active, tool_access, date_of_birth, start_date, end_date, drive_url, approved_hours_per_week, schedule_pht_start, schedule_pht_end, setup_email_sent_at')
     .eq('id', body.id)
     .maybeSingle();
 
@@ -404,7 +461,8 @@ export const PATCH = route(async (req: Request) => {
     const roleChanged = String(before.role) !== String(updated.role);
     const activeChanged = Number(before.is_active) !== Number(updated.is_active);
     const otherFieldChanged = body.team !== undefined || body.memberCode !== undefined || body.hourlyRateUsd !== undefined
-      || body.dateOfBirth !== undefined || body.startDate !== undefined || body.endDate !== undefined || body.driveUrl !== undefined;
+      || body.dateOfBirth !== undefined || body.startDate !== undefined || body.endDate !== undefined || body.driveUrl !== undefined
+      || body.approvedHoursPerWeek !== undefined || body.schedulePhtStart !== undefined || body.schedulePhtEnd !== undefined;
     if (roleChanged || activeChanged || otherFieldChanged) {
       const { action, details } = deriveUserPatchAction(
         { role: String(before.role), is_active: Number(before.is_active) },
@@ -431,6 +489,10 @@ export const PATCH = route(async (req: Request) => {
       startDate:     updated.start_date ?? null,
       endDate:       updated.end_date ?? null,
       driveUrl:      updated.drive_url ?? null,
+      approvedHoursPerWeek: updated.approved_hours_per_week == null ? 15 : Number(updated.approved_hours_per_week),
+      schedulePhtStart: updated.schedule_pht_start ?? null,
+      schedulePhtEnd:   updated.schedule_pht_end ?? null,
+      setupEmailSentAt: updated.setup_email_sent_at ?? null,
     },
   });
 });

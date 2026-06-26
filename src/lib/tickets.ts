@@ -12,6 +12,7 @@ export interface PlaneProject {
   description: string;
   network: number;
   team: string | null;
+  autoArchiveDoneDays: number | null;   // null/0 = off
 }
 
 export interface PlaneState {
@@ -61,6 +62,7 @@ export type ProjectPatch = {
   description?: string | null;
   team?: string | null;
   archived?: number;
+  autoArchiveDoneDays?: number | null;   // null/0 = off
 };
 
 type Row = Record<string, unknown>;
@@ -73,6 +75,7 @@ function mapProject(r: Row): PlaneProject {
     description: String(r.description ?? ''),
     network: Number(r.network ?? 2),
     team: r.team ? String(r.team) : null,
+    autoArchiveDoneDays: r.auto_archive_done_days == null ? null : Number(r.auto_archive_done_days),
   };
 }
 
@@ -99,6 +102,13 @@ export function normalizeProjectPatch(patch: ProjectPatch): ProjectPatch {
     normalized.archived = patch.archived;
   }
 
+  if (patch.autoArchiveDoneDays !== undefined) {
+    // Clamp to a sane range; null or <=0 means "off".
+    const d = patch.autoArchiveDoneDays;
+    normalized.autoArchiveDoneDays =
+      d == null || d <= 0 ? null : Math.min(Math.floor(d), 365);
+  }
+
   return normalized;
 }
 
@@ -115,7 +125,7 @@ function mapState(r: Row): PlaneState {
 export async function getProjects(opts?: { team?: string | null }): Promise<PlaneProject[]> {
   const sb = createAdminClient();
   let q = sb.from('projects')
-    .select('id, name, identifier, description, network, team')
+    .select('id, name, identifier, description, network, team, auto_archive_done_days')
     .eq('archived', 0)
     .order('name');
   // Empty string or `null` is treated as "no filter".
@@ -170,7 +180,9 @@ export async function getWorkItems(
     .select('id, sequence_id, name, description, priority, state_id, cycle_id, target_date, completed_at, created_at, updated_at, work_item_assignees(user_id, users(email)), work_item_labels(label_id)')
     .eq('project_id', Number(projectId))
     .eq('archived', 0)
-    .order('sequence_id');
+    // Newest task first (highest sequence_id) — board columns and My Tasks read
+    // this order top-to-bottom, so descending puts the latest work at the top.
+    .order('sequence_id', { ascending: false });
 
   if (error) throw new PlaneApiError(500, `work-items/${projectId}`);
 
@@ -346,14 +358,135 @@ export async function patchWorkItem(
 export async function archiveWorkItem(itemId: string): Promise<number> {
   const sb = createAdminClient();
   const id = Number(itemId);
+  const nowIso = new Date().toISOString();
   const { data: before } = await sb.from('work_items')
     .select('project_id').eq('id', id).maybeSingle();
   if (!before) throw new PlaneApiError(404, `work-items/${itemId}`);
   const { error } = await sb.from('work_items')
-    .update({ archived: 1, updated_at: new Date().toISOString() })
+    .update({ archived: 1, archived_at: nowIso, updated_at: nowIso })
     .eq('id', id);
   if (error) throw new PlaneApiError(502, `work-items/${itemId} archive`);
   return Number((before as Row).project_id);
+}
+
+// Un-archive a task: it reappears in its state column on the board.
+export async function restoreWorkItem(itemId: string): Promise<number> {
+  const sb = createAdminClient();
+  const id = Number(itemId);
+  const { data: before } = await sb.from('work_items')
+    .select('project_id').eq('id', id).maybeSingle();
+  if (!before) throw new PlaneApiError(404, `work-items/${itemId}`);
+  const { error } = await sb.from('work_items')
+    .update({ archived: 0, archived_at: null, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw new PlaneApiError(502, `work-items/${itemId} restore`);
+  return Number((before as Row).project_id);
+}
+
+// State ids belonging to the project's "completed" (Done) group.
+async function getCompletedStateIds(projectId: string): Promise<number[]> {
+  const states = await getProjectStates(projectId);
+  return states
+    .filter(s => isCompletedGroup(s.group.toLowerCase()))
+    .map(s => Number(s.id));
+}
+
+// Manual bulk archive: clear every (non-archived) Done task in one project.
+// Returns the archived item ids so the board can drop them optimistically.
+export async function bulkArchiveCompleted(
+  projectId: string,
+  actorId: number,
+): Promise<{ count: number; ids: number[] }> {
+  const sb = createAdminClient();
+  const doneStateIds = await getCompletedStateIds(projectId);
+  if (!doneStateIds.length) return { count: 0, ids: [] };
+
+  const { data, error } = await sb.from('work_items')
+    .select('id')
+    .eq('project_id', Number(projectId))
+    .eq('archived', 0)
+    .in('state_id', doneStateIds);
+  if (error) throw new PlaneApiError(500, `work-items/${projectId} done`);
+
+  const ids = (data ?? []).map((r: Row) => Number(r.id));
+  if (!ids.length) return { count: 0, ids: [] };
+
+  const nowIso = new Date().toISOString();
+  const { error: upErr } = await sb.from('work_items')
+    .update({ archived: 1, archived_at: nowIso, updated_at: nowIso })
+    .in('id', ids);
+  if (upErr) throw new PlaneApiError(502, `work-items/${projectId} bulk archive`);
+
+  await Promise.all(ids.map(id => logActivity(id, actorId, 'archived')));
+  return { count: ids.length, ids };
+}
+
+export interface ArchivedWorkItem {
+  id: string;
+  sequence_id: number;
+  name: string;
+  priority: string;
+  state_name: string;
+  archived_at: string | null;
+}
+
+// The project Archive view: archived tasks, most-recently-archived first.
+export async function getArchivedWorkItems(projectId: string): Promise<ArchivedWorkItem[]> {
+  const sb = createAdminClient();
+  const { data, error } = await sb.from('work_items')
+    .select('id, sequence_id, name, priority, archived_at, project_states(name)')
+    .eq('project_id', Number(projectId))
+    .eq('archived', 1)
+    .order('archived_at', { ascending: false, nullsFirst: false });
+  if (error) throw new PlaneApiError(500, `archived/${projectId}`);
+  return (data ?? []).map((r: Row) => ({
+    id: String(r.id),
+    sequence_id: Number(r.sequence_id ?? 0),
+    name: String(r.name),
+    priority: String(r.priority ?? 'none'),
+    state_name: String((r.project_states as Row | null)?.name ?? ''),
+    archived_at: (r.archived_at as string | null) ?? null,
+  }));
+}
+
+// Daily cron sweep: archive Done tasks whose completion is older than each
+// project's configured window (projects.auto_archive_done_days; null/0 = off).
+export async function autoArchiveCompletedTasks(): Promise<{ archived: number; projects: number }> {
+  const sb = createAdminClient();
+  const { data: projs, error } = await sb.from('projects')
+    .select('id, auto_archive_done_days')
+    .eq('archived', 0);
+  if (error) throw new PlaneApiError(500, 'projects auto-archive');
+
+  let archived = 0;
+  let touched = 0;
+  for (const p of (projs ?? []) as Row[]) {
+    const days = Number(p.auto_archive_done_days ?? 0);
+    if (!days || days <= 0) continue;
+
+    const doneStateIds = await getCompletedStateIds(String(p.id));
+    if (!doneStateIds.length) continue;
+
+    const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+    const { data: items } = await sb.from('work_items')
+      .select('id')
+      .eq('project_id', Number(p.id))
+      .eq('archived', 0)
+      .in('state_id', doneStateIds)
+      .not('completed_at', 'is', null)
+      .lt('completed_at', cutoff);
+
+    const ids = (items ?? []).map((r: Row) => Number(r.id));
+    if (!ids.length) continue;
+
+    const nowIso = new Date().toISOString();
+    await sb.from('work_items')
+      .update({ archived: 1, archived_at: nowIso, updated_at: nowIso })
+      .in('id', ids);
+    archived += ids.length;
+    touched += 1;
+  }
+  return { archived, projects: touched };
 }
 
 // ── Comments ────────────────────────────────────────────────────────────
@@ -1020,7 +1153,7 @@ export async function createProject(input: {
     name:        input.name.trim(),
     description: input.description ?? null,
     team:        normalizedTeam,
-  }).select('id, name, identifier, description, network, team').single();
+  }).select('id, name, identifier, description, network, team, auto_archive_done_days').single();
   if (error || !inserted) throw new PlaneApiError(502, 'projects create');
 
   const pid = Number(inserted.id);
@@ -1050,6 +1183,7 @@ export async function updateProject(
   if (normalized.description !== undefined) update.description = normalized.description;
   if (normalized.team !== undefined)        update.team = normalized.team ? mapOrgDeptToAppTeam(normalized.team) : null;
   if (normalized.archived !== undefined)    update.archived = normalized.archived;
+  if (normalized.autoArchiveDoneDays !== undefined) update.auto_archive_done_days = normalized.autoArchiveDoneDays;
   if (Object.keys(update).length === 1) return; // only updated_at — skip
   const { error } = await sb.from('projects')
     .update(update).eq('id', Number(projectId));

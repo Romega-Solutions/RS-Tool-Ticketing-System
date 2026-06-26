@@ -8,7 +8,16 @@ interface Label   { id: number; project_id: number; name: string; color: string 
 interface Member  { id: number; project_id: number; user_id: number; name: string; email: string; role: string }
 interface Cycle   { id: number; project_id: number; name: string; start_date: string; end_date: string; archived: number }
 interface UserRow { id: number; name: string; email: string }
-interface ProjectDetails { name: string; description: string; team: string | null }
+interface ProjectDetails { name: string; description: string; team: string | null; autoArchiveDoneDays: number | null }
+
+// Choices for the auto-archive window (days a Done task waits before it's archived).
+const AUTO_ARCHIVE_OPTIONS: { value: number; label: string }[] = [
+  { value: 0,  label: 'Off — never auto-archive' },
+  { value: 14, label: 'After 14 days' },
+  { value: 30, label: 'After 30 days' },
+  { value: 60, label: 'After 60 days' },
+  { value: 90, label: 'After 90 days' },
+];
 
 const LABEL_COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899','#6b7280'];
 
@@ -45,6 +54,11 @@ export function ProjectSettingsClient({
         project={project}
         setProject={setProject}
         canReteam={canReteam}
+      />
+      <AutoArchiveSection
+        projectId={projectId}
+        value={project.autoArchiveDoneDays}
+        onChange={(days) => setProject({ ...project, autoArchiveDoneDays: days })}
       />
       <LabelsSection projectId={projectId} labels={labels} setLabels={setLabels} />
       <MembersSection projectId={projectId} members={members} setMembers={setMembers} allUsers={allUsers} />
@@ -120,6 +134,7 @@ function ProjectDetailsSection({
         name: trimmedName,
         description: description.trim(),
         team: canReteam ? (team.trim() || null) : project.team,
+        autoArchiveDoneDays: project.autoArchiveDoneDays,
       };
       setProject(nextProject);
       setMessage('Project details updated');
@@ -224,6 +239,81 @@ function ProjectDetailsSection({
           </div>
         </div>
       )}
+    </Card>
+  );
+}
+
+// ── Automation: auto-archive Done ─────────────────────────────────────────
+
+function AutoArchiveSection({
+  projectId,
+  value,
+  onChange,
+}: {
+  projectId: string;
+  value: number | null;
+  onChange: (days: number | null) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const current = value && value > 0 ? value : 0;
+
+  const save = async (days: number) => {
+    setSaving(true);
+    setMessage('');
+    setError('');
+    try {
+      const res = await fetch(`/api/tickets/projects/${projectId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoArchiveDoneDays: days === 0 ? null : days }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) { setError(data.error ?? 'Failed to update'); return; }
+      onChange(days === 0 ? null : days);
+      setMessage(days === 0 ? 'Auto-archive turned off.' : `Done tasks will auto-archive after ${days} days.`);
+    } catch {
+      setError('Request failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card title="Auto-archive completed tasks">
+      <div className="space-y-3">
+        <p className="text-sm text-(--rs-neutral-grey-600)">
+          Keep the Done column tidy: completed tasks older than this are moved to the
+          project Archive automatically. You can still archive on demand from the Done
+          column, and restore anything from the Archive.
+        </p>
+        <label className="block max-w-xs">
+          <span className="text-xs font-medium text-(--rs-neutral-grey-600)">Archive Done tasks</span>
+          <select
+            value={current}
+            disabled={saving}
+            onChange={e => save(Number(e.target.value))}
+            className="mt-1 min-h-10 w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none disabled:opacity-50"
+          >
+            {AUTO_ARCHIVE_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
+        {saving && (
+          <p className="inline-flex items-center gap-1.5 text-xs text-(--rs-neutral-grey-500)">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…
+          </p>
+        )}
+        {message && (
+          <p className="inline-flex items-center gap-1.5 text-xs font-medium text-green-600">
+            <Check className="h-3.5 w-3.5" /> {message}
+          </p>
+        )}
+        {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
+      </div>
     </Card>
   );
 }

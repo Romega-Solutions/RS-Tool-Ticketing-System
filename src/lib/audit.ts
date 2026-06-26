@@ -6,6 +6,7 @@ export type AuditAction =
   | 'user.deactivated'
   | 'user.reactivated'
   | 'user.tool_access_changed'
+  | 'user.setup_email_sent'
   | 'user.updated';
 
 // Best-effort audit write: logs failures but NEVER throws — an audit insert must
@@ -62,6 +63,7 @@ export function describeAudit(action: string, details: Record<string, unknown> |
       if (removed.length) parts.push(`−${removed.join(', ')}`);
       return parts.length ? `Changed a user's tool access (${parts.join('; ')})` : "Changed a user's tool access";
     }
+    case 'user.setup_email_sent': return 'Sent an account-setup email';
     case 'user.updated':      return 'Updated a user account';
     default:                  return `Admin action: ${action}`;
   }

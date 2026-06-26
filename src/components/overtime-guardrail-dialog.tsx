@@ -74,8 +74,8 @@ export function OvertimeGuardrailDialog({
   }, [pending, onClose]);
 
   const heading = variant === 'on-open'
-    ? 'You’re over your weekly 15-hour limit'
-    : 'Weekly 15-hour limit reached';
+    ? 'You’re at your weekly hour limit'
+    : 'Weekly hour limit reached';
 
   return (
     <div

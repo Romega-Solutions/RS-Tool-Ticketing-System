@@ -41,6 +41,8 @@ function LiveDuration({ clockedInAt, weekSecondsBefore = 0 }: { clockedInAt: str
 
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
+  // Soft cosmetic cue only: 15h default base (the presence SSE feed doesn't carry
+  // per-user approved hours; enforcement + attendance use the real per-user base).
   const over = isOvertime(weekSecondsBefore + secs);
   const label = h > 0 ? `${h}h ${m}m` : `${m}m`;
   return (

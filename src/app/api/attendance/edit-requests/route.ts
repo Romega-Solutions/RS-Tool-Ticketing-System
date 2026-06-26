@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { route, requireReports } from '@/lib/api';
 import { computeOvertime } from '@/lib/utils';
-import { weeklySecondsForUser } from '@/lib/overtime-server';
+import { weeklySecondsForUser, baseWeeklySecondsForUser } from '@/lib/overtime-server';
 import { notifyTimeEditDecided } from '@/lib/notifications';
 
 export const runtime = 'nodejs';
@@ -106,8 +106,11 @@ export const POST = route(async (req: Request) => {
   };
   if (outDate) {
     const durationSeconds = Math.round((outDate.getTime() - inDate.getTime()) / 1000);
-    const weekSecondsBefore = await weeklySecondsForUser(admin, ts.user_id, inDate, ts.id);
-    const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds);
+    const [weekSecondsBefore, baseSeconds] = await Promise.all([
+      weeklySecondsForUser(admin, ts.user_id, inDate, ts.id),
+      baseWeeklySecondsForUser(admin, ts.user_id),
+    ]);
+    const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds, baseSeconds);
     update.duration_seconds = durationSeconds;
     update.is_overtime = isOvertime ? 1 : 0;
     update.overtime_seconds = isOvertime ? overtimeSeconds : null;

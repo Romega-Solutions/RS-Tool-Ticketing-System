@@ -11,158 +11,142 @@ import {
   SAFETY_CEILING_SECONDS,
 } from '@/lib/utils';
 
+// Overtime is now budget-based: a user's weekly ALLOWANCE = the 15h base cap
+// plus any admin-approved overtime granted this week. Approving "+2h" raises the
+// allowance to 17h (it does NOT merely open a time window). Enforcement is a hard
+// ceiling at the allowance; the 16h single-session safety ceiling still applies.
 const NOW = new Date('2026-06-03T12:00:00.000Z'); // a Wednesday
 const ago = (seconds: number) => new Date(NOW.getTime() - seconds * 1000).toISOString();
-const future = (seconds: number) => new Date(NOW.getTime() + seconds * 1000).toISOString();
 const H = 3600;
+const CAP = WEEKLY_CAP_SECONDS; // 15h — the base weekly allowance
+const PLUS2 = CAP + 2 * H;      // 17h — allowance after a +2h grant
 
 describe('planEnforcement — close-on-read decision + write payload', () => {
-  it('does not close a session within limits', () => {
-    const r = planEnforcement({ role: 'ic', clockedInAt: ago(2 * H), weekSecondsBefore: 5 * H, approvedUntil: null, now: NOW });
+  it('does not close a session within the base allowance', () => {
+    const r = planEnforcement({ clockedInAt: ago(2 * H), weekSecondsBefore: 5 * H, allowanceSeconds: CAP, now: NOW });
     expect(r).toEqual({ close: false, reason: 'within limits' });
   });
 
-  it('closes an over-cap session and reports the overtime slice', () => {
-    // 14h completed + 2h running = 16h → 1h beyond the 15h cap.
-    const r = planEnforcement({ role: 'ic', clockedInAt: ago(2 * H), weekSecondsBefore: 14 * H, approvedUntil: null, now: NOW });
-    expect(r).toMatchObject({ close: true, durationSeconds: 2 * H, isOvertime: true, overtimeSeconds: 1 * H, reason: 'weekly cap' });
+  it('closes an over-allowance session and reports the overtime slice (everything beyond 15h)', () => {
+    // 14h completed + 2h running = 16h → 1h beyond the 15h base.
+    const r = planEnforcement({ clockedInAt: ago(2 * H), weekSecondsBefore: 14 * H, allowanceSeconds: CAP, now: NOW });
+    expect(r).toMatchObject({ close: true, durationSeconds: 2 * H, isOvertime: true, overtimeSeconds: 1 * H, reason: 'weekly allowance' });
   });
 
-  it('closes exactly at the cap with no overtime (overtimeSeconds null)', () => {
-    // 14h completed + 1h running = 15h exactly → close, but no overtime slice.
-    const r = planEnforcement({ role: 'ic', clockedInAt: ago(1 * H), weekSecondsBefore: 14 * H, approvedUntil: null, now: NOW });
-    expect(r).toMatchObject({ close: true, durationSeconds: 1 * H, isOvertime: false, overtimeSeconds: null, reason: 'weekly cap' });
+  it('closes exactly at a 15h allowance with no overtime slice', () => {
+    const r = planEnforcement({ clockedInAt: ago(1 * H), weekSecondsBefore: 14 * H, allowanceSeconds: CAP, now: NOW });
+    expect(r).toMatchObject({ close: true, durationSeconds: 1 * H, isOvertime: false, overtimeSeconds: null, reason: 'weekly allowance' });
   });
 
-  it('closes any session past the 16h safety ceiling, even an admin', () => {
-    const r = planEnforcement({ role: 'admin', clockedInAt: ago(SAFETY_CEILING_SECONDS), weekSecondsBefore: 0, approvedUntil: null, now: NOW });
+  it('GRANT RAISES THE CEILING: a +2h grant keeps a 16h week running (was cut at 15h before)', () => {
+    // 14h completed + 2h running = 16h, allowance 17h → still within limits.
+    const r = planEnforcement({ clockedInAt: ago(2 * H), weekSecondsBefore: 14 * H, allowanceSeconds: PLUS2, now: NOW });
+    expect(r).toEqual({ close: false, reason: 'within limits' });
+  });
+
+  it('closes at the RAISED ceiling; the whole session counts as overtime once past 15h (payroll)', () => {
+    // allowance 17h; 16h done + 2h running = 18h ≥ 17h → close. The week was
+    // already past 15h, so the entire 2h slice of THIS session is overtime.
+    const r = planEnforcement({ clockedInAt: ago(2 * H), weekSecondsBefore: 16 * H, allowanceSeconds: PLUS2, now: NOW });
+    expect(r).toMatchObject({ close: true, durationSeconds: 2 * H, isOvertime: true, overtimeSeconds: 2 * H, reason: 'weekly allowance' });
+  });
+
+  it('closes any session past the 16h safety ceiling regardless of allowance', () => {
+    const r = planEnforcement({ clockedInAt: ago(SAFETY_CEILING_SECONDS), weekSecondsBefore: 0, allowanceSeconds: PLUS2, now: NOW });
     expect(r).toMatchObject({ close: true, reason: 'safety ceiling' });
-  });
-
-  it('closes an over-cap admin now that admins are capped like everyone', () => {
-    const r = planEnforcement({ role: 'admin', clockedInAt: ago(4 * H), weekSecondsBefore: 20 * H, approvedUntil: null, now: NOW });
-    expect(r).toMatchObject({ close: true, isOvertime: true, reason: 'weekly cap' });
-  });
-
-  it('does not close a non-admin holding active approval', () => {
-    const r = planEnforcement({ role: 'ic', clockedInAt: ago(4 * H), weekSecondsBefore: 20 * H, approvedUntil: future(3600), now: NOW });
-    expect(r).toEqual({ close: false, reason: 'approved overtime' });
   });
 });
 
-describe('decideAutoClockOut — no per-session/day cap', () => {
-  it('does NOT cut a long session that is still under the weekly cap', () => {
-    // 5h continuous session, only 5h this week → fine. (Old 3h cut is gone.)
-    const r = decideAutoClockOut({ role: 'ic', clockedInAt: ago(5 * H), weekSecondsBefore: 0, approvedUntil: null, now: NOW });
+describe('decideAutoClockOut — allowance-based weekly ceiling', () => {
+  it('does NOT cut a long session still under the allowance (no per-session/day cap)', () => {
+    const r = decideAutoClockOut({ clockedInAt: ago(5 * H), weekSecondsBefore: 0, allowanceSeconds: CAP, now: NOW });
     expect(r).toEqual({ action: 'skip', reason: 'within limits' });
   });
 
   it('still cuts at the 16h safety ceiling regardless of week total', () => {
-    const r = decideAutoClockOut({ role: 'ic', clockedInAt: ago(SAFETY_CEILING_SECONDS), weekSecondsBefore: 0, approvedUntil: null, now: NOW });
+    const r = decideAutoClockOut({ clockedInAt: ago(SAFETY_CEILING_SECONDS), weekSecondsBefore: 0, allowanceSeconds: CAP, now: NOW });
     expect(r).toEqual({ action: 'close', elapsedSec: SAFETY_CEILING_SECONDS, reason: 'safety ceiling' });
   });
-});
 
-describe('decideAutoClockOut — no role exemption (admins capped like everyone)', () => {
-  it.each(['admin', 'ceo', 'owner', 'superadmin'])('closes role=%s past the weekly cap', (role) => {
-    const r = decideAutoClockOut({ role, clockedInAt: ago(4 * H), weekSecondsBefore: 20 * H, approvedUntil: null, now: NOW });
+  it('closes when completed + elapsed crosses the base 15h allowance', () => {
+    const r = decideAutoClockOut({ clockedInAt: ago(1 * H), weekSecondsBefore: 14 * H, allowanceSeconds: CAP, now: NOW });
     expect(r.action).toBe('close');
-    if (r.action === 'close') expect(r.reason).toBe('weekly cap');
+    if (r.action === 'close') expect(r.reason).toBe('weekly allowance');
   });
 
-  it('closes even an admin at the 16h safety ceiling (ghost-session guard)', () => {
-    const r = decideAutoClockOut({ role: 'admin', clockedInAt: ago(SAFETY_CEILING_SECONDS), weekSecondsBefore: 0, approvedUntil: null, now: NOW });
-    expect(r.action).toBe('close');
-    if (r.action === 'close') expect(r.reason).toBe('safety ceiling');
-  });
-});
-
-describe('decideAutoClockOut — admin approval suspends the weekly cap', () => {
-  it('skips an over-cap session when an approval is still active', () => {
-    const r = decideAutoClockOut({ role: 'ic', clockedInAt: ago(4 * H), weekSecondsBefore: 20 * H, approvedUntil: future(3600), now: NOW });
-    expect(r).toEqual({ action: 'skip', reason: 'approved overtime' });
-  });
-
-  it('ignores an expired approval and closes on the weekly cap', () => {
-    const r = decideAutoClockOut({ role: 'ic', clockedInAt: ago(4 * H), weekSecondsBefore: 20 * H, approvedUntil: ago(60), now: NOW });
-    expect(r.action).toBe('close');
-    if (r.action === 'close') expect(r.reason).toBe('weekly cap');
-  });
-
-  it('ignores a garbage approval value and closes on the weekly cap', () => {
-    const r = decideAutoClockOut({ role: 'ic', clockedInAt: ago(4 * H), weekSecondsBefore: 20 * H, approvedUntil: 'not-a-date', now: NOW });
-    expect(r.action).toBe('close');
-    if (r.action === 'close') expect(r.reason).toBe('weekly cap');
-  });
-});
-
-describe('decideAutoClockOut — weekly 15h cap', () => {
-  it('closes when completed + elapsed crosses 15h', () => {
-    // 14h already done this week, 1h into a fresh session = 15h → cut.
-    const r = decideAutoClockOut({ role: 'ic', clockedInAt: ago(1 * H), weekSecondsBefore: 14 * H, approvedUntil: null, now: NOW });
-    expect(r.action).toBe('close');
-    if (r.action === 'close') expect(r.reason).toBe('weekly cap');
-  });
-
-  it('skips when comfortably under the weekly cap', () => {
-    const r = decideAutoClockOut({ role: 'ic', clockedInAt: ago(1 * H), weekSecondsBefore: 5 * H, approvedUntil: null, now: NOW });
+  it('skips when comfortably under the allowance', () => {
+    const r = decideAutoClockOut({ clockedInAt: ago(1 * H), weekSecondsBefore: 5 * H, allowanceSeconds: CAP, now: NOW });
     expect(r).toEqual({ action: 'skip', reason: 'within limits' });
+  });
+
+  it('a +2h grant lets an at-15h session keep running up to the 17h ceiling', () => {
+    const r = decideAutoClockOut({ clockedInAt: ago(1 * H), weekSecondsBefore: 15 * H, allowanceSeconds: PLUS2, now: NOW });
+    expect(r).toEqual({ action: 'skip', reason: 'within limits' });
+  });
+
+  it('closes once the raised 17h ceiling is reached', () => {
+    const r = decideAutoClockOut({ clockedInAt: ago(2 * H), weekSecondsBefore: 15 * H, allowanceSeconds: PLUS2, now: NOW });
+    expect(r.action).toBe('close');
+    if (r.action === 'close') expect(r.reason).toBe('weekly allowance');
+  });
+});
+
+describe('decideAutoClockOut — no role exemption (everyone capped at their allowance)', () => {
+  it('closes an over-allowance session for any user', () => {
+    const r = decideAutoClockOut({ clockedInAt: ago(4 * H), weekSecondsBefore: 20 * H, allowanceSeconds: CAP, now: NOW });
+    expect(r.action).toBe('close');
+    if (r.action === 'close') expect(r.reason).toBe('weekly allowance');
   });
 });
 
 describe('decideAutoClockOut — invalid input', () => {
   it('skips an unparseable clocked_in_at', () => {
-    const r = decideAutoClockOut({ role: 'ic', clockedInAt: 'nope', weekSecondsBefore: 0, approvedUntil: null, now: NOW });
+    const r = decideAutoClockOut({ clockedInAt: 'nope', weekSecondsBefore: 0, allowanceSeconds: CAP, now: NOW });
     expect(r).toEqual({ action: 'skip', reason: 'invalid clocked_in_at' });
   });
 });
 
 describe('decideClockInAllowed', () => {
-  it('blocks a contractor who already hit 15h this week', () => {
-    const r = decideClockInAllowed({ role: 'ic', weekSecondsBefore: WEEKLY_CAP_SECONDS, approvedUntil: null, now: NOW });
-    expect(r).toEqual({ allowed: false, reason: 'weekly cap reached' });
+  it('blocks a contractor who already hit the 15h base allowance', () => {
+    const r = decideClockInAllowed({ weekSecondsBefore: CAP, allowanceSeconds: CAP });
+    expect(r).toEqual({ allowed: false, reason: 'weekly allowance reached' });
   });
 
-  it('allows a blocked contractor who has an active approval', () => {
-    const r = decideClockInAllowed({ role: 'ic', weekSecondsBefore: WEEKLY_CAP_SECONDS, approvedUntil: future(3600), now: NOW });
+  it('GRANT RAISES THE CEILING: a +2h grant lets a blocked contractor clock in again at 15h', () => {
+    const r = decideClockInAllowed({ weekSecondsBefore: CAP, allowanceSeconds: PLUS2 });
     expect(r).toEqual({ allowed: true });
   });
 
-  it('blocks admins at the cap too (no role exemption)', () => {
-    const r = decideClockInAllowed({ role: 'ceo', weekSecondsBefore: WEEKLY_CAP_SECONDS * 2, approvedUntil: null, now: NOW });
-    expect(r).toEqual({ allowed: false, reason: 'weekly cap reached' });
+  it('blocks again once the raised 17h ceiling is reached', () => {
+    const r = decideClockInAllowed({ weekSecondsBefore: PLUS2, allowanceSeconds: PLUS2 });
+    expect(r).toEqual({ allowed: false, reason: 'weekly allowance reached' });
   });
 
-  it('allows an admin who holds an active approval', () => {
-    const r = decideClockInAllowed({ role: 'admin', weekSecondsBefore: WEEKLY_CAP_SECONDS * 2, approvedUntil: future(3600), now: NOW });
-    expect(r).toEqual({ allowed: true });
-  });
-
-  it('allows a contractor under the cap', () => {
-    const r = decideClockInAllowed({ role: 'ic', weekSecondsBefore: 14 * H, approvedUntil: null, now: NOW });
+  it('allows a contractor under the allowance', () => {
+    const r = decideClockInAllowed({ weekSecondsBefore: 14 * H, allowanceSeconds: CAP });
     expect(r).toEqual({ allowed: true });
   });
 });
 
-describe('isClockInCapLocked — UI mirror of the clock-in gate for a clocked-out user', () => {
-  it('locks a user who is exactly at the 15h cap with no request', () => {
-    expect(isClockInCapLocked({ weekSecondsBefore: WEEKLY_CAP_SECONDS, requestStatus: 'none' })).toBe(true);
+describe('isClockInCapLocked — UI mirror of the clock-in gate', () => {
+  it('locks a user exactly at the 15h base allowance', () => {
+    expect(isClockInCapLocked({ weekSecondsBefore: CAP, allowanceSeconds: CAP })).toBe(true);
   });
 
-  it('locks a user who is over the cap', () => {
-    expect(isClockInCapLocked({ weekSecondsBefore: WEEKLY_CAP_SECONDS + 5 * H, requestStatus: 'none' })).toBe(true);
+  it('locks a user over the allowance', () => {
+    expect(isClockInCapLocked({ weekSecondsBefore: CAP + 5 * H, allowanceSeconds: CAP })).toBe(true);
   });
 
-  it('keeps locking while a request is only pending (not yet approved)', () => {
-    expect(isClockInCapLocked({ weekSecondsBefore: WEEKLY_CAP_SECONDS, requestStatus: 'pending' })).toBe(true);
+  it('unlocks once a grant raises the allowance above their used time', () => {
+    expect(isClockInCapLocked({ weekSecondsBefore: CAP, allowanceSeconds: PLUS2 })).toBe(false);
   });
 
-  it('unlocks once the overtime request is approved', () => {
-    expect(isClockInCapLocked({ weekSecondsBefore: WEEKLY_CAP_SECONDS * 2, requestStatus: 'approved' })).toBe(false);
+  it('re-locks at the raised ceiling', () => {
+    expect(isClockInCapLocked({ weekSecondsBefore: PLUS2, allowanceSeconds: PLUS2 })).toBe(true);
   });
 
-  it('does not lock a user still under the cap', () => {
-    expect(isClockInCapLocked({ weekSecondsBefore: 14 * H, requestStatus: 'none' })).toBe(false);
+  it('does not lock a user still under the allowance', () => {
+    expect(isClockInCapLocked({ weekSecondsBefore: 14 * H, allowanceSeconds: CAP })).toBe(false);
   });
 });
 
@@ -175,5 +159,18 @@ describe('weekStartMonday', () => {
   });
   it('maps Sunday back to the prior Monday', () => {
     expect(weekStartMonday(new Date('2026-06-07T09:00:00'))).toBe('2026-06-01');
+  });
+});
+
+describe('planEnforcement — per-user base (approved hours)', () => {
+  it('computes the OT slice against baseSeconds, not the flat 15h', () => {
+    // 20h approved base, +0 grant ⇒ allowance 20h. 19h done + 2h run = 21h ≥ 20h
+    // → close; overtime is the slice beyond the 20h base = 1h (not 6h vs 15h).
+    const r = planEnforcement({ clockedInAt: ago(2 * H), weekSecondsBefore: 19 * H, allowanceSeconds: 20 * H, baseSeconds: 20 * H, now: NOW });
+    expect(r).toMatchObject({ close: true, isOvertime: true, overtimeSeconds: 1 * H });
+  });
+  it('defaults the base to 15h when baseSeconds is omitted (back-compat)', () => {
+    const r = planEnforcement({ clockedInAt: ago(2 * H), weekSecondsBefore: 14 * H, allowanceSeconds: CAP, now: NOW });
+    expect(r).toMatchObject({ close: true, isOvertime: true, overtimeSeconds: 1 * H });
   });
 });

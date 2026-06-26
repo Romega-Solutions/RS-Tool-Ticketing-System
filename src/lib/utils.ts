@@ -28,23 +28,28 @@ export const WEEKLY_CAP_SECONDS = 15 * 60 * 60; // 54000
 // (the 25h ghost session that prompted removing the admin exemption in May).
 export const SAFETY_CEILING_SECONDS = 16 * 60 * 60; // 57600
 
-/** True once a user's week-to-date total (incl. the live session) passes 15h. */
-export function isOvertime(weekSecondsTotal: number): boolean {
-  return weekSecondsTotal > WEEKLY_CAP_SECONDS;
+/**
+ * True once a user's week-to-date total (incl. the live session) passes their
+ * weekly base cap. `capSeconds` defaults to the 15h base; pass the user's
+ * approved-hours base for per-user accounting.
+ */
+export function isOvertime(weekSecondsTotal: number, capSeconds = WEEKLY_CAP_SECONDS): boolean {
+  return weekSecondsTotal > capSeconds;
 }
 
 /**
  * Server-side: the overtime portion of a just-finished session — the slice of
- * `durationSeconds` lying beyond the 15h weekly cap, given the user's already
- * completed seconds earlier this Mon–Sun week (`weekSecondsBefore`).
+ * `durationSeconds` lying beyond the user's weekly base, given the seconds they
+ * already completed earlier this Mon–Sun week (`weekSecondsBefore`). `baseSeconds`
+ * defaults to the 15h base; pass the user's approved-hours base for per-user OT.
  */
-export function computeOvertime(weekSecondsBefore: number, durationSeconds: number): {
+export function computeOvertime(weekSecondsBefore: number, durationSeconds: number, baseSeconds = WEEKLY_CAP_SECONDS): {
   isOvertime: boolean;
   overtimeSeconds: number;
 } {
   const overtimeSeconds = Math.max(
     0,
-    Math.min(durationSeconds, weekSecondsBefore + durationSeconds - WEEKLY_CAP_SECONDS),
+    Math.min(durationSeconds, weekSecondsBefore + durationSeconds - baseSeconds),
   );
   return { isOvertime: overtimeSeconds > 0, overtimeSeconds };
 }
@@ -68,16 +73,18 @@ export type WeeklyBudget = {
  *
  * @param weekSecondsBefore completed (clocked-out) seconds this Mon–Sun week
  * @param elapsedSeconds    live seconds of the open session (0 when clocked out)
+ * @param capSeconds        the weekly allowance (15h base + any approved overtime
+ *                          granted this week); defaults to the 15h base cap
  */
-export function weeklyBudget(weekSecondsBefore: number, elapsedSeconds = 0): WeeklyBudget {
+export function weeklyBudget(weekSecondsBefore: number, elapsedSeconds = 0, capSeconds = WEEKLY_CAP_SECONDS): WeeklyBudget {
   const usedSeconds = Math.max(0, weekSecondsBefore + elapsedSeconds);
-  const remainingSeconds = Math.max(0, WEEKLY_CAP_SECONDS - usedSeconds);
-  const percentUsed = Math.min(100, Math.round((usedSeconds / WEEKLY_CAP_SECONDS) * 100));
+  const remainingSeconds = Math.max(0, capSeconds - usedSeconds);
+  const percentUsed = Math.min(100, Math.round((usedSeconds / capSeconds) * 100));
   return {
     usedSeconds,
     remainingSeconds,
-    capSeconds: WEEKLY_CAP_SECONDS,
+    capSeconds,
     percentUsed,
-    isOvertime: usedSeconds > WEEKLY_CAP_SECONDS,
+    isOvertime: usedSeconds > capSeconds,
   };
 }

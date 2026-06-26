@@ -2,11 +2,10 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { AlertTriangle, Loader2, Lock, LogIn, LogOut, Send } from 'lucide-react';
-import { formatDuration, isOvertime, weeklyBudget, WEEKLY_CAP_SECONDS } from '@/lib/utils';
+import { formatDuration, weeklyBudget, WEEKLY_CAP_SECONDS } from '@/lib/utils';
 import { isClockInCapLocked, type WeeklyCapRequestStatus } from '@/lib/overtime-policy';
 import { ClockOutReminderBanner } from '@/components/clock-out-reminder-banner';
 import { OvertimeGuardrailDialog } from '@/components/overtime-guardrail-dialog';
-import { OvertimeStatusBanner } from '@/components/overtime-status-banner';
 
 type WidgetState = 'loading' | 'out' | 'in';
 type PendingAction = 'clock-in' | 'clock-out' | null;
@@ -128,28 +127,30 @@ function ClockConfirmDialog({
   );
 }
 
-// Personal weekly-budget meter for the dark sidebar: how much of the 15h
-// Mon–Sun cap is used and how much is left. Live-ticks via `elapsed` while
-// clocked in; still shows completed-week usage when clocked out.
-function WeeklyBudgetBar({ weekSecondsBefore, elapsed }: { weekSecondsBefore: number; elapsed: number }) {
-  const { usedSeconds, remainingSeconds, capSeconds, percentUsed, isOvertime: over } =
-    weeklyBudget(weekSecondsBefore, elapsed);
-  const fillColor = over ? 'bg-amber-400' : percentUsed >= 80 ? 'bg-amber-300' : 'bg-green-400';
-  const usedH = (usedSeconds / 3600).toFixed(usedSeconds % 3600 === 0 ? 0 : 1);
-  const capH  = Math.round(capSeconds / 3600);
+// Personal weekly-budget meter for the dark sidebar: how much of the weekly
+// allowance (15h base + any approved overtime grant) is used and how much is
+// left. Live-ticks via `elapsed` while clocked in; still shows completed-week
+// usage when clocked out. The allowance is a hard ceiling, so there is no
+// "overtime overflow" state — at the ceiling it simply reads "Limit reached".
+function WeeklyBudgetBar({ weekSecondsBefore, elapsed, allowanceSeconds }: { weekSecondsBefore: number; elapsed: number; allowanceSeconds: number }) {
+  const { usedSeconds, remainingSeconds, capSeconds, percentUsed } =
+    weeklyBudget(weekSecondsBefore, elapsed, allowanceSeconds);
+  const reached = remainingSeconds === 0;
+  const fillColor = reached ? 'bg-amber-400' : percentUsed >= 80 ? 'bg-amber-300' : 'bg-green-400';
+  const fmtHours = (s: number) => (s / 3600).toFixed(s % 3600 === 0 ? 0 : 1);
 
   return (
     <div className="px-3 pt-1.5">
       <div className="flex items-center justify-between text-[10px] mb-1">
-        <span className="text-white/45">{usedH}h / {capH}h this week</span>
-        <span className={over ? 'font-semibold text-amber-300' : 'text-white/70'}>
-          {over ? `OT +${formatDuration(usedSeconds - capSeconds)}` : `${formatDuration(remainingSeconds)} left`}
+        <span className="text-white/45">{fmtHours(usedSeconds)}h / {fmtHours(capSeconds)}h this week</span>
+        <span className={reached ? 'font-semibold text-amber-300' : 'text-white/70'}>
+          {reached ? 'Limit reached' : `${formatDuration(remainingSeconds)} left`}
         </span>
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
         <div
           className={`h-full rounded-full transition-all ${fillColor}`}
-          style={{ width: `${over ? 100 : Math.max(percentUsed, 2)}%` }}
+          style={{ width: `${Math.max(percentUsed, 2)}%` }}
         />
       </div>
     </div>
@@ -169,13 +170,14 @@ export function ClockWidget({
   const [noteDraft, setNoteDraft] = useState('');
   const [elapsed, setElapsed] = useState(0);
   const [weekSecondsBefore, setWeekSecondsBefore] = useState(0);
+  // This week's hard ceiling = 15h base + any approved overtime grant.
+  const [weekAllowance, setWeekAllowance] = useState(WEEKLY_CAP_SECONDS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [reminderEnabled, setReminderEnabled] = useState(true);
   const [reminderIntervalMinutes, setReminderIntervalMinutes] = useState(120);
   const [reminderVisible, setReminderVisible] = useState(false);
-  const [overtimeApproved, setOvertimeApproved] = useState(false);
   const [limitDialogVisible, setLimitDialogVisible] = useState(false);
   const [limitWeekTotal, setLimitWeekTotal] = useState(0);
   const [dialogVariant, setDialogVariant] = useState<'crossed' | 'on-open'>('crossed');
@@ -186,6 +188,7 @@ export function ClockWidget({
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedRef = useRef(0);
   const weekBeforeRef = useRef(0);
+  const allowanceRef = useRef(WEEKLY_CAP_SECONDS);
   const lastReminderFiredRef = useRef<number>(0);
   const overtimeHandledRef = useRef(false);
 
@@ -217,7 +220,7 @@ export function ClockWidget({
       fetch('/api/profile/me').then(r => r.json()),
     ])
       .then(([presenceData, profileData]: [
-        { openSession?: { clockedInAt: string; notes?: string | null } | null; weekSecondsBefore?: number },
+        { openSession?: { clockedInAt: string; notes?: string | null } | null; weekSecondsBefore?: number; weekAllowanceSeconds?: number },
         { user?: { reminderEnabled?: boolean; reminderIntervalMinutes?: number } }
       ]) => {
         if (cancelled) return;
@@ -228,6 +231,9 @@ export function ClockWidget({
         const wsb = presenceData.weekSecondsBefore ?? 0;
         setWeekSecondsBefore(wsb);
         weekBeforeRef.current = wsb;
+        const allowance = presenceData.weekAllowanceSeconds ?? WEEKLY_CAP_SECONDS;
+        setWeekAllowance(allowance);
+        allowanceRef.current = allowance;
         if (presenceData.openSession?.clockedInAt) {
           setSessionNote(presenceData.openSession.notes ?? '');
           setNoteSaved(true);
@@ -235,11 +241,11 @@ export function ClockWidget({
           setState('in');
         } else {
           setState('out');
-          // Opened the app already over the 15h cap — close-on-read clocked them
-          // out server-side. Record this week's request status (which locks the
-          // Clock In button), and surface the request-overtime prompt once per
-          // week (per browser session) unless a request is already open/approved.
-          if (wsb >= WEEKLY_CAP_SECONDS) {
+          // Opened the app already at the weekly allowance — close-on-read clocked
+          // them out server-side. Record this week's request status (for the CTA
+          // label) and surface the request-overtime prompt once per week (per
+          // browser session) unless a request is already open/approved.
+          if (wsb >= allowance) {
             let acked = false;
             try { acked = sessionStorage.getItem(OVERCAP_ACK_KEY) === currentWeekKey(); } catch { /* no sessionStorage */ }
             const showOnOpenPrompt = () => {
@@ -289,40 +295,30 @@ export function ClockWidget({
     return () => clearInterval(id);
   }, [state, reminderEnabled, reminderIntervalMinutes]);
 
-  // Overtime guardrail. The 15h weekly cap is hard-enforced server-side; this
-  // mirrors it in the browser using the week-to-date total (completed seconds
-  // before this session + live elapsed). When it crosses 15h the user is
-  // clocked out and shown the request dialog — unless they already hold an
-  // active admin approval, in which case the session keeps running under an
-  // "On overtime" banner. No role is exempt (a 16h safety ceiling still applies
-  // server-side).
+  // Weekly-allowance guardrail. The allowance (15h base + any approved overtime
+  // grant) is hard-enforced server-side; this mirrors it in the browser using
+  // the week-to-date total (completed seconds before this session + live
+  // elapsed). When it reaches the allowance the user is clocked out and shown
+  // the request-overtime dialog. No role is exempt (a 16h single-session safety
+  // ceiling still applies server-side). There is no persistent "on overtime"
+  // state — approved time simply raises the allowance, so up to the ceiling it
+  // reads as ordinary hours.
   useEffect(() => {
     if (state !== 'in') return;
-    const check = async () => {
-      if (weekBeforeRef.current + elapsedRef.current < WEEKLY_CAP_SECONDS) return;
+    const check = () => {
+      if (weekBeforeRef.current + elapsedRef.current < allowanceRef.current) return;
       if (overtimeHandledRef.current) return;
       overtimeHandledRef.current = true;
-
-      let approved = false;
-      try {
-        const r = await fetch('/api/presence/overtime-request');
-        const d = (await r.json()) as { request?: { status: string; approved_until: string | null } | null };
-        const req = d.request;
-        approved = !!req && req.status === 'approved' && !!req.approved_until
-          && new Date(req.approved_until).getTime() > Date.now();
-      } catch { /* treat as not approved */ }
-
-      if (approved) { setOvertimeApproved(true); return; }
 
       setLimitWeekTotal(weekBeforeRef.current + elapsedRef.current);
       setDialogVariant('crossed');
       setLimitDialogVisible(true);
       void confirmClockOut();
     };
-    void check();
+    check();
     const id = setInterval(check, 15_000);
     return () => clearInterval(id);
-    // confirmClockOut is a stable function declaration; only fired once at 15h.
+    // confirmClockOut is a stable function declaration; only fired once at the allowance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
@@ -408,7 +404,6 @@ export function ClockWidget({
       setPendingAction(null);
       // Fresh session — re-arm the overtime guardrail.
       overtimeHandledRef.current = false;
-      setOvertimeApproved(false);
       setLimitDialogVisible(false);
       setOtRequestState('idle');
     } catch {
@@ -438,7 +433,6 @@ export function ClockWidget({
       stopTimer();
       setReminderVisible(false);
       lastReminderFiredRef.current = 0;
-      setOvertimeApproved(false);
       setSessionNote('');
       setNoteDraft('');
       setNoteSaved(true);
@@ -457,23 +451,14 @@ export function ClockWidget({
     ? 'This session is active, but note saving is not available until the database update is applied.'
     : '';
 
-  const inOvertime = state === 'in' && isOvertime(weekSecondsBefore + elapsed);
-
-  // Clocked out and at/over the 15h weekly cap with no active approval → Clock In
-  // is disabled; the only path forward is to request overtime from the admin.
-  // Applies to every role, admins included.
+  // Clocked out and at/over the weekly allowance → Clock In is disabled; the only
+  // path forward is to request more overtime from the admin (an approved grant
+  // raises the allowance and re-opens clock-in). Applies to every role, admins included.
   const capLocked = state === 'out'
-    && isClockInCapLocked({ weekSecondsBefore, requestStatus: weekRequestStatus });
+    && isClockInCapLocked({ weekSecondsBefore, allowanceSeconds: weekAllowance });
 
   const overtimeOverlays = (
     <>
-      {state === 'in' && overtimeApproved && (
-        <OvertimeStatusBanner
-          weekSecondsTotal={weekSecondsBefore + elapsed}
-          busy={busy}
-          onClockOut={confirmClockOut}
-        />
-      )}
       {limitDialogVisible && (
         <OvertimeGuardrailDialog
           weekSecondsTotal={limitWeekTotal}
@@ -496,13 +481,8 @@ export function ClockWidget({
           </div>
         ) : state === 'in' ? (
           <div className="flex items-center gap-2">
-            <div className={`flex items-center gap-1.5 text-xs font-medium border px-2.5 py-1 rounded-full ${
-              inOvertime
-                ? 'text-amber-800 bg-amber-50 border-amber-300'
-                : 'text-green-700 bg-green-50 border-green-200'
-            }`}>
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${inOvertime ? 'bg-amber-500' : 'bg-green-500'}`} />
-              {inOvertime && <span className="font-semibold">OT</span>}
+            <div className="flex items-center gap-1.5 text-xs font-medium border px-2.5 py-1 rounded-full text-green-700 bg-green-50 border-green-200">
+              <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-green-500" />
               {formatDuration(elapsed)}
             </div>
             <button
@@ -575,7 +555,7 @@ export function ClockWidget({
           disabled={busy || state === 'loading'}
           className={`w-full flex justify-center py-2 transition-colors ${
             state === 'in'
-              ? inOvertime ? 'text-amber-400 hover:text-amber-300' : 'text-green-400 hover:text-green-300'
+              ? 'text-green-400 hover:text-green-300'
               : capLocked ? 'text-amber-400 hover:text-amber-300' : 'text-white/40 hover:text-white/80'
           } disabled:opacity-50`}
           title={state === 'in'
@@ -585,7 +565,7 @@ export function ClockWidget({
           {busy || state === 'loading'
             ? <Loader2 className="w-4 h-4 animate-spin" />
             : state === 'in'
-            ? <span className={`w-2 h-2 rounded-full mt-1 ${inOvertime ? 'bg-amber-400' : 'bg-green-400'}`} />
+            ? <span className="w-2 h-2 rounded-full mt-1 bg-green-400" />
             : capLocked
             ? <Lock className="w-4 h-4" />
             : <LogIn className="w-4 h-4" />}
@@ -594,9 +574,9 @@ export function ClockWidget({
         <div className="space-y-1">
           {state === 'in' ? (
             <>
-              <div className={`flex items-center gap-2 px-3 py-1 text-xs ${inOvertime ? 'text-amber-400' : 'text-green-400'}`}>
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${inOvertime ? 'bg-amber-400' : 'bg-green-400'}`} />
-                <span className="font-medium">{inOvertime ? 'Overtime' : 'Clocked in'} · {formatDuration(elapsed)}</span>
+              <div className="flex items-center gap-2 px-3 py-1 text-xs text-green-400">
+                <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-green-400" />
+                <span className="font-medium">Clocked in · {formatDuration(elapsed)}</span>
               </div>
               {noteHint && (
                 <p className="px-3 text-[10px] text-white/50 line-clamp-2">{noteHint}</p>
@@ -647,7 +627,7 @@ export function ClockWidget({
             </button>
           )}
           {state !== 'loading' && (
-            <WeeklyBudgetBar weekSecondsBefore={weekSecondsBefore} elapsed={state === 'in' ? elapsed : 0} />
+            <WeeklyBudgetBar weekSecondsBefore={weekSecondsBefore} elapsed={state === 'in' ? elapsed : 0} allowanceSeconds={weekAllowance} />
           )}
           {error && <p className="px-3 text-[10px] text-red-400">{error}</p>}
         </div>

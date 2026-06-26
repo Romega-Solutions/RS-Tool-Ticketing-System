@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getOnline, getMyEntry, clockIn } from '@/lib/presence';
 import { getPhotoResolver } from '@/lib/orgchart';
-import { weeklySecondsForUser, enforceUserOpenSession, maybeSweepOpenSessions } from '@/lib/overtime-server';
+import { weeklySecondsForUser, weeklyAllowanceForUser, enforceUserOpenSession, maybeSweepOpenSessions } from '@/lib/overtime-server';
 import type { AppRole } from '@/lib/rbac';
 import { route, requireSession } from '@/lib/api';
 
@@ -22,7 +22,10 @@ export const GET = route(async () => {
   await maybeSweepOpenSessions(admin, now);
 
   const online = getOnline(session.role, session.team, session.id);
-  const weekSecondsBefore = await weeklySecondsForUser(admin, session.id, now);
+  const [weekSecondsBefore, weekAllowanceSeconds] = await Promise.all([
+    weeklySecondsForUser(admin, session.id, now),
+    weeklyAllowanceForUser(admin, session.id, now),
+  ]);
 
   const myEntry = getMyEntry(session.id);
   let openSession: { timesheetId: number; clockedInAt: string; notes: string | null } | null = null;
@@ -55,5 +58,5 @@ export const GET = route(async () => {
     }
   }
 
-  return NextResponse.json({ online, openSession, weekSecondsBefore });
+  return NextResponse.json({ online, openSession, weekSecondsBefore, weekAllowanceSeconds });
 });

@@ -42,6 +42,7 @@ export default async function ProjectSettingsPage({
           name: project.name,
           description: project.description,
           team: project.team,
+          autoArchiveDoneDays: project.autoArchiveDoneDays,
         }}
         canReteam={await canReteamProject(session, Number(id))}
         initialLabels={labels}

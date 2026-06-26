@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useState, useEffect, useMemo } from 'react';
+import { WEEKLY_CAP_SECONDS } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { AttendanceExportSheet } from '@/components/attendance-export-sheet';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -679,6 +680,9 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
   const [teamUsers,        setTeamUsers]         = useState<TeamUser[]>([]);
   const [teamRecords,      setTeamRecords]       = useState<AttendanceRecord[]>([]);
   const [timesheetsByDay,  setTimesheetsByDay]   = useState<Record<string, number>>({});
+  const [openSessions,     setOpenSessions]      = useState<Record<string, string>>({});
+  const [allowanceByUser,  setAllowanceByUser]   = useState<Record<string, number>>({});
+  const [nowTick,          setNowTick]           = useState(() => Date.now());
   const [fx,               setFx]                = useState<{ rate: number; label: string } | null>(null);
 
   // Which user row is expanded to show clock-in detail
@@ -696,12 +700,14 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
     let cancelled = false;
     fetch(`/api/attendance?week=${weekStart}`)
       .then(r => r.json())
-      .then((d: { users?: TeamUser[]; records?: AttendanceRecord[]; timesheetsByDay?: Record<string, number>; error?: string }) => {
+      .then((d: { users?: TeamUser[]; records?: AttendanceRecord[]; timesheetsByDay?: Record<string, number>; openSessions?: Record<string, string>; allowanceByUser?: Record<string, number>; error?: string }) => {
         if (cancelled) return;
         if (d.error) { setWeekError(d.error); return; }
         setTeamUsers(d.users ?? []);
         setTeamRecords(d.records ?? []);
         setTimesheetsByDay(d.timesheetsByDay ?? {});
+        setOpenSessions(d.openSessions ?? {});
+        setAllowanceByUser(d.allowanceByUser ?? {});
       })
       .catch(() => { if (!cancelled) setWeekError('Failed to load attendance data.'); })
       .finally(() => { if (!cancelled) setWeekLoading(false); });
@@ -726,6 +732,15 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
     const id = setInterval(pull, 5 * 60 * 1000);
     return () => { cancelled = true; clearInterval(id); };
   }, []);
+
+  // Live-tick the running week totals once per second while any displayed member
+  // is still clocked in (has an open session). No open sessions → no timer.
+  const hasOpenSession = Object.keys(openSessions).length > 0;
+  useEffect(() => {
+    if (!hasOpenSession) return;
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [hasOpenSession]);
 
   // Monthly state
   const [month, setMonth] = useState(getCurrentYearMonth());
@@ -1008,7 +1023,12 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                   <tbody>
                     {pagedWeeklyUsers.map(user => {
                       const rec = teamRecords.find(r => r.userId === user.id);
-                      const weekSeconds = weekdayDateStrs.reduce((sum, d) => sum + (timesheetsByDay[`${user.id}:${d}`] ?? 0), 0);
+                      const completedWeekSeconds = weekdayDateStrs.reduce((sum, d) => sum + (timesheetsByDay[`${user.id}:${d}`] ?? 0), 0);
+                      // Add the live elapsed of an open session so the total ticks in real time.
+                      const openAt = openSessions[String(user.id)];
+                      const liveSeconds = openAt ? Math.max(0, Math.floor((nowTick - new Date(openAt).getTime()) / 1000)) : 0;
+                      const weekSeconds = completedWeekSeconds + liveSeconds;
+                      const allotted = allowanceByUser[String(user.id)] ?? WEEKLY_CAP_SECONDS;
                       const isExpanded = expandedUserId === user.id;
                       const detailDays: DetailDay[] = DAY_KEYS.map((dayKey, index) => ({
                         key: dayKey,
@@ -1066,9 +1086,22 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                               );
                             })}
                             <td className="text-center py-4 px-4 align-middle">
-                              {weekSeconds > 0
-                                ? <span className="text-sm font-semibold text-(--rs-neutral-grey-900)">{fmtSeconds(weekSeconds)}</span>
-                                : <span className="text-(--rs-neutral-grey-300) text-sm">—</span>}
+                              {weekSeconds > 0 ? (
+                                <div className="leading-tight whitespace-nowrap">
+                                  <span className={`text-sm font-semibold ${weekSeconds >= allotted ? 'text-amber-700' : 'text-(--rs-neutral-grey-900)'}`}>
+                                    {fmtSeconds(weekSeconds)}
+                                  </span>
+                                  <span className="text-(--rs-neutral-grey-400) text-xs"> / {fmtSeconds(allotted)}</span>
+                                  {openAt && (
+                                    <span
+                                      className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-green-500 align-middle animate-pulse"
+                                      title="Clocked in now — live"
+                                    />
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-(--rs-neutral-grey-300) text-sm">—</span>
+                              )}
                             </td>
                           </tr>
                           {isExpanded && (

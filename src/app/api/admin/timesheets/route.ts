@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { computeOvertime } from '@/lib/utils';
-import { weeklySecondsForUser } from '@/lib/overtime-server';
+import { weeklySecondsForUser, baseWeeklySecondsForUser } from '@/lib/overtime-server';
 import { route, requireAdmin, requireReports } from '@/lib/api';
 
 export const runtime = 'nodejs';
@@ -171,8 +171,11 @@ export const PATCH = route(async (req: Request) => {
     const durationSeconds = Math.round((outDate.getTime() - inDate.getTime()) / 1000);
     // Weekly OT for this row: sum the user's other completed sessions in the
     // edited row's week, then take the slice of this session beyond 15h.
-    const weekSecondsBefore = await weeklySecondsForUser(admin, existing.user_id, inDate, id);
-    const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds);
+    const [weekSecondsBefore, baseSeconds] = await Promise.all([
+      weeklySecondsForUser(admin, existing.user_id, inDate, id),
+      baseWeeklySecondsForUser(admin, existing.user_id),
+    ]);
+    const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds, baseSeconds);
     update.duration_seconds = durationSeconds;
     update.is_overtime = isOvertime ? 1 : 0;
     update.overtime_seconds = isOvertime ? overtimeSeconds : null;

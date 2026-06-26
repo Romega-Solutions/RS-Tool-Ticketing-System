@@ -1,5 +1,6 @@
 import { createAdminClient } from './supabase/admin';
-import { weekDates, planEnforcement } from './overtime-policy';
+import { weekDates, weekStartMonday, planEnforcement } from './overtime-policy';
+import { WEEKLY_CAP_SECONDS } from './utils';
 import { clockOut } from './presence';
 import { HttpError } from './api/errors';
 
@@ -52,17 +53,79 @@ export async function weeklySecondsForUsers(
   return out;
 }
 
-/** Latest active overtime approval timestamp for a user, or null. */
-export async function activeApprovalUntil(admin: Admin, userId: number): Promise<string | null> {
+/**
+ * Approved overtime granted to a user for the Mon–Sun week of `now`, in seconds
+ * (the sum of every approved request's grant for that week_start).
+ */
+export async function grantedOvertimeForUser(admin: Admin, userId: number, now: Date): Promise<number> {
   const { data } = await admin
     .from('overtime_requests')
-    .select('approved_until')
+    .select('granted_seconds')
     .eq('user_id', userId)
-    .eq('status', 'approved')
-    .not('approved_until', 'is', null)
-    .order('approved_until', { ascending: false })
-    .limit(1);
-  return (data?.[0]?.approved_until as string | undefined) ?? null;
+    .eq('week_start', weekStartMonday(now))
+    .eq('status', 'approved');
+  let sum = 0;
+  for (const r of (data ?? []) as { granted_seconds: number | null }[]) sum += r.granted_seconds ?? 0;
+  return sum;
+}
+
+/**
+ * This user's weekly BASE in seconds = `users.approved_hours_per_week` × 3600.
+ * Defaults to the 15h base when the column is absent/null or the lookup fails, so
+ * it's safe before the migration runs and identical to the old flat cap then.
+ */
+export async function baseWeeklySecondsForUser(admin: Admin, userId: number): Promise<number> {
+  try {
+    const { data } = await admin.from('users').select('approved_hours_per_week').eq('id', userId).maybeSingle();
+    const hrs = (data as { approved_hours_per_week?: number | null } | null)?.approved_hours_per_week;
+    return hrs != null && Number.isFinite(Number(hrs)) ? Number(hrs) * 3600 : WEEKLY_CAP_SECONDS;
+  } catch { return WEEKLY_CAP_SECONDS; }
+}
+
+/** Batched weekly base seconds; every requested id is present, defaulting to the 15h base. */
+export async function baseWeeklySecondsForUsers(admin: Admin, userIds: number[]): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  for (const id of userIds) out.set(id, WEEKLY_CAP_SECONDS);
+  if (userIds.length === 0) return out;
+  try {
+    const { data } = await admin.from('users').select('id, approved_hours_per_week').in('id', userIds);
+    for (const u of (data ?? []) as { id: number; approved_hours_per_week: number | null }[]) {
+      if (u.approved_hours_per_week != null && Number.isFinite(Number(u.approved_hours_per_week))) {
+        out.set(u.id, Number(u.approved_hours_per_week) * 3600);
+      }
+    }
+  } catch { /* leave defaults */ }
+  return out;
+}
+
+/** This user's weekly allowance: their approved-hours base + approved grants this week. */
+export async function weeklyAllowanceForUser(admin: Admin, userId: number, now: Date): Promise<number> {
+  const [base, grants] = await Promise.all([
+    baseWeeklySecondsForUser(admin, userId),
+    grantedOvertimeForUser(admin, userId, now),
+  ]);
+  return base + grants;
+}
+
+/**
+ * Weekly allowance for many users at once (batched), for the Mon–Sun week of
+ * `now`. Every requested user is present in the map, seeded with their
+ * approved-hours base; an approved grant adds on top. Non-fatal: a failed lookup
+ * leaves everyone at the 15h base so enforcement still runs.
+ */
+export async function weeklyAllowanceForUsers(admin: Admin, userIds: number[], now: Date): Promise<Map<number, number>> {
+  const out = await baseWeeklySecondsForUsers(admin, userIds);
+  if (userIds.length === 0) return out;
+  const { data } = await admin
+    .from('overtime_requests')
+    .select('user_id, granted_seconds')
+    .in('user_id', userIds)
+    .eq('week_start', weekStartMonday(now))
+    .eq('status', 'approved');
+  for (const r of (data ?? []) as { user_id: number; granted_seconds: number | null }[]) {
+    out.set(r.user_id, (out.get(r.user_id) ?? WEEKLY_CAP_SECONDS) + (r.granted_seconds ?? 0));
+  }
+  return out;
 }
 
 /**
@@ -88,17 +151,17 @@ export async function enforceUserOpenSession(
     .maybeSingle();
   if (!open) return null;
 
-  const [{ data: user }, weekSecondsBefore, approvedUntil] = await Promise.all([
-    admin.from('users').select('role').eq('id', userId).maybeSingle(),
+  const [weekSecondsBefore, allowanceSeconds, baseSeconds] = await Promise.all([
     weeklySecondsForUser(admin, userId, now),
-    activeApprovalUntil(admin, userId),
+    weeklyAllowanceForUser(admin, userId, now),
+    baseWeeklySecondsForUser(admin, userId),
   ]);
 
   const plan = planEnforcement({
-    role:              (user?.role as string | undefined) ?? null,
     clockedInAt:       open.clocked_in_at as string,
     weekSecondsBefore,
-    approvedUntil,
+    allowanceSeconds,
+    baseSeconds,
     now,
   });
   if (!plan.close) return null;
@@ -127,11 +190,11 @@ type SweepResult = {
 };
 
 /**
- * Batched weekly-cap sweep: close every open session the policy says must end
- * now (15h weekly cap for every role incl. admins, 16h absolute ceiling for
- * everyone; an active admin approval suspends the weekly cap). This is the SINGLE sweep used
- * by both the daily cron and the throttled activity backstop, so the cap is
- * enforced identically no matter what triggers it.
+ * Batched weekly-allowance sweep: close every open session the policy says must
+ * end now (each user's allowance = 15h base + approved grants this week, for
+ * every role incl. admins; 16h absolute single-session ceiling for everyone).
+ * This is the SINGLE sweep used by both the daily cron and the throttled activity
+ * backstop, so the ceiling is enforced identically no matter what triggers it.
  */
 export async function sweepOpenSessions(admin: Admin, now: Date): Promise<SweepResult> {
   const { data: openRows, error: openErr } = await admin
@@ -143,18 +206,11 @@ export async function sweepOpenSessions(admin: Admin, now: Date): Promise<SweepR
   const rows = (openRows ?? []) as { id: number; user_id: number; clocked_in_at: string }[];
   const userIds = [...new Set(rows.map(r => r.user_id))];
 
-  const roleByUserId     = new Map<number, string>();
-  const weekSecByUserId  = new Map<number, number>();
-  const approvalByUserId = new Map<number, string>();
+  const weekSecByUserId = new Map<number, number>();
+  let allowanceByUserId = new Map<number, number>();
+  let baseByUserId = new Map<number, number>();
 
   if (userIds.length > 0) {
-    const { data: users, error: userErr } = await admin
-      .from('users').select('id, role').in('id', userIds);
-    if (userErr) throw new HttpError(500, userErr.message);
-    for (const u of (users ?? []) as { id: number; role: string }[]) {
-      roleByUserId.set(u.id, u.role);
-    }
-
     // Completed seconds this Mon–Sun per user (open sessions have null duration
     // so they're naturally excluded and counted via elapsed in planEnforcement).
     const { data: ts, error: tsErr } = await admin
@@ -168,21 +224,10 @@ export async function sweepOpenSessions(admin: Admin, now: Date): Promise<SweepR
       weekSecByUserId.set(t.user_id, (weekSecByUserId.get(t.user_id) ?? 0) + t.duration_seconds);
     }
 
-    // Latest active overtime approval per user. Non-fatal: if the lookup fails,
-    // treat everyone as unapproved so enforcement still runs.
-    const { data: appr, error: apprErr } = await admin
-      .from('overtime_requests')
-      .select('user_id, approved_until')
-      .in('user_id', userIds)
-      .eq('status', 'approved')
-      .not('approved_until', 'is', null);
-    if (apprErr) console.error('[sweepOpenSessions] approval lookup failed (continuing):', apprErr.message);
-    for (const a of (appr ?? []) as { user_id: number; approved_until: string }[]) {
-      const prev = approvalByUserId.get(a.user_id);
-      if (!prev || new Date(a.approved_until).getTime() > new Date(prev).getTime()) {
-        approvalByUserId.set(a.user_id, a.approved_until);
-      }
-    }
+    // Each user's weekly allowance = their approved-hours base + grants this week;
+    // baseByUserId is the same base alone, used to measure the OT slice.
+    allowanceByUserId = await weeklyAllowanceForUsers(admin, userIds, now);
+    baseByUserId = await baseWeeklySecondsForUsers(admin, userIds);
   }
 
   const closed:  SweepResult['closed']  = [];
@@ -190,10 +235,10 @@ export async function sweepOpenSessions(admin: Admin, now: Date): Promise<SweepR
 
   for (const row of rows) {
     const plan = planEnforcement({
-      role:              roleByUserId.get(row.user_id),
       clockedInAt:       row.clocked_in_at,
       weekSecondsBefore: weekSecByUserId.get(row.user_id) ?? 0,
-      approvedUntil:     approvalByUserId.get(row.user_id) ?? null,
+      allowanceSeconds:  allowanceByUserId.get(row.user_id) ?? WEEKLY_CAP_SECONDS,
+      baseSeconds:       baseByUserId.get(row.user_id) ?? WEEKLY_CAP_SECONDS,
       now,
     });
 

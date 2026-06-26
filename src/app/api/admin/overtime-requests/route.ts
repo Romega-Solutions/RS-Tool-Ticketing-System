@@ -15,11 +15,13 @@ type Row = {
   decided_by: number | null;
   decided_at: string | null;
   approved_until: string | null;
+  granted_seconds: number | null;
 };
 
-// Overtime is now granted in bounded slices: an admin extends by 30 minutes,
-// 1 hour, or 2 hours from the moment of approval (default 1 hour). The approval
-// stays active until `approved_until`, then the weekly cap re-applies.
+// Overtime is granted in bounded slices: an admin grants +30 minutes, +1 hour,
+// or +2 hours (default 1 hour). The grant RAISES that user's weekly allowance
+// for the request's week (granted_seconds added on top of the 15h base);
+// approved_until is kept only as an audit record of when it was granted.
 const ALLOWED_OT_MINUTES = new Set([30, 60, 120]);
 const DEFAULT_OT_MINUTES = 60;
 
@@ -35,7 +37,7 @@ export const GET = route(async () => {
   const admin = createAdminClient();
   const { data, error } = await admin
     .from('overtime_requests')
-    .select('id, user_id, week_start, status, reason, requested_at, decided_by, decided_at, approved_until')
+    .select('id, user_id, week_start, status, reason, requested_at, decided_by, decided_at, approved_until, granted_seconds')
     .order('status', { ascending: true })        // 'approved' < 'denied' < 'pending' alphabetically — re-sorted below
     .order('requested_at', { ascending: false })
     .limit(100);
@@ -80,8 +82,8 @@ export const POST = route(async (req: Request) => {
   const minutes = normalizeOtMinutes(body.minutes);
   const approvedUntil = new Date(now.getTime() + minutes * 60_000).toISOString();
   const patch = body.action === 'approve'
-    ? { status: 'approved', decided_by: session.id, decided_at: now.toISOString(), approved_until: approvedUntil }
-    : { status: 'denied',   decided_by: session.id, decided_at: now.toISOString(), approved_until: null };
+    ? { status: 'approved', decided_by: session.id, decided_at: now.toISOString(), approved_until: approvedUntil, granted_seconds: minutes * 60 }
+    : { status: 'denied',   decided_by: session.id, decided_at: now.toISOString(), approved_until: null, granted_seconds: null };
 
   const { data, error } = await admin
     .from('overtime_requests')

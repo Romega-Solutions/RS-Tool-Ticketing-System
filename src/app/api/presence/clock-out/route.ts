@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clockOut } from '@/lib/presence';
 import { computeOvertime } from '@/lib/utils';
-import { weeklySecondsForUser } from '@/lib/overtime-server';
+import { weeklySecondsForUser, baseWeeklySecondsForUser } from '@/lib/overtime-server';
 import { route, requireSession, badRequest } from '@/lib/api';
 
 export const runtime = 'nodejs';
@@ -25,10 +25,13 @@ export const POST = route(async () => {
   const nowDate = new Date();
   const now = nowDate.toISOString();
   const durationSeconds = Math.round((Date.now() - new Date(open.clocked_in_at).getTime()) / 1000);
-  // Overtime is the slice of this session beyond the 15h weekly cap. The open
-  // row has a null duration, so it's naturally excluded from the week sum.
-  const weekSecondsBefore = await weeklySecondsForUser(admin, session.id, nowDate);
-  const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds);
+  // Overtime is the slice of this session beyond the user's approved-hours base.
+  // The open row has a null duration, so it's naturally excluded from the week sum.
+  const [weekSecondsBefore, baseSeconds] = await Promise.all([
+    weeklySecondsForUser(admin, session.id, nowDate),
+    baseWeeklySecondsForUser(admin, session.id),
+  ]);
+  const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds, baseSeconds);
 
   await admin
     .from('timesheets')

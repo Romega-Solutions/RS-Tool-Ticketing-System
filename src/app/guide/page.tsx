@@ -1,38 +1,12 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import {
-  UserPlus, Mail, UserCheck, LayoutDashboard,
   GraduationCap, User, Users, Building2, Shield,
   CheckSquare, Calendar, FileText, BarChart2,
-  ArrowLeft, ArrowRight,
+  ArrowLeft,
 } from 'lucide-react';
-
-const FLOW_STEPS = [
-  {
-    n: 1,
-    icon: UserPlus,
-    title: 'Create Account',
-    desc: 'Sign up with your work or Gmail email on the login page.',
-  },
-  {
-    n: 2,
-    icon: Mail,
-    title: 'Confirm Email',
-    desc: 'Click the confirmation link we send to activate your account.',
-  },
-  {
-    n: 3,
-    icon: UserCheck,
-    title: 'Set Up Profile',
-    desc: 'Choose your role, department, and job title during onboarding.',
-  },
-  {
-    n: 4,
-    icon: LayoutDashboard,
-    title: 'Start Working',
-    desc: 'Access your dashboard, tasks, reports, and team tools.',
-  },
-];
+import { GoogleIcon } from '@/components/google-icon';
+import { SignupStepper } from '@/components/guide/signup-stepper.client';
 
 const ROLES = [
   {
@@ -115,8 +89,8 @@ const FEATURES = [
 
 export default function GuidePage() {
   return (
-    <div className="min-h-screen bg-(--rs-primary-50) px-4 py-12">
-      <div className="mx-auto max-w-4xl animate-auth-enter">
+    <div className="min-h-screen bg-(--rs-primary-50) px-4 sm:px-6 lg:px-10 py-12">
+      <div className="mx-auto w-full max-w-[1600px] animate-auth-enter">
 
         {/* Header */}
         <div className="mb-10 text-center flex flex-col items-center gap-3">
@@ -133,45 +107,19 @@ export default function GuidePage() {
           <div>
             <h1 className="text-3xl font-serif font-bold text-(--rs-neutral-grey-900)">Getting Started</h1>
             <p className="mt-2 text-sm text-(--rs-neutral-grey-500) max-w-md mx-auto">
-              Your visual guide to the RS Ticketing System — everything you need to know before signing up.
+              Your visual guide to the RS Ticketing System — everything you need to know before you sign in.
             </p>
           </div>
         </div>
 
-        {/* How It Works */}
+        {/* How you sign in (interactive) */}
         <section className="mb-8">
           <div className="rounded-2xl border border-(--color-border) bg-white p-8 shadow-[var(--shadow-elevated)]">
-            <h2 className="text-lg font-serif font-bold text-(--rs-neutral-grey-900) mb-6">How It Works</h2>
-            <div className="flex flex-col md:flex-row items-start gap-0">
-              {FLOW_STEPS.map((step, i) => (
-                <div key={step.n} className="flex md:flex-col items-start md:items-center flex-1 gap-4 md:gap-0">
-                  {/* Step content */}
-                  <div className="flex md:flex-col items-center md:items-center gap-3 flex-1 md:text-center">
-                    {/* Circle + connector row */}
-                    <div className="flex items-center md:flex-col">
-                      <div className="w-10 h-10 rounded-full bg-(--rs-primary-500) text-white flex items-center justify-center shrink-0 shadow-sm">
-                        <step.icon className="w-5 h-5" />
-                      </div>
-                      {/* horizontal connector on desktop */}
-                      {i < FLOW_STEPS.length - 1 && (
-                        <div className="hidden md:block h-0.5 w-full bg-(--rs-primary-200) mx-0" />
-                      )}
-                      {/* vertical connector on mobile */}
-                      {i < FLOW_STEPS.length - 1 && (
-                        <div className="md:hidden w-0.5 h-8 bg-(--rs-primary-200) ml-5 mt-1" />
-                      )}
-                    </div>
-                    <div className="md:mt-3 md:px-2">
-                      <div className="flex items-center gap-2 md:justify-center">
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-(--rs-primary-400)">{step.n}</span>
-                        <p className="text-sm font-bold text-(--rs-neutral-grey-900)">{step.title}</p>
-                      </div>
-                      <p className="text-xs text-(--rs-neutral-grey-500) mt-1 leading-relaxed">{step.desc}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <h2 className="text-lg font-serif font-bold text-(--rs-neutral-grey-900)">How you sign in</h2>
+            <p className="mt-1 mb-6 text-sm text-(--rs-neutral-grey-500)">
+              Sign-in is Google-only — one click, no password to set up. Tap a step to see what happens.
+            </p>
+            <SignupStepper />
           </div>
         </section>
 
@@ -182,7 +130,7 @@ export default function GuidePage() {
             <p className="text-sm text-(--rs-neutral-grey-500) mb-6">
               Pick the role that best describes you during onboarding. Your admin can update it anytime.
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
               {ROLES.map(role => (
                 <div
                   key={role.label}
@@ -213,7 +161,7 @@ export default function GuidePage() {
         <section className="mb-10">
           <div className="rounded-2xl border border-(--color-border) bg-white p-8 shadow-[var(--shadow-elevated)]">
             <h2 className="text-lg font-serif font-bold text-(--rs-neutral-grey-900) mb-6">What&apos;s Inside</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {FEATURES.map(feat => (
                 <div key={feat.title} className="flex items-start gap-3 p-4 rounded-xl border border-(--color-border)">
                   <div className={`w-9 h-9 rounded-lg ${feat.bg} flex items-center justify-center shrink-0`}>
@@ -229,22 +177,21 @@ export default function GuidePage() {
           </div>
         </section>
 
-        {/* CTAs */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+        {/* CTAs — Google-only sign-in */}
+        <div className="flex flex-col-reverse sm:flex-row items-center justify-center gap-3">
           <Link
             href="/login"
-            className="inline-flex items-center gap-2 rounded-xl border border-(--rs-primary-300) bg-white px-5 py-2.5 text-sm font-semibold text-(--rs-primary-600) hover:bg-(--rs-primary-50) transition-colors"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-800) transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
-            Back to Sign In
+            Back to sign in
           </Link>
           <Link
             href="/login"
-            className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white transition-all hover:opacity-90"
-            style={{ background: 'var(--color-primary)' }}
+            className="inline-flex items-center gap-3 rounded-xl border border-(--rs-neutral-grey-200) bg-white px-6 py-3 text-sm font-semibold text-(--rs-neutral-grey-800) shadow-sm transition-colors hover:bg-(--rs-neutral-grey-50) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300)"
           >
-            Create Account
-            <ArrowRight className="w-4 h-4" />
+            <GoogleIcon className="h-4 w-4" />
+            Continue with Google
           </Link>
         </div>
 

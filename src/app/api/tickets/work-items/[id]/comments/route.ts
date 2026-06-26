@@ -56,7 +56,9 @@ export const POST = route(async (req: Request, { params }: { params: Promise<{ i
           actorName:    session.name,
           projectName,
           snippet:      trimmed.slice(0, 120),
-          link:         `/projects/${detail.project_id}`,
+          // Deep-link straight to the task and the exact comment they were tagged
+          // in (the board reads ?task / ?comment to open the sheet and scroll).
+          link:         `/projects/${detail.project_id}?task=${id}&comment=${created.id}`,
         });
       }
     }

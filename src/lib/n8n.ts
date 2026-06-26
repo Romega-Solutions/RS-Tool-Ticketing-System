@@ -297,6 +297,48 @@ export async function notifyOnboardingWebhook(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Account-setup email — sent through the existing GENERIC n8n sender
+// "OpenClaw - Send Email via Gmail" (webhook path /webhook/openclaw-send-email,
+// wired via N8N_ACCOUNT_SETUP_URL). Contract: POST { to, subject, body } → it
+// sends `body` as a PLAIN-TEXT Gmail and responds { status: 'sent' | 'error' }.
+// The app owns + renders the template (src/lib/email-templates.ts); n8n only
+// sends. Same fire-and-forget, never-throws, 8s-ceiling contract as above.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function sendAccountSetupEmail(msg: {
+  to: string;
+  subject: string;
+  body: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const url = process.env.N8N_ACCOUNT_SETUP_URL?.trim();
+  if (!url) {
+    return { ok: false, error: 'N8N_ACCOUNT_SETUP_URL is not configured' };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(msg),
+      signal:  controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) {
+      // OpenClaw returns { status:'error', message } on a 400 — surface it.
+      let detail = '';
+      try { detail = ((await res.json())?.message as string) ?? ''; } catch { /* non-JSON */ }
+      return { ok: false, error: detail || `n8n responded ${res.status}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    clearTimeout(timer);
+    return { ok: false, error: err instanceof Error ? err.message : 'network error' };
+  }
+}
+
 export async function parseResumeWithN8n(
   file: File,
   candidateId?: string | number,

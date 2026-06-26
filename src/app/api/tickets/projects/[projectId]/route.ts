@@ -14,6 +14,7 @@ const patchProjectSchema = z.object({
   name: z.string().trim().min(1, 'Project name cannot be blank').optional(),
   description: z.string().nullable().optional(),
   team: z.string().nullable().optional(),
+  autoArchiveDoneDays: z.number().int().nullable().optional(),   // null/0 = off
 });
 
 // PATCH /api/tickets/projects/[projectId]

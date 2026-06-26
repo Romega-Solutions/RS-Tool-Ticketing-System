@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { clockIn } from '@/lib/presence';
 import { getPhotoResolver } from '@/lib/orgchart';
 import { decideClockInAllowed } from '@/lib/overtime-policy';
-import { weeklySecondsForUser, activeApprovalUntil, enforceUserOpenSession } from '@/lib/overtime-server';
+import { weeklySecondsForUser, weeklyAllowanceForUser, enforceUserOpenSession } from '@/lib/overtime-server';
 import { route, requireSession, parseBody, badRequest } from '@/lib/api';
 
 export const runtime = 'nodejs';
@@ -125,19 +125,14 @@ export const POST = route(async (req: Request) => {
     });
   }
 
-  // Weekly-cap gate: block a NEW session when the contractor has already hit
-  // 15h this week with no active admin approval. Resuming an open session
-  // (handled above) is always allowed; the cron enforces caps on running ones.
-  const approvedUntil = await activeApprovalUntil(admin, session.id);
-  const gate = decideClockInAllowed({
-    role:              session.role,
-    weekSecondsBefore,
-    approvedUntil,
-    now:               nowDate,
-  });
+  // Weekly-allowance gate: block a NEW session once the contractor has reached
+  // their weekly allowance (15h base + approved grants). Resuming an open session
+  // (handled above) is always allowed; the cron enforces the ceiling on running ones.
+  const allowanceSeconds = await weeklyAllowanceForUser(admin, session.id, nowDate);
+  const gate = decideClockInAllowed({ weekSecondsBefore, allowanceSeconds });
   if (!gate.allowed) {
     return NextResponse.json(
-      { error: 'Weekly 15-hour limit reached. Request overtime approval to continue.', code: 'weekly_cap' },
+      { error: 'Weekly hour limit reached. Request overtime approval to continue.', code: 'weekly_cap' },
       { status: 403 },
     );
   }

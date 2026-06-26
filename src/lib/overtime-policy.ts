@@ -1,27 +1,27 @@
-import { WEEKLY_CAP_SECONDS, SAFETY_CEILING_SECONDS, computeOvertime } from './utils';
+import { SAFETY_CEILING_SECONDS, computeOvertime } from './utils';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Pure overtime policy. All thresholds and decisions live here with no I/O,
 // so the cron, the clock-in route, and the UI share one tested source of
-// truth. Overtime is gated behind an admin approval and bounded by a 15h
-// Mon–Sun weekly cap — there is no per-session or per-day cap, and no role is
-// exempt (admins are capped exactly like everyone else). Only an active admin
-// approval suspends the cap, and an absolute 16h safety ceiling applies to all.
+// truth.
+//
+// Overtime is BUDGET-based: each user's weekly ALLOWANCE = the 15h Mon–Sun base
+// cap PLUS any admin-approved overtime granted this week. Approving "+2h" raises
+// the allowance to 17h — it does not merely open a wall-clock window. Enforcement
+// is a hard ceiling at the allowance; once a user reaches it, the running session
+// is cut and new clock-ins are blocked until the next week (or another grant). No
+// role is exempt (admins included). An absolute 16h single-session safety ceiling
+// still applies to everyone as a ghost-session guard.
 // ─────────────────────────────────────────────────────────────────────────
 
-function approvalActive(approvedUntil: string | null, now: Date): boolean {
-  if (!approvedUntil) return false;
-  const ms = new Date(approvedUntil).getTime();
-  return Number.isFinite(ms) && now.getTime() < ms;
-}
-
 export type AutoClockOutInput = {
-  role:              string | null | undefined;
   clockedInAt:       string;
   /** Completed (clocked-out) seconds for this user this Mon–Sun week, excluding the open session. */
   weekSecondsBefore: number;
-  /** Latest active admin OT approval (ISO), or null. */
-  approvedUntil:     string | null;
+  /** This week's hard ceiling: base allotment + admin-approved overtime granted this week. */
+  allowanceSeconds:  number;
+  /** This user's weekly base (approved hours × 3600). The OT slice is measured against this; defaults to the 15h base. */
+  baseSeconds?:      number;
   now:               Date;
 };
 
@@ -38,18 +38,14 @@ export function decideAutoClockOut(input: AutoClockOutInput): AutoClockOutDecisi
   }
   const elapsedSec = Math.max(0, Math.round((input.now.getTime() - clockedInMs) / 1000));
 
-  // 1. Absolute safety ceiling — every role, no exceptions (ghost-session guard).
+  // 1. Absolute single-session safety ceiling — every role, no exceptions
+  //    (ghost-session guard for a tab left open / a forgotten clock-out).
   if (elapsedSec >= SAFETY_CEILING_SECONDS) {
     return { action: 'close', elapsedSec, reason: 'safety ceiling' };
   }
-  // 2. An active admin approval suspends the weekly cap (the only exemption — no
-  //    role, including admin, is exempt without one).
-  if (approvalActive(input.approvedUntil, input.now)) {
-    return { action: 'skip', reason: 'approved overtime' };
-  }
-  // 3. 15h weekly cap (already-completed seconds + this running session).
-  if (input.weekSecondsBefore + elapsedSec >= WEEKLY_CAP_SECONDS) {
-    return { action: 'close', elapsedSec, reason: 'weekly cap' };
+  // 2. Weekly allowance (15h base + approved grants). Hard ceiling for everyone.
+  if (input.weekSecondsBefore + elapsedSec >= input.allowanceSeconds) {
+    return { action: 'close', elapsedSec, reason: 'weekly allowance' };
   }
   return { action: 'skip', reason: 'within limits' };
 }
@@ -58,17 +54,18 @@ export type EnforcementPlan =
   | { close: false; reason: string }
   | { close: true; durationSeconds: number; isOvertime: boolean; overtimeSeconds: number | null; reason: string };
 
-// Pure: given an open session's context, decide whether the weekly-cap policy
+// Pure: given an open session's context, decide whether the allowance policy
 // requires closing it *now* and, if so, the exact timesheet fields to write.
 // Composes decideAutoClockOut (should we close?) with computeOvertime (how much
-// of the elapsed slice is overtime). Shared by the daily cron AND the
-// close-on-read path so both produce byte-identical results — there is one
-// enforcement decision in the codebase, not two that can drift.
+// of the elapsed slice is overtime — still measured against the 15h base, so
+// payroll's overtime accounting is unchanged even when the allowance is raised).
+// Shared by the daily cron AND the close-on-read path so both produce
+// byte-identical results — one enforcement decision, not two that can drift.
 export function planEnforcement(input: AutoClockOutInput): EnforcementPlan {
   const decision = decideAutoClockOut(input);
   if (decision.action === 'skip') return { close: false, reason: decision.reason };
 
-  const { isOvertime, overtimeSeconds } = computeOvertime(input.weekSecondsBefore, decision.elapsedSec);
+  const { isOvertime, overtimeSeconds } = computeOvertime(input.weekSecondsBefore, decision.elapsedSec, input.baseSeconds);
   return {
     close: true,
     durationSeconds: decision.elapsedSec,
@@ -79,46 +76,43 @@ export function planEnforcement(input: AutoClockOutInput): EnforcementPlan {
 }
 
 export type ClockInInput = {
-  role:              string | null | undefined;
   /** Completed seconds for this user this Mon–Sun week. */
   weekSecondsBefore: number;
-  approvedUntil:     string | null;
-  now:               Date;
+  /** This week's hard ceiling: 15h base + approved grants. */
+  allowanceSeconds:  number;
 };
 
 export type ClockInDecision =
   | { allowed: true }
   | { allowed: false; reason: string };
 
-// May this user start a new clock-in session right now? No role is exempt; the
-// only thing that lifts the 15h cap is an active admin approval.
+// May this user start a new clock-in session right now? Blocked once their
+// completed week-to-date has reached their allowance; an admin grant raises the
+// allowance and so re-opens clock-in. No role is exempt.
 export function decideClockInAllowed(input: ClockInInput): ClockInDecision {
-  if (approvalActive(input.approvedUntil, input.now)) return { allowed: true };
-  if (input.weekSecondsBefore >= WEEKLY_CAP_SECONDS) {
-    return { allowed: false, reason: 'weekly cap reached' };
+  if (input.weekSecondsBefore >= input.allowanceSeconds) {
+    return { allowed: false, reason: 'weekly allowance reached' };
   }
   return { allowed: true };
 }
 
-/** Current-week overtime-request status as the browser knows it. */
+/** Current-week overtime-request status as the browser knows it (for CTA labels). */
 export type WeeklyCapRequestStatus = 'none' | 'pending' | 'approved';
 
 export type ClockInCapLockInput = {
   /** Completed seconds for this user this Mon–Sun week. */
   weekSecondsBefore: number;
-  /** This week's overtime-request status. */
-  requestStatus:     WeeklyCapRequestStatus;
+  /** This week's hard ceiling: 15h base + approved grants. */
+  allowanceSeconds:  number;
 };
 
 // Browser-side mirror of `decideClockInAllowed` for a *clocked-out* user: should
-// the Clock In button be locked (disabled) because they're at/over the 15h cap
-// with no active approval? No role is exempt (admins are capped too); an
-// approved overtime request unlocks clock-in, while a merely *pending* request
-// keeps it locked until the admin approves. Pure so the widget and tests share
-// one rule.
+// the Clock In button be locked because they've reached their weekly allowance?
+// Because an approved grant raises `allowanceSeconds`, the lock lifts on its own
+// once the allowance exceeds their used time — no separate approval flag needed.
+// Pure so the widget and tests share one rule.
 export function isClockInCapLocked(input: ClockInCapLockInput): boolean {
-  if (input.requestStatus === 'approved') return false;
-  return input.weekSecondsBefore >= WEEKLY_CAP_SECONDS;
+  return input.weekSecondsBefore >= input.allowanceSeconds;
 }
 
 /** Monday (local) of the week containing `date`, as YYYY-MM-DD. */

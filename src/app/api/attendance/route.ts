@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getPhotoResolver } from '@/lib/orgchart';
 import { route, requireAdmin, requireReports, parseBody, badRequest } from '@/lib/api';
+import { WEEKLY_CAP_SECONDS } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 
@@ -198,7 +199,7 @@ export const GET = route(async (req: Request) => {
     .eq('week_start', weekStart);
   const rawRecords = rawRecordsData ?? [];
 
-  let usersQuery = admin.from('users').select('id, name, email, team, role, member_code, hourly_rate_usd').eq('is_active', 1);
+  let usersQuery = admin.from('users').select('id, name, email, team, role, member_code, hourly_rate_usd, approved_hours_per_week').eq('is_active', 1);
   if (session.role !== 'admin') {
     usersQuery = usersQuery.eq('team', session.team ?? '');
   }
@@ -257,6 +258,40 @@ export const GET = route(async (req: Request) => {
     }
   }
 
+  // Open (still-clocked-in) sessions whose day falls in this week, so the client
+  // can render a *live* week total that ticks while someone is clocked in. At most
+  // one open session per user, and only for the current week (a past week has
+  // none). Plus each user's weekly allowance (their approved-hours base + approved
+  // overtime grants for this week) for the "total / allotted" denominator.
+  const openSessions: Record<number, string> = {};
+  const allowanceByUser: Record<number, number> = {};
+  const baseByUser: Record<number, number> = {};
+  for (const u of teamUsers as { id: number; approved_hours_per_week?: number | null }[]) {
+    baseByUser[u.id] = (u.approved_hours_per_week != null ? Number(u.approved_hours_per_week) : 15) * 3600;
+  }
+  for (const id of userIds) allowanceByUser[id] = baseByUser[id] ?? WEEKLY_CAP_SECONDS;
+  if (userIds.length > 0) {
+    const { data: openData } = await admin
+      .from('timesheets')
+      .select('user_id, clocked_in_at')
+      .in('user_id', userIds)
+      .in('date', weekDates)
+      .is('clocked_out_at', null);
+    for (const o of (openData ?? []) as { user_id: number; clocked_in_at: string }[]) {
+      openSessions[o.user_id] = o.clocked_in_at;
+    }
+
+    const { data: grantData } = await admin
+      .from('overtime_requests')
+      .select('user_id, granted_seconds')
+      .in('user_id', userIds)
+      .eq('week_start', weekStart)
+      .eq('status', 'approved');
+    for (const g of (grantData ?? []) as { user_id: number; granted_seconds: number | null }[]) {
+      allowanceByUser[g.user_id] = (allowanceByUser[g.user_id] ?? WEEKLY_CAP_SECONDS) + (g.granted_seconds ?? 0);
+    }
+  }
+
   const usersOut = (teamUsers as { id: number; name: string; email: string | null; team: string | null; role: string; member_code: string | null; hourly_rate_usd: number | string | null }[])
     .map(u => ({
       id: u.id, name: u.name, team: u.team, role: u.role,
@@ -265,7 +300,7 @@ export const GET = route(async (req: Request) => {
       hourlyRateUsd: u.hourly_rate_usd == null ? null : Number(u.hourly_rate_usd),
     }));
 
-  return NextResponse.json({ weekStart, records, users: usersOut, timesheetsByDay });
+  return NextResponse.json({ weekStart, records, users: usersOut, timesheetsByDay, openSessions, allowanceByUser });
 });
 
 // Attendance edits are admin-only. This legacy self-submit path has no UI caller;
@@ -310,7 +345,6 @@ export const POST = route(async (req: Request) => {
     sunday_status:    dayValues.sunday,
     notes:            body.notes?.trim() || null,
     submitted_at:     now,
-    updated_at:       now,
   };
 
   if (existing) {

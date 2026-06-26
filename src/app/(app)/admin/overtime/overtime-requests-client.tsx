@@ -13,6 +13,7 @@ type OvertimeRequest = {
   requested_at: string;
   decided_at: string | null;
   approved_until: string | null;
+  granted_seconds: number | null;
 };
 
 function fmt(iso: string | null): string {
@@ -23,6 +24,14 @@ function fmt(iso: string | null): string {
       hour12: true, timeZone: 'Asia/Manila',
     }).format(new Date(iso));
   } catch { return iso; }
+}
+
+// Human label for an overtime grant: the seconds added to the user's weekly allowance.
+function fmtGrant(seconds: number): string {
+  const m = Math.round(seconds / 60);
+  if (m >= 60 && m % 60 === 0) return `${m / 60}h`;
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
 const STATUS_STYLE: Record<OvertimeRequest['status'], string> = {
@@ -143,7 +152,7 @@ export function OvertimeRequestsClient() {
                 </div>
                 <p className="mt-0.5 text-xs text-(--rs-neutral-grey-500)">
                   Requested {fmt(r.requested_at)}
-                  {r.status === 'approved' && r.approved_until && <> · approved until {fmt(r.approved_until)}</>}
+                  {r.status === 'approved' && r.granted_seconds != null && <> · granted +{fmtGrant(r.granted_seconds)} weekly allowance</>}
                   {r.status === 'denied' && r.decided_at && <> · denied {fmt(r.decided_at)}</>}
                 </p>
                 {r.reason && <p className="mt-1 text-xs text-(--rs-neutral-grey-600) italic">“{r.reason}”</p>}

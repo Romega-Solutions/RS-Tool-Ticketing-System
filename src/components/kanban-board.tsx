@@ -18,7 +18,9 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { AlertTriangle, GripVertical, Plus, Loader2, X } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { AlertTriangle, GripVertical, Plus, Loader2, X, Archive } from 'lucide-react';
+import { ProjectArchiveDrawer } from '@/components/project-archive-drawer';
 import { TaskDetailSheet, type SheetWorkItem } from '@/components/task-detail-sheet';
 import type { ProjectCaps } from '@/lib/permissions';
 import {
@@ -53,6 +55,27 @@ export type KanbanItem = {
 type KanbanCycle = { id: number; name: string; start_date: string; end_date: string };
 type KanbanLabel = { id: number; name: string; color: string };
 type KanbanMember = { id: number; user_id: number; name: string; email: string; role: string };
+
+// Keep a column from becoming an endless scroll: render this many cards, then
+// offer a "Show all" toggle. Mainly helps the Done column over a project's life.
+const DONE_VISIBLE_CAP = 50;
+
+// Group flat work items into a state-id → items map (board seed + reload share this).
+function groupItems(items: KanbanItem[], states: KanbanState[]): Map<string, KanbanItem[]> {
+  const map = new Map<string, KanbanItem[]>(states.map(s => [s.id, []]));
+  for (const item of items) {
+    const sid = item.state_detail?.id ?? '';
+    if (map.has(sid)) {
+      map.get(sid)!.push(item);
+    } else {
+      const fallback = states.find(
+        s => s.group.toLowerCase() === (item.state_detail?.group ?? '').toLowerCase(),
+      );
+      if (fallback) map.get(fallback.id)!.push(item);
+    }
+  }
+  return map;
+}
 
 // ── Priority dot ───────────────────────────────────────────────────────────────
 
@@ -312,6 +335,9 @@ function KanbanColumn({
   onOpen,
   canMove,
   canCreate,
+  canArchive,
+  onArchiveCompleted,
+  archivingDone,
 }: {
   state: KanbanState;
   items: KanbanItem[];
@@ -321,8 +347,16 @@ function KanbanColumn({
   onOpen: (id: string) => void;
   canMove: boolean;
   canCreate: boolean;
+  canArchive: boolean;
+  onArchiveCompleted: (stateId: string) => void;
+  archivingDone: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: state.id });
+  const [showAll, setShowAll] = useState(false);
+
+  const isCompleted = state.group.toLowerCase() === 'completed';
+  const overCap = items.length > DONE_VISIBLE_CAP;
+  const visibleItems = showAll ? items : items.slice(0, DONE_VISIBLE_CAP);
 
   return (
     <div
@@ -342,6 +376,20 @@ function KanbanColumn({
         <span className="bg-white/25 rounded-full px-1.5 py-0.5 text-xs font-bold shrink-0 leading-none">
           {items.length}
         </span>
+        {isCompleted && canArchive && items.length > 0 && (
+          <button
+            type="button"
+            onClick={() => onArchiveCompleted(state.id)}
+            disabled={archivingDone}
+            aria-label={`Archive all ${items.length} completed task${items.length === 1 ? '' : 's'}`}
+            title="Archive all completed"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-white/80 transition-colors hover:bg-white/20 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 disabled:opacity-50 cursor-pointer"
+          >
+            {archivingDone
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <Archive className="h-3.5 w-3.5" />}
+          </button>
+        )}
       </div>
 
       {/* Drop zone */}
@@ -358,7 +406,7 @@ function KanbanColumn({
           </div>
         )}
         <div className="min-h-24 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-0.5 sm:max-h-[calc(100dvh-17rem)]">
-          {items.map(item => (
+          {visibleItems.map(item => (
             <DraggableCard
               key={item.id}
               item={item}
@@ -367,6 +415,15 @@ function KanbanColumn({
               canMove={canMove}
             />
           ))}
+          {overCap && (
+            <button
+              type="button"
+              onClick={() => setShowAll(s => !s)}
+              className="w-full rounded-md border border-dashed border-(--rs-neutral-grey-200) py-1.5 text-xs font-medium text-(--rs-neutral-grey-500) transition-colors hover:border-(--rs-primary-300) hover:text-(--rs-primary-700) focus:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-400) cursor-pointer"
+            >
+              {showAll ? 'Show less' : `Show all (${items.length})`}
+            </button>
+          )}
           {items.length === 0 && (
             <div className={`flex h-20 items-center justify-center rounded-md border-2 border-dashed transition-colors ${
               isOver
@@ -408,29 +465,77 @@ export function KanbanBoard({
   caps: ProjectCaps;
   cycles?: KanbanCycle[];
 }) {
+  const router = useRouter();
+
   // Build state → items map from initial server data
-  const [itemsByState, setItemsByState] = useState<Map<string, KanbanItem[]>>(() => {
-    const map = new Map<string, KanbanItem[]>(states.map(s => [s.id, []]));
-    for (const item of initialItems) {
-      const sid = item.state_detail?.id ?? '';
-      if (map.has(sid)) {
-        map.get(sid)!.push(item);
-      } else {
-        // Fallback: match by group name
-        const fallback = states.find(
-          s => s.group.toLowerCase() === (item.state_detail?.group ?? '').toLowerCase(),
-        );
-        if (fallback) map.get(fallback.id)!.push(item);
-      }
-    }
-    return map;
-  });
+  const [itemsByState, setItemsByState] = useState<Map<string, KanbanItem[]>>(
+    () => groupItems(initialItems, states),
+  );
+
+  // Re-seed from the server when initialItems changes identity (only happens on
+  // navigation / router.refresh() — e.g. after restoring an archived task). It
+  // does NOT fire during normal client interaction, so optimistic drag/archive
+  // state is preserved.
+  const firstSeed = useRef(true);
+  useEffect(() => {
+    if (firstSeed.current) { firstSeed.current = false; return; }
+    setItemsByState(groupItems(initialItems, states));
+  }, [initialItems, states]);
 
   const [activeItem, setActiveItem] = useState<KanbanItem | null>(null);
   const [dragError, setDragError] = useState('');
   const [moveNotice, setMoveNotice] = useState<{ tone: 'info' | 'success'; message: string } | null>(null);
   const [movingItemId, setMovingItemId] = useState<string | null>(null);
-  const [openItemId, setOpenItemId] = useState<string | null>(null);
+  // Deep-link support: a notification (or any link) can land on
+  // /projects/[id]?task=<id>&comment=<id> to open a task straight to a comment.
+  // Read both once at mount — the filter-sync effect below rewrites the URL and
+  // would otherwise strip them before we get a chance to read them.
+  const [openItemId, setOpenItemId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('task');
+  });
+  const [focusCommentId, setFocusCommentId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('comment');
+  });
+
+  // Open a task by hand (card click): no comment to scroll to.
+  const openItem = useCallback((id: string) => {
+    setFocusCommentId(null);
+    setOpenItemId(id);
+  }, []);
+
+  // Archive: the project Archive drawer + the Done-column bulk-clear action.
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archivingDone, setArchivingDone] = useState(false);
+
+  // Bulk-archive every task in a Done column; drop the cards optimistically.
+  async function handleArchiveCompleted(stateId: string) {
+    const count = (itemsByState.get(stateId) ?? []).length;
+    if (!count) return;
+    if (!window.confirm(
+      `Archive all ${count} completed task${count === 1 ? '' : 's'}? `
+      + 'They move to the project Archive — you can restore them anytime.',
+    )) return;
+
+    setArchivingDone(true);
+    try {
+      const res = await fetch(`/api/tickets/projects/${projectId}/archive-completed`, { method: 'POST' });
+      if (!res.ok) throw new Error();
+      const { ids } = (await res.json()) as { count: number; ids: number[] };
+      const removed = new Set(ids.map(String));
+      setItemsByState(prev => {
+        const next = new Map(prev);
+        next.set(stateId, (next.get(stateId) ?? []).filter(i => !removed.has(i.id)));
+        return next;
+      });
+      setMoveNotice({ tone: 'success', message: `Archived ${ids.length} completed task${ids.length === 1 ? '' : 's'}.` });
+    } catch {
+      setDragError('Could not archive completed tasks. Please try again.');
+    } finally {
+      setArchivingDone(false);
+    }
+  }
 
   // ── Filter state (URL-synced via window.location, optional for SSR safety) ──
   const [filters, setFilters] = useState<{
@@ -749,6 +854,15 @@ export function KanbanBoard({
             <X className="w-3 h-3" /> Clear ({activeFilterCount})
           </button>
         )}
+
+        {/* View archived (restorable) tasks — open to anyone who can see the board. */}
+        <button
+          type="button"
+          onClick={() => setArchiveOpen(true)}
+          className="flex min-h-10 flex-none items-center gap-1.5 rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-xs font-medium text-(--rs-neutral-grey-600) transition-colors hover:border-(--rs-primary-300) hover:text-(--rs-primary-700) focus:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-400) cursor-pointer sm:ml-auto"
+        >
+          <Archive className="h-3.5 w-3.5" /> Archive
+        </button>
       </div>
 
       {moveNotice && (
@@ -801,9 +915,12 @@ export function KanbanBoard({
                 activeId={activeItem?.id ?? movingItemId}
                 projectId={projectId}
                 onAdd={handleTaskAdded}
-                onOpen={setOpenItemId}
+                onOpen={openItem}
                 canMove={caps.canEditItem}
                 canCreate={caps.canCreateItem}
+                canArchive={caps.canArchiveItem}
+                onArchiveCompleted={handleArchiveCompleted}
+                archivingDone={archivingDone}
               />
             ))}
           </div>
@@ -817,13 +934,23 @@ export function KanbanBoard({
       <TaskDetailSheet
         itemId={openItemId}
         open={openItemId !== null}
-        onOpenChange={(o) => !o && setOpenItemId(null)}
+        focusCommentId={focusCommentId}
+        onOpenChange={(o) => { if (!o) { setOpenItemId(null); setFocusCommentId(null); } }}
         states={states.map(s => ({ id: s.id, name: s.name, color: s.color }))}
         currentUserId={currentUserId}
         isAdmin={isAdmin}
         caps={caps}
         onSaved={(updated) => applySheetUpdate(updated)}
         onArchived={(id) => removeItemFromBoard(id)}
+      />
+
+      <ProjectArchiveDrawer
+        open={archiveOpen}
+        onClose={() => setArchiveOpen(false)}
+        projectId={projectId}
+        canRestore={caps.canArchiveItem}
+        onOpenItem={openItem}
+        onRestored={() => router.refresh()}
       />
     </div>
   );

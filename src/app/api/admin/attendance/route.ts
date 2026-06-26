@@ -82,7 +82,6 @@ export const PATCH = route(async (req: Request) => {
     sunday_status:    dayValues.sunday,
     notes:            body.notes == null ? null : body.notes.toString().trim() || null,
     submitted_at:     now,
-    updated_at:       now,
     edited_by:        session.id,
     edited_at:        now,
   };

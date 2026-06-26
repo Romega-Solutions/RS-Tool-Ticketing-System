@@ -108,3 +108,45 @@ describe('weeklyBudget (personal view of the 15h weekly cap)', () => {
     });
   });
 });
+
+describe('weeklyBudget — with a raised allowance (admin overtime grant)', () => {
+  it('uses the supplied allowance as the cap, not the flat 15h', () => {
+    // 16h used against a 17h allowance → 1h left, not over.
+    expect(weeklyBudget(16 * H, 0, 17 * H)).toMatchObject({
+      usedSeconds: 16 * H,
+      remainingSeconds: 1 * H,
+      capSeconds: 17 * H,
+      isOvertime: false,
+    });
+  });
+
+  it('treats exactly the allowance as fully used but not over', () => {
+    expect(weeklyBudget(17 * H, 0, 17 * H)).toMatchObject({
+      usedSeconds: 17 * H,
+      remainingSeconds: 0,
+      capSeconds: 17 * H,
+      percentUsed: 100,
+      isOvertime: false,
+    });
+  });
+
+  it('only flags over once past the raised allowance', () => {
+    expect(weeklyBudget(17 * H + 1, 0, 17 * H).isOvertime).toBe(true);
+  });
+
+  it('defaults the cap to the 15h base when no allowance is supplied (back-compat)', () => {
+    expect(weeklyBudget(15 * H, 0).capSeconds).toBe(WEEKLY_CAP_SECONDS);
+  });
+});
+
+describe('per-user base (approved hours ≠ 15h)', () => {
+  it('isOvertime respects a supplied cap', () => {
+    expect(isOvertime(18 * H, 20 * H)).toBe(false);
+    expect(isOvertime(20 * H + 1, 20 * H)).toBe(true);
+    expect(isOvertime(16 * H)).toBe(true); // default still 15h
+  });
+  it('computeOvertime measures the slice beyond a supplied base', () => {
+    expect(computeOvertime(19 * H, 2 * H, 20 * H)).toEqual({ isOvertime: true, overtimeSeconds: 1 * H });
+    expect(computeOvertime(14 * H, 2 * H)).toEqual({ isOvertime: true, overtimeSeconds: 1 * H }); // default 15h
+  });
+});

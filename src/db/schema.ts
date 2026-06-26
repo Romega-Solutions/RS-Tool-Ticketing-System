@@ -19,6 +19,15 @@ export const users = pgTable('users', {
   endDate:       text('end_date'),
   driveUrl:      text('drive_url'),
   hourlyRateUsd: numeric('hourly_rate_usd', { precision: 10, scale: 2 }),
+  // Weekly allotted hours — the per-user BASE for the overtime allowance/cap
+  // (allowance = approvedHoursPerWeek + admin-approved grants). Default 15 keeps
+  // every existing user identical to the old flat 15h cap.
+  approvedHoursPerWeek: integer('approved_hours_per_week').notNull().default(15),
+  // Daily work schedule in PHT ('HH:MM' 24h, both optional). The PST/PDT
+  // equivalent is DERIVED on render (src/lib/schedule.ts), never stored, so it
+  // always follows US daylight saving.
+  schedulePhtStart: text('schedule_pht_start'),
+  schedulePhtEnd:   text('schedule_pht_end'),
   // Per-user tool access (checkbox-driven). JSON array of GateableToolKey
   // strings, e.g. ["projects","attendance","recruiting"]. Admins bypass this
   // (always all). Seeded once from role+team via scripts/seed-tool-access.ts.
@@ -29,6 +38,9 @@ export const users = pgTable('users', {
   reminderIntervalMinutes: integer('reminder_interval_minutes').notNull().default(120),
   createdAt:              text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt:              text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  // When an admin last sent this user the Google sign-in "account setup" email
+  // (ISO string; null = never). Drives the "Sent · <date>" badge in User Management.
+  setupEmailSentAt:       text('setup_email_sent_at'),
 });
 
 export const timesheets = pgTable('timesheets', {
@@ -49,8 +61,10 @@ export const timesheets = pgTable('timesheets', {
 });
 
 // Overtime admin-approval queue. A contractor cut at the 15h weekly cap files a
-// request; an admin approves it and sets approvedUntil, which suspends the
-// cap for that user until it expires. Mirror of docs/migrations/add-overtime-requests.sql.
+// request; an admin approves it with a bounded grant (`grantedSeconds`, e.g. +2h)
+// that RAISES that user's weekly allowance for `weekStart` (allowance = 15h base
+// + the week's approved grants). `approvedUntil` is retained only as an audit
+// record of when the grant was issued. Mirror of docs/migrations/add-overtime-requests.sql.
 export const overtimeRequests = pgTable('overtime_requests', {
   id:            serial('id').primaryKey(),
   userId:        integer('user_id').notNull(),
@@ -61,6 +75,9 @@ export const overtimeRequests = pgTable('overtime_requests', {
   decidedBy:     integer('decided_by'),
   decidedAt:     text('decided_at'),
   approvedUntil: text('approved_until'),
+  // Bounded overtime grant in seconds, added to this user's 15h weekly allowance
+  // for `weekStart` while status='approved'. e.g. a +2h grant = 7200.
+  grantedSeconds: integer('granted_seconds'),
 });
 
 // IC self-service time-edit requests. An IC asks to correct a clock-in/out
@@ -115,6 +132,7 @@ export const weeklyReports = pgTable('weekly_reports', {
   clientEngagements: text('client_engagements'),
   risks:             text('risks'),
   ideas:             text('ideas'),
+  meetings:          text('meetings'),
   submittedAt:       text('submitted_at'),
   updatedAt:         text('updated_at').default(sql`CURRENT_TIMESTAMP`),
 });
@@ -142,6 +160,13 @@ export const candidates = pgTable('candidates', {
   languages:      jsonb('languages'),
   parsedAt:       text('parsed_at'),
   assignedTo:     integer('assigned_to'),
+  // Who added this candidate (users.id). null = self-applied via public /apply.
+  createdBy:         integer('created_by'),
+  // Public application reference code (shown in the Talent showcase).
+  applicationCode:   text('application_code'),
+  // Last ATS comms email sent to this candidate (n8n).
+  lastEmailTemplate: text('last_email_template'),
+  lastEmailSentAt:   text('last_email_sent_at'),
   // When TRUE, this candidate is shown on the public Talent showcase at
   // romega-solutions.com/talent. Default FALSE — requires explicit
   // recruiter publishing.
@@ -239,6 +264,7 @@ export const projects = pgTable('projects', {
   network:     integer('network').notNull().default(2),
   nextSequence: integer('next_sequence').notNull().default(1),
   archived:    integer('archived').notNull().default(0),
+  autoArchiveDoneDays: integer('auto_archive_done_days').default(30), // null/0 = off; days a Done task waits before auto-archiving
   createdAt:   text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt:   text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 });
@@ -275,6 +301,7 @@ export const workItems = pgTable('work_items', {
   targetDate:   text('target_date'),
   completedAt:  text('completed_at'),
   archived:     integer('archived').notNull().default(0),
+  archivedAt:   text('archived_at'),   // set when archived, cleared on restore; sorts the Archive view
   createdBy:    integer('created_by'),
   createdAt:    text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt:    text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -500,3 +527,15 @@ export const notifications = pgTable('notifications', {
 }, (t) => [
   index('notifications_user_idx').on(t.userId, t.isRead, t.createdAt),
 ]);
+
+// Editable transactional email templates — one row per `key`. v1 has a single
+// row, key='account_setup' (the Google sign-in invite an admin sends from User
+// Management). The app owns + resolves these templates; n8n is just the sender.
+// See src/lib/email-templates.ts. Created by drizzle/0008_email_templates.sql.
+export const emailTemplates = pgTable('email_templates', {
+  key:       text('key').primaryKey(),
+  subject:   text('subject').notNull(),
+  body:      text('body').notNull(),
+  updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedBy: integer('updated_by'),
+});

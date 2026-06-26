@@ -66,95 +66,138 @@ const STATUS_BADGE: Record<MyRequest['status'], { label: string; cls: string; Ic
   cancelled: { label: 'Cancelled',cls: 'bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-600)', Icon: XCircle },
 };
 
+function TabButton({ active, onClick, label, count }: { active: boolean; onClick: () => void; label: string; count?: number }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+        active
+          ? 'border-(--rs-primary-500) text-(--rs-primary-600)'
+          : 'border-transparent text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-700) hover:border-(--rs-neutral-grey-300)'
+      }`}
+    >
+      {label}
+      {count != null && count > 0 && (
+        <span className="ml-2 inline-flex items-center justify-center rounded-full bg-(--rs-accent-100) px-1.5 text-[11px] font-semibold text-(--rs-accent-700)">
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
 export function MyTimeClient({ sessions, requests }: { sessions: MySession[]; requests: MyRequest[] }) {
   const router = useRouter();
   const [active, setActive] = useState<MySession | null>(null);
+  const [tab, setTab] = useState<'logins' | 'requests'>('logins');
+
+  const pendingCount = requests.filter(r => r.status === 'pending').length;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <header>
         <h1 className="font-serif text-2xl font-semibold text-(--rs-neutral-grey-900)">My Time</h1>
         <p className="mt-1 text-sm text-(--rs-neutral-grey-500)">
-          Your recent clock sessions. Spot a mistake? Request a correction and your team lead will review it.
+          Your clock-in history and time-correction requests.
         </p>
       </header>
 
-      {/* Recent sessions */}
-      <section className="space-y-3">
-        <h2 className="text-xs font-bold uppercase tracking-wider text-(--rs-neutral-grey-500)">Recent sessions</h2>
-        {sessions.length === 0 ? (
-          <Card><CardContent className="p-8 text-center text-sm text-(--rs-neutral-grey-500)">
-            No clock sessions in the last few weeks.
-          </CardContent></Card>
-        ) : (
-          <Card><CardContent className="p-0 divide-y divide-(--rs-neutral-grey-100)">
-            {sessions.map(s => (
-              <div key={s.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3.5">
-                <div className="w-28 shrink-0">
-                  <div className="text-sm font-semibold text-(--rs-neutral-grey-900)">{fmtDate(s.date)}</div>
-                </div>
-                <div className="flex items-center gap-2 text-sm text-(--rs-neutral-grey-700)">
-                  <Clock className="h-3.5 w-3.5 text-(--rs-neutral-grey-400)" />
-                  {fmtTime(s.clockedInAt)} <span className="text-(--rs-neutral-grey-400)">→</span> {fmtTime(s.clockedOutAt)}
-                </div>
-                <div className="text-sm text-(--rs-neutral-grey-500) tabular-nums">{fmtDuration(s.durationSeconds)}</div>
-                <div className="ml-auto flex items-center gap-2">
-                  {s.editedAt && (
-                    <span className="inline-flex items-center rounded-full bg-(--rs-primary-50) px-2 py-0.5 text-[11px] font-medium text-(--rs-primary-700)">Edited</span>
-                  )}
-                  {s.hasPendingRequest ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-(--rs-accent-50) px-2 py-0.5 text-[11px] font-medium text-(--rs-accent-700)">
-                      <Hourglass className="h-3 w-3" /> Request pending
-                    </span>
-                  ) : (
-                    <Button
-                      variant="outline" size="sm" className="gap-1.5"
-                      onClick={() => setActive(s)}
-                    >
-                      <Pencil className="h-3.5 w-3.5" /> Request correction
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </CardContent></Card>
-        )}
-      </section>
+      {/* Tabs */}
+      <div className="flex gap-0.5 border-b border-(--rs-neutral-grey-200)">
+        <TabButton active={tab === 'logins'} onClick={() => setTab('logins')} label="Logins" />
+        <TabButton active={tab === 'requests'} onClick={() => setTab('requests')} label="Time Request" count={pendingCount} />
+      </div>
 
-      {/* Request history */}
-      {requests.length > 0 && (
+      {/* ── LOGINS ─────────────────────────────────────────────────────────── */}
+      {tab === 'logins' && (
         <section className="space-y-3">
-          <h2 className="text-xs font-bold uppercase tracking-wider text-(--rs-neutral-grey-500)">My requests</h2>
-          <Card><CardContent className="p-0 divide-y divide-(--rs-neutral-grey-100)">
-            {requests.map(r => {
-              const b = STATUS_BADGE[r.status];
-              return (
-                <div key={r.id} className="px-4 py-3.5 space-y-1.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <CalendarClock className="h-3.5 w-3.5 text-(--rs-neutral-grey-400)" />
-                    <span className="text-sm font-semibold text-(--rs-neutral-grey-900)">{fmtDate(r.date)}</span>
-                    <span className="text-sm text-(--rs-neutral-grey-600)">
-                      {fmtTime(r.requestedClockIn ?? r.currentClockIn)} <span className="text-(--rs-neutral-grey-400)">→</span> {fmtTime(r.requestedClockOut ?? r.currentClockOut)}
-                    </span>
-                    <span className={`ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${b.cls}`}>
-                      <b.Icon className="h-3 w-3" /> {b.label}
-                    </span>
+          <p className="text-sm text-(--rs-neutral-grey-500)">
+            Your recent clock sessions. Spot a mistake? Click “Request correction” and your team lead will review it.
+          </p>
+          {sessions.length === 0 ? (
+            <Card><CardContent className="p-8 text-center text-sm text-(--rs-neutral-grey-500)">
+              No clock sessions in the last few weeks.
+            </CardContent></Card>
+          ) : (
+            <Card><CardContent className="p-0 divide-y divide-(--rs-neutral-grey-100)">
+              {sessions.map(s => (
+                <div key={s.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3.5">
+                  <div className="w-28 shrink-0">
+                    <div className="text-sm font-semibold text-(--rs-neutral-grey-900)">{fmtDate(s.date)}</div>
                   </div>
-                  <p className="text-sm text-(--rs-neutral-grey-600)">{r.reason}</p>
-                  {r.documentName && (
-                    <p className="inline-flex items-center gap-1 text-xs text-(--rs-neutral-grey-500)">
-                      <Paperclip className="h-3 w-3" /> {r.documentName}
-                    </p>
-                  )}
-                  {r.status === 'denied' && r.decisionComment && (
-                    <p className="rounded-md bg-red-50 px-2.5 py-1.5 text-xs text-red-700">
-                      <strong>Lead’s note:</strong> {r.decisionComment}
-                    </p>
-                  )}
+                  <div className="flex items-center gap-2 text-sm text-(--rs-neutral-grey-700)">
+                    <Clock className="h-3.5 w-3.5 text-(--rs-neutral-grey-400)" />
+                    {fmtTime(s.clockedInAt)} <span className="text-(--rs-neutral-grey-400)">→</span> {fmtTime(s.clockedOutAt)}
+                  </div>
+                  <div className="text-sm text-(--rs-neutral-grey-500) tabular-nums">{fmtDuration(s.durationSeconds)}</div>
+                  <div className="ml-auto flex items-center gap-2">
+                    {s.editedAt && (
+                      <span className="inline-flex items-center rounded-full bg-(--rs-primary-50) px-2 py-0.5 text-[11px] font-medium text-(--rs-primary-700)">Edited</span>
+                    )}
+                    {s.hasPendingRequest ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-(--rs-accent-50) px-2 py-0.5 text-[11px] font-medium text-(--rs-accent-700)">
+                        <Hourglass className="h-3 w-3" /> Request pending
+                      </span>
+                    ) : (
+                      <Button
+                        variant="outline" size="sm" className="gap-1.5"
+                        onClick={() => setActive(s)}
+                      >
+                        <Pencil className="h-3.5 w-3.5" /> Request correction
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              );
-            })}
-          </CardContent></Card>
+              ))}
+            </CardContent></Card>
+          )}
+        </section>
+      )}
+
+      {/* ── TIME REQUEST ───────────────────────────────────────────────────── */}
+      {tab === 'requests' && (
+        <section className="space-y-3">
+          <p className="text-sm text-(--rs-neutral-grey-500)">
+            Corrections you’ve submitted. To file a new one, open the{' '}
+            <button type="button" onClick={() => setTab('logins')} className="font-medium text-(--rs-primary-600) underline-offset-2 hover:underline">Logins</button>{' '}
+            tab and click “Request correction” on the session.
+          </p>
+          {requests.length === 0 ? (
+            <Card><CardContent className="p-8 text-center text-sm text-(--rs-neutral-grey-500)">
+              You haven’t submitted any time-correction requests yet.
+            </CardContent></Card>
+          ) : (
+            <Card><CardContent className="p-0 divide-y divide-(--rs-neutral-grey-100)">
+              {requests.map(r => {
+                const b = STATUS_BADGE[r.status];
+                return (
+                  <div key={r.id} className="px-4 py-3.5 space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <CalendarClock className="h-3.5 w-3.5 text-(--rs-neutral-grey-400)" />
+                      <span className="text-sm font-semibold text-(--rs-neutral-grey-900)">{fmtDate(r.date)}</span>
+                      <span className="text-sm text-(--rs-neutral-grey-600)">
+                        {fmtTime(r.requestedClockIn ?? r.currentClockIn)} <span className="text-(--rs-neutral-grey-400)">→</span> {fmtTime(r.requestedClockOut ?? r.currentClockOut)}
+                      </span>
+                      <span className={`ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${b.cls}`}>
+                        <b.Icon className="h-3 w-3" /> {b.label}
+                      </span>
+                    </div>
+                    <p className="text-sm text-(--rs-neutral-grey-600)">{r.reason}</p>
+                    {r.documentName && (
+                      <p className="inline-flex items-center gap-1 text-xs text-(--rs-neutral-grey-500)">
+                        <Paperclip className="h-3 w-3" /> {r.documentName}
+                      </p>
+                    )}
+                    {r.status === 'denied' && r.decisionComment && (
+                      <p className="rounded-md bg-red-50 px-2.5 py-1.5 text-xs text-red-700">
+                        <strong>Lead’s note:</strong> {r.decisionComment}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </CardContent></Card>
+          )}
         </section>
       )}
 

@@ -21,7 +21,6 @@ const navItems = [
   { href: "/my-tasks",              label: "My Tasks",       icon: CheckSquare,     category: "main"      },
   { href: "/my-time",               label: "My Time",        icon: Timer,           category: "main"      },
   { href: "/projects",              label: "Projects",       icon: Briefcase,       category: "main"      },
-  { href: "/attendance/requests",   label: "Time Requests",  icon: ClipboardList,   category: "main"      },
   { href: "/tools",                 label: "Tools",          icon: LayoutGrid,      category: "main"      },
   { href: "/weekly-report",         label: "Weekly Reports", icon: FileText,        category: "main"      },
   // ── Team Tools — per-user gated
@@ -32,6 +31,7 @@ const navItems = [
   { href: "/pm/status-drafter",     label: "PM",             icon: ClipboardList,   category: "leadTools" },
   { href: "/recruiting/candidates", label: "Recruiting",     icon: UserPlus2,       category: "leadTools" },
   { href: "/sales/leads",           label: "Sales",          icon: Users2,          category: "leadTools" },
+  { href: "/attendance/requests",   label: "Time Approvals", icon: ClipboardList,   category: "leadTools" },
   // ── Admin — admin only
   { href: "/admin/learning",        label: "Manage Learning",icon: BookOpen,        category: "admin"     },
   { href: "/admin/overtime",        label: "Overtime",       icon: Timer,           category: "admin"     },
@@ -126,7 +126,7 @@ function NavLinks({ collapsed = false, role, toolAccess }: { collapsed?: boolean
   const mainItems     = navItems.filter(i => i.category === "main");   // Workspace — open to all
   const leadToolItems = navItems.filter(i => {
     if (i.category !== "leadTools") return false;
-    if (i.href === '/attendance') return hasToolAccess('attendance', role, toolAccess);
+    if (i.href.startsWith('/attendance')) return hasToolAccess('attendance', role, toolAccess);
     if (i.href.startsWith('/ceo/')) return hasToolAccess('ceo', role, toolAccess);
     if (i.href.startsWith('/marketing/')) return hasToolAccess('marketing', role, toolAccess);
     if (i.href.startsWith('/onboarders')) return hasToolAccess('onboarding', role, toolAccess);
@@ -139,8 +139,9 @@ function NavLinks({ collapsed = false, role, toolAccess }: { collapsed?: boolean
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
-    // The "Attendance" tool must not light up while on "/attendance/requests"
-    // (Time Requests), which is now a separate Workspace item.
+    // "Attendance" and "Time Approvals" are sibling Lead Tools sharing the
+    // /attendance prefix, so Attendance must not light up on the
+    // /attendance/requests (Time Approvals) route.
     if (href === "/attendance")
       return pathname === "/attendance" ||
         (pathname.startsWith("/attendance/") && !pathname.startsWith("/attendance/requests"));

@@ -11,8 +11,9 @@ export default async function TimeEditRequestsPage() {
   const session = await getSession();
   if (!session) redirect('/login');
 
-  // Open to all (Time Requests is a Workspace tool). Only leads/admins can act
-  // on requests; everyone else just tracks the requests they filed themselves.
+  // Surfaced in Lead Tools as the team approval queue; ICs view their own filed
+  // requests in My Time → Time Request. Only leads/admins can act on requests;
+  // anyone landing here without that access just sees the ones they filed.
   const canDecide = canAccessReports(session.role);
 
   const admin = createAdminClient();

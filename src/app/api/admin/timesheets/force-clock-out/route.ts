@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clockOut } from '@/lib/presence';
 import { computeOvertime } from '@/lib/utils';
-import { weeklySecondsForUser } from '@/lib/overtime-server';
+import { weeklySecondsForUser, baseWeeklySecondsForUser } from '@/lib/overtime-server';
 import { route, requireAdmin } from '@/lib/api';
 
 export const runtime = 'nodejs';
@@ -53,8 +53,11 @@ export const POST = route(async (req: Request) => {
   }
 
   const durationSeconds = Math.round((outDate.getTime() - inDate.getTime()) / 1000);
-  const weekSecondsBefore = await weeklySecondsForUser(admin, userId, outDate);
-  const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds);
+  const [weekSecondsBefore, baseSeconds] = await Promise.all([
+    weeklySecondsForUser(admin, userId, outDate),
+    baseWeeklySecondsForUser(admin, userId),
+  ]);
+  const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds, baseSeconds);
 
   const { error } = await admin
     .from('timesheets')

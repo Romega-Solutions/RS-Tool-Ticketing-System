@@ -76,6 +76,7 @@ export function TaskDetailSheet({
   itemId,
   open,
   onOpenChange,
+  focusCommentId,
   states,
   currentUserId,
   isAdmin,
@@ -86,6 +87,8 @@ export function TaskDetailSheet({
   itemId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  // When opened from a notification deep link, the comment to jump to + highlight.
+  focusCommentId?: string | null;
   states: StateOption[];
   currentUserId: number;
   isAdmin: boolean;
@@ -98,6 +101,12 @@ export function TaskDetailSheet({
   const canEditDates = caps.canEditDates;      // lead    : due date
   const canEditAssignees = caps.canEditAssignees; // lead : assignees
   const [tab, setTab] = useState<'details' | 'comments' | 'activity'>('details');
+
+  // Deep-link to a specific comment (from a "tagged you" notification): jump to
+  // the Comments tab, scroll the comment into view, and flash a highlight.
+  const [highlightCommentId, setHighlightCommentId] = useState<string | null>(null);
+  const commentsListRef = useRef<HTMLDivElement>(null);
+  const handledFocusRef = useRef<string | null>(null);
 
   // ── Resizable panel width ──────────────────────────────────────────────────
   // Drag the left edge to set whatever width you want (remembered per browser).
@@ -259,6 +268,37 @@ export function TaskDetailSheet({
 
     return () => window.clearTimeout(timeoutId);
   }, [open, itemId, refresh]);
+
+  // Once the task + its comments have loaded, honor a ?comment deep link: open
+  // the Comments tab, then scroll to and briefly highlight the tagged comment.
+  // All state/DOM work is deferred into rAF callbacks so nothing runs
+  // synchronously in the effect body (avoids cascading-render churn).
+  useEffect(() => {
+    if (!open || !focusCommentId || loading || !item) return;
+
+    const focusKey = `${itemId}:${focusCommentId}`;
+    if (handledFocusRef.current === focusKey) return; // already handled this target
+    if (!comments.some(c => String(c.id) === focusCommentId)) return; // not found (deleted?)
+    handledFocusRef.current = focusKey;
+
+    let innerRaf = 0;
+    const raf = window.requestAnimationFrame(() => {
+      setTab('comments');
+      // Scroll on the next frame, after the Comments tab has painted.
+      innerRaf = window.requestAnimationFrame(() => {
+        commentsListRef.current
+          ?.querySelector(`[data-comment-id="${focusCommentId}"]`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setHighlightCommentId(focusCommentId);
+      });
+    });
+    const clear = window.setTimeout(() => setHighlightCommentId(null), 2600);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.cancelAnimationFrame(innerRaf);
+      window.clearTimeout(clear);
+    };
+  }, [open, focusCommentId, loading, item, comments, itemId]);
 
   const handleSave = async () => {
     if (!item) return;
@@ -878,14 +918,19 @@ export function TaskDetailSheet({
           )}
 
           {!loading && item && tab === 'comments' && (
-            <div className="space-y-3">
+            <div ref={commentsListRef} className="space-y-3">
               {comments.length === 0 && (
                 <p className="text-sm text-(--rs-neutral-grey-400) italic">No comments yet.</p>
               )}
               {comments.map(c => (
                 <div
                   key={c.id}
-                  className="border border-(--rs-neutral-grey-100) rounded-lg p-3 bg-white"
+                  data-comment-id={c.id}
+                  className={`rounded-lg p-3 transition-colors duration-500 ${
+                    highlightCommentId === String(c.id)
+                      ? 'border border-(--rs-accent-300) bg-(--rs-accent-50) ring-2 ring-(--rs-accent-200)'
+                      : 'border border-(--rs-neutral-grey-100) bg-white'
+                  }`}
                 >
                   <div className="flex items-center justify-between text-xs text-(--rs-neutral-grey-500) mb-1.5">
                     <span className="font-medium text-(--rs-neutral-grey-800)">{c.author_name}</span>
@@ -969,6 +1014,7 @@ function describeActivity(a: ActivityEntry): string {
     case 'unassigned':    return `unassigned user ${a.from_value}`;
     case 'commented':     return `commented: "${(a.to_value ?? '').slice(0, 60)}${(a.to_value?.length ?? 0) > 60 ? '…' : ''}"`;
     case 'archived':      return `archived this task`;
+    case 'restored':      return `restored this task`;
     default:              return a.action;
   }
 }

@@ -121,7 +121,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
         <div className="flex-1 overflow-y-auto p-4 md:p-8">
-          <div className="max-w-7xl mx-auto">
+          {/* Full-width content: fills large monitors (no centered max-width cap).
+              Individual pages keep their own max-w-* for forms/prose readability. */}
+          <div className="w-full">
             {children}
           </div>
         </div>
