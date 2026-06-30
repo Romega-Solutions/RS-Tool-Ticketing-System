@@ -3,9 +3,21 @@ import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { hash } from 'bcryptjs';
 import { normalizeRole } from '@/lib/rbac';
+import { mergeNotificationPrefs } from '@/lib/notifications';
 import { route, requireSession, parseBody, badRequest, notFound } from '@/lib/api';
 
 export const runtime = 'nodejs';
+
+// Per-user email notification toggles. All optional + boolean; merged over the
+// all-on defaults before persisting so a partial payload never wipes a key.
+const notificationPrefsSchema = z.object({
+  email:        z.boolean().optional(),
+  mentions:     z.boolean().optional(),
+  dueToday:     z.boolean().optional(),
+  approvals:    z.boolean().optional(),
+  projectAdded: z.boolean().optional(),
+  taskAdded:    z.boolean().optional(),
+});
 
 const profileUpdateSchema = z.object({
   name: z.string().optional(),
@@ -14,6 +26,7 @@ const profileUpdateSchema = z.object({
   password: z.string().optional(),
   reminderEnabled: z.boolean().optional(),
   reminderIntervalMinutes: z.union([z.number(), z.string()]).optional(),
+  notificationPrefs: notificationPrefsSchema.optional(),
 });
 
 export const GET = route(async () => {
@@ -58,6 +71,7 @@ export const GET = route(async () => {
       isActive: Boolean(user.is_active),
       reminderEnabled: Boolean(user.reminder_enabled ?? 1),
       reminderIntervalMinutes: user.reminder_interval_minutes ?? 120,
+      notificationPrefs: mergeNotificationPrefs(user.notification_prefs),
     },
     availableTeams,
     availableJobTitles,
@@ -90,6 +104,16 @@ export const PUT = route(async (req: Request) => {
     payload.reminder_interval_minutes = Number(body.reminderIntervalMinutes);
   }
 
+  // Merge the (partial) toggle payload over current prefs so we never clobber a
+  // key the client didn't send. jsonb column → store the resolved object.
+  if (body.notificationPrefs !== undefined) {
+    const db = createAdminClient();
+    const { data: current } = await db
+      .from('users').select('notification_prefs').eq('id', session.id).maybeSingle();
+    const merged = { ...mergeNotificationPrefs(current?.notification_prefs), ...body.notificationPrefs };
+    (payload as Record<string, unknown>).notification_prefs = merged;
+  }
+
   if (password) {
     if (password.length < 8) {
       throw badRequest('Password must be at least 8 characters');
@@ -117,6 +141,7 @@ export const PUT = route(async (req: Request) => {
       isActive: Boolean(updated.is_active),
       reminderEnabled: Boolean(updated.reminder_enabled ?? 1),
       reminderIntervalMinutes: updated.reminder_interval_minutes ?? 120,
+      notificationPrefs: mergeNotificationPrefs(updated.notification_prefs),
     },
   });
 });

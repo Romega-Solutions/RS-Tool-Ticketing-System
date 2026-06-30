@@ -1,19 +1,41 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWorkItems } from '@/lib/tickets';
+import {
+  getProjects,
+  getProjectStates,
+  getWorkItems,
+  getProjectActivity,
+  buildStateLookup,
+  enrichWorkItems,
+} from '@/lib/tickets';
 import { getSession } from '@/lib/session';
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { canArchiveProject } from '@/lib/permissions';
 import { Briefcase } from 'lucide-react';
 import { NewProjectButton } from '@/components/new-project-button';
+import { ProjectCard } from '@/components/project-card.client';
+import { ProjectActivityFeed } from '@/components/project-activity-feed';
+import { cn } from '@/lib/utils';
+
+const TABS = [
+  { key: 'active', label: 'Active' },
+  { key: 'archived', label: 'Archived' },
+  { key: 'activity', label: 'Project Activity' },
+] as const;
+type TabKey = (typeof TABS)[number]['key'];
+
+type CardMeta = { stat: { total: number; open: number; done: number }; canArchive: boolean };
 
 export default async function ProjectsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ team?: string }>;
+  searchParams: Promise<{ team?: string; tab?: string }>;
 }) {
   const session = await getSession();
   if (!session) redirect('/login');   // Projects is a Workspace tool — open to all
-  const { team: teamParam } = await searchParams;
+  const { team: teamParam, tab: tabParam } = await searchParams;
+
+  const tab: TabKey =
+    tabParam === 'archived' ? 'archived' : tabParam === 'activity' ? 'activity' : 'active';
 
   // Default-filter: leads with a team set see only their team's projects unless
   // they pass ?team=all (or some other explicit value). Admins/CEO/IC are
@@ -28,69 +50,119 @@ export default async function ProjectsPage({
 
   const showToggle = session?.role === 'lead' && !!session.team;
   const onMyTeam = effectiveTeam !== null && effectiveTeam === session?.team;
+  const privileged = session.role === 'admin' || session.role === 'lead';
+
+  // Preserve the active team scope when moving between tabs.
+  const tabHref = (key: TabKey) => {
+    const sp = new URLSearchParams();
+    if (key !== 'active') sp.set('tab', key);
+    if (teamParam) sp.set('team', teamParam);
+    const qs = sp.toString();
+    return qs ? `/projects?${qs}` : '/projects';
+  };
 
   let projects: Awaited<ReturnType<typeof getProjects>> = [];
-  let stats: Record<string, { total: number; open: number; done: number }> = {};
+  let meta: Record<string, CardMeta> = {};
+  let activity: Awaited<ReturnType<typeof getProjectActivity>> = [];
   let loadError: string | null = null;
 
   try {
-    projects = await getProjects({ team: effectiveTeam });
-    const results = await Promise.all(
-      projects.map(async p => {
-        const [items, states] = await Promise.all([
-          getWorkItems(p.id),
-          getProjectStates(p.id),
-        ]);
-        const lookup = buildStateLookup(states);
-        const enriched = enrichWorkItems(items, lookup);
-        const total = enriched.length;
-        const done = enriched.filter(i =>
-          (i.state_detail?.group ?? '').toLowerCase() === 'completed'
-        ).length;
-        return { id: p.id, total, open: total - done, done };
-      })
-    );
-    stats = Object.fromEntries(results.map(r => [r.id, r]));
+    if (tab === 'activity') {
+      activity = await getProjectActivity({ team: effectiveTeam });
+    } else {
+      projects = await getProjects({ team: effectiveTeam, archived: tab === 'archived' ? 1 : 0 });
+      const results = await Promise.all(
+        projects.map(async p => {
+          const [items, states] = await Promise.all([
+            getWorkItems(p.id),
+            getProjectStates(p.id),
+          ]);
+          const lookup = buildStateLookup(states);
+          const enriched = enrichWorkItems(items, lookup);
+          const total = enriched.length;
+          const done = enriched.filter(i =>
+            (i.state_detail?.group ?? '').toLowerCase() === 'completed'
+          ).length;
+          // Visibility of the kebab = real archive permission. Only resolve the
+          // per-project check for leads/admins; everyone else gets no kebab.
+          const canArchive = privileged ? await canArchiveProject(session, Number(p.id)) : false;
+          return { id: p.id, stat: { total, open: total - done, done }, canArchive };
+        })
+      );
+      meta = Object.fromEntries(results.map(r => [r.id, { stat: r.stat, canArchive: r.canArchive }]));
+    }
   } catch (err) {
     loadError = err instanceof Error ? err.message : 'Failed to load projects';
   }
+
+  const description =
+    tab === 'archived'
+      ? 'Archived projects. Restore any to move it back to Active.'
+      : tab === 'activity'
+      ? 'Created and archived project events, newest first.'
+      : effectiveTeam
+      ? `Showing ${effectiveTeam} team projects.`
+      : 'All active projects in the Romega Solutions workspace.';
+
+  const currentTabLabel = TABS.find(t => t.key === tab)!.label;
 
   return (
     <div className="space-y-6 overflow-x-hidden">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-2xl font-serif font-bold text-(--rs-neutral-grey-900)">Projects</h1>
-          <p className="text-(--rs-neutral-grey-500) text-sm mt-1 max-w-2xl">
-            {effectiveTeam
-              ? `Showing ${effectiveTeam} team projects.`
-              : 'All active projects in the Romega Solutions workspace.'}
-          </p>
+          <p className="text-(--rs-neutral-grey-500) text-sm mt-1 max-w-2xl">{description}</p>
         </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end sm:flex-wrap">
-          {showToggle && (
-            <div className="grid grid-cols-2 overflow-hidden rounded-md border border-(--rs-neutral-grey-200) text-xs sm:inline-flex">
-              <Link
-                href="/projects"
-                className={`flex min-h-10 items-center justify-center px-3 py-2 text-center transition-colors ${onMyTeam ? 'bg-(--rs-primary-500) text-white' : 'bg-white text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-50)'}`}
-              >
-                My team ({session!.team})
-              </Link>
-              <Link
-                href="/projects?team=all"
-                className={`flex min-h-10 items-center justify-center border-l border-(--rs-neutral-grey-200) px-3 py-2 text-center transition-colors ${!onMyTeam ? 'bg-(--rs-primary-500) text-white' : 'bg-white text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-50)'}`}
-              >
-                All teams
-              </Link>
-            </div>
-          )}
-          {session && (
+        {session && (
+          <div className="flex w-full sm:w-auto sm:justify-end">
             <NewProjectButton
               defaultTeam={session.team}
               canChooseTeam={session.role === 'admin' || session.role === 'lead'}
             />
-          )}
-        </div>
+          </div>
+        )}
       </div>
+
+      {/* Tabs: Active · Archived · Project Activity */}
+      <div role="tablist" aria-label="Project views" className="flex flex-wrap gap-x-6 border-b border-(--rs-neutral-grey-200)">
+        {TABS.map(t => {
+          const active = tab === t.key;
+          return (
+            <Link
+              key={t.key}
+              role="tab"
+              aria-selected={active}
+              href={tabHref(t.key)}
+              className={cn(
+                '-mb-px inline-flex items-center border-b-2 px-1 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300)',
+                active
+                  ? 'border-(--rs-primary-500) text-(--rs-primary-700)'
+                  : 'border-transparent text-(--rs-neutral-grey-500) hover:border-(--rs-neutral-grey-300) hover:text-(--rs-neutral-grey-800)',
+              )}
+            >
+              {t.label}
+            </Link>
+          );
+        })}
+      </div>
+
+      {/* Team toggle lives under the Active tab only. */}
+      {tab === 'active' && showToggle && (
+        <div className="grid grid-cols-2 overflow-hidden rounded-md border border-(--rs-neutral-grey-200) text-xs sm:inline-flex">
+          <Link
+            href="/projects"
+            className={`flex min-h-10 items-center justify-center px-3 py-2 text-center transition-colors ${onMyTeam ? 'bg-(--rs-primary-500) text-white' : 'bg-white text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-50)'}`}
+          >
+            My team ({session!.team})
+          </Link>
+          <Link
+            href="/projects?team=all"
+            className={`flex min-h-10 items-center justify-center border-l border-(--rs-neutral-grey-200) px-3 py-2 text-center transition-colors ${!onMyTeam ? 'bg-(--rs-primary-500) text-white' : 'bg-white text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-50)'}`}
+          >
+            All teams
+          </Link>
+        </div>
+      )}
 
       {loadError && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md text-sm">
@@ -98,62 +170,37 @@ export default async function ProjectsPage({
         </div>
       )}
 
-      {projects.length === 0 && !loadError && (
-        <p className="text-(--rs-neutral-grey-500) italic text-sm">No projects found in workspace.</p>
-      )}
+      <div role="tabpanel" aria-label={currentTabLabel} className="space-y-6">
+        {tab === 'activity' ? (
+          !loadError && <ProjectActivityFeed entries={activity} />
+        ) : (
+          <>
+            {projects.length === 0 && !loadError && (
+              <div className="flex flex-col items-center justify-center py-16 text-(--rs-neutral-grey-400)">
+                <Briefcase className="mb-4 h-12 w-12 opacity-30" aria-hidden="true" />
+                <p className="text-sm">
+                  {tab === 'archived' ? 'No archived projects.' : 'No active projects found in workspace.'}
+                </p>
+              </div>
+            )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {projects.map(p => {
-          const s = stats[p.id] ?? { total: 0, open: 0, done: 0 };
-          const pct = s.total > 0 ? Math.round((s.done / s.total) * 100) : 0;
-          return (
-            <Link key={p.id} href={`/projects/${p.id}`} className="block h-full min-w-0">
-              <Card className="h-full cursor-pointer border-t-4 border-t-(--rs-primary-500) transition-colors hover:border-(--rs-primary-300)">
-                <CardHeader className="pb-2">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded bg-(--rs-primary-100) text-xs font-bold text-(--rs-primary-700)">
-                      {p.identifier}
-                    </span>
-                    <CardTitle className="min-w-0 text-base font-bold leading-tight text-(--rs-neutral-grey-900)">
-                      {p.name}
-                    </CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {p.description && (
-                    <p className="text-xs text-(--rs-neutral-grey-500) line-clamp-2">{p.description}</p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                    <span className="text-(--rs-neutral-grey-500)">
-                      <span className="font-semibold text-(--rs-neutral-grey-900)">{s.total}</span> tasks
-                    </span>
-                    <span className="text-green-600 font-medium">{s.done} done</span>
-                    <span className="text-(--rs-neutral-grey-500)">{s.open} open</span>
-                  </div>
-                  {s.total > 0 && (
-                    <div>
-                      <div className="h-1.5 bg-(--rs-neutral-grey-100) rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-(--rs-primary-500) rounded-full"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                      <div className="text-xs text-(--rs-neutral-grey-400) mt-1 text-right">{pct}% complete</div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </Link>
-          );
-        })}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {projects.map(p => {
+                const m = meta[p.id];
+                return (
+                  <ProjectCard
+                    key={p.id}
+                    project={{ id: p.id, identifier: p.identifier, name: p.name, description: p.description }}
+                    stats={m?.stat ?? { total: 0, open: 0, done: 0 }}
+                    archived={tab === 'archived'}
+                    canArchive={m?.canArchive ?? false}
+                  />
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
-
-      {projects.length === 0 && loadError && (
-        <div className="flex flex-col items-center justify-center py-16 text-(--rs-neutral-grey-400)">
-          <Briefcase className="w-12 h-12 mb-4 opacity-30" />
-          <p className="text-sm">No projects yet.</p>
-        </div>
-      )}
     </div>
   );
 }

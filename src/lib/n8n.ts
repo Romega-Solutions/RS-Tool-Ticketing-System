@@ -339,6 +339,59 @@ export async function sendAccountSetupEmail(msg: {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Generic notification email — the single email path for the in-app
+// notification layer (src/lib/notifications.ts), so every bell event can ALSO
+// arrive as an email when the recipient hasn't opted out.
+//
+// Reuses the same "OpenClaw - Send Email via Gmail" webhook as
+// sendAccountSetupEmail. A dedicated N8N_NOTIFICATION_EMAIL_URL wins when set
+// (point it at an HTML-capable Gmail sender); otherwise we fall back to the
+// account-setup webhook (N8N_ACCOUNT_SETUP_URL).
+//
+// Contract: POST { to, subject, body, html }.
+//   - `body` carries the PLAIN-TEXT version. The current OpenClaw Gmail node
+//     sends `body` as text, so recipients get a readable email even on the
+//     fallback webhook (never a wall of raw HTML tags).
+//   - `html` carries the branded HTML for an HTML-capable sender to render.
+//
+// FIRE-AND-FORGET: returns void, never throws, never blocks the caller. The
+// HTTP POST runs in the background — callers must NOT await delivery — so that
+// posting a comment / saving a task is never slowed or broken by email latency
+// or a wedged n8n.
+// ─────────────────────────────────────────────────────────────────────────────
+export function sendEmail(msg: {
+  to:      string;
+  subject: string;
+  html:    string;
+  text?:   string;
+}): void {
+  const url = process.env.N8N_NOTIFICATION_EMAIL_URL?.trim()
+    || process.env.N8N_ACCOUNT_SETUP_URL?.trim()
+    || '';
+  if (!url || !msg.to?.trim()) return; // not configured / no recipient → silent no-op
+
+  const text = msg.text ?? msg.html.replace(/<[^>]+>/g, '').trim();
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  // Kicked off but intentionally NOT awaited — fire-and-forget.
+  void fetch(url, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ to: msg.to, subject: msg.subject, body: text, html: msg.html }),
+    signal:  controller.signal,
+  })
+    .then((res) => {
+      clearTimeout(timer);
+      if (!res.ok) console.error(`[notifications/email] n8n responded ${res.status} for ${msg.to}`);
+    })
+    .catch((err) => {
+      clearTimeout(timer);
+      console.error('[notifications/email] send failed:', err instanceof Error ? err.message : err);
+    });
+}
+
 export async function parseResumeWithN8n(
   file: File,
   candidateId?: string | number,

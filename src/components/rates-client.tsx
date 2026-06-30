@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { RefreshCw, ArrowRightLeft, TrendingUp, Loader2, ExternalLink } from 'lucide-react';
+import { roleDisplayLabel } from '@/lib/rbac';
 
 // Wise's public mid-market converter — anyone can open this and confirm the
 // rate we show matches Wise live, no login needed.
@@ -227,7 +228,7 @@ export function RatesClient({ users }: { users: RateUser[] }) {
                     <div className="font-medium text-(--rs-neutral-grey-900)">{u.name}</div>
                     {u.team && <div className="text-xs text-(--rs-neutral-grey-400)">{u.team}</div>}
                   </td>
-                  <td className="px-4 py-2.5 text-(--rs-neutral-grey-600)">{u.role}</td>
+                  <td className="px-4 py-2.5 text-(--rs-neutral-grey-600)">{roleDisplayLabel(u.role)}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">
                     {u.hourlyRateUsd != null
                       ? <span className="font-medium text-(--rs-neutral-grey-800)">$ {usd(u.hourlyRateUsd)}</span>

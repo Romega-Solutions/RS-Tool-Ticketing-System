@@ -12,12 +12,35 @@ import {
   canAccessCertificateCreator,
   canAccessDevTools,
   emailSignatureAccess,
+  roleDisplayLabel,
 } from '@/lib/rbac';
+
+describe('roleDisplayLabel', () => {
+  it('maps raw "ceo" → "Founder" (preserved before normalizing)', () => {
+    expect(roleDisplayLabel('ceo')).toBe('Founder');
+  });
+  it('maps raw "founder" → "Founder"', () => {
+    expect(roleDisplayLabel('founder')).toBe('Founder');
+  });
+  it('maps "tl" → "Lead"', () => {
+    expect(roleDisplayLabel('tl')).toBe('Lead');
+  });
+  it('maps "ic" → "IC"', () => {
+    expect(roleDisplayLabel('ic')).toBe('IC');
+  });
+  it('maps "admin" → "Admin"', () => {
+    expect(roleDisplayLabel('admin')).toBe('Admin');
+  });
+  it('maps "intern" → "Intern"', () => {
+    expect(roleDisplayLabel('intern')).toBe('Intern');
+  });
+});
 
 describe('normalizeRole', () => {
   it('maps admin aliases to admin', () => {
     expect(normalizeRole('admin')).toBe('admin');
     expect(normalizeRole('ceo')).toBe('admin');
+    expect(normalizeRole('founder')).toBe('admin');
     expect(normalizeRole('owner')).toBe('admin');
     expect(normalizeRole('superadmin')).toBe('admin');
     expect(normalizeRole('CEO')).toBe('admin');

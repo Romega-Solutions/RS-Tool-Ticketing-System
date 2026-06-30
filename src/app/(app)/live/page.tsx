@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Radio, Loader2 } from 'lucide-react';
 import { isOvertime } from '@/lib/utils';
+import { roleDisplayLabel } from '@/lib/rbac';
 import { PersonAvatar } from '@/components/person-avatar';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -39,11 +40,10 @@ function roleColor(role: string): string {
   return 'bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-600)';
 }
 
+// Role badge text — proper casing (Intern | IC | Lead | Admin | Founder);
+// 'ceo'/'founder' resolve to "Founder" via the shared rbac helper.
 function roleLabel(role: string): string {
-  const r = role.toLowerCase();
-  if (['admin', 'ceo', 'owner', 'superadmin'].includes(r)) return role.toUpperCase();
-  if (['lead', 'team_lead', 'teamlead', 'manager', 'tl'].includes(r)) return 'Lead';
-  return 'IC';
+  return roleDisplayLabel(role);
 }
 
 // ── Live duration ticker ───────────────────────────────────────────────────────

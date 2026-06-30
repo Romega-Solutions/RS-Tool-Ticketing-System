@@ -41,6 +41,10 @@ export const users = pgTable('users', {
   // When an admin last sent this user the Google sign-in "account setup" email
   // (ISO string; null = never). Drives the "Sent · <date>" badge in User Management.
   setupEmailSentAt:       text('setup_email_sent_at'),
+  // Per-user notification email preferences. The in-app bell is always on; these
+  // toggles gate EMAIL delivery only. `email` is the master switch; the rest are
+  // per-event. Default: everything ON, so existing users keep getting emails.
+  notificationPrefs:      jsonb('notification_prefs').notNull().default(sql`'{"email":true,"mentions":true,"dueToday":true,"approvals":true,"projectAdded":true,"taskAdded":true}'::jsonb`),
 });
 
 export const timesheets = pgTable('timesheets', {
@@ -264,6 +268,9 @@ export const projects = pgTable('projects', {
   network:     integer('network').notNull().default(2),
   nextSequence: integer('next_sequence').notNull().default(1),
   archived:    integer('archived').notNull().default(0),
+  // When the project was archived (ISO string; null = never/active). Powers the
+  // "Project Activity" footprint (created_at + archived_at) and the Archived tab.
+  archivedAt:  text('archived_at'),
   autoArchiveDoneDays: integer('auto_archive_done_days').default(30), // null/0 = off; days a Done task waits before auto-archiving
   createdAt:   text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt:   text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),

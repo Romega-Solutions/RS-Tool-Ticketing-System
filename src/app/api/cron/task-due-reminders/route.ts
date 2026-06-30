@@ -13,18 +13,19 @@ function manilaDate(offsetDays = 0): string {
 }
 
 // GET /api/cron/task-due-reminders
-// Daily Vercel cron: for every active work item due tomorrow, notify its
-// assignee(s) once. Re-running the same day is idempotent (dedupe by link).
+// Daily Vercel cron: for every active work item due TODAY (the due date is
+// within the day), notify its assignee(s) once. Re-running the same day is
+// idempotent (dedupe by link).
 export const GET = route(async (req: Request) => {
   requireBearer(req, process.env.CRON_SECRET);
 
   const sb = createAdminClient();
-  const tomorrow   = manilaDate(1);
-  const todayStart = manilaDate(0); // dedupe window: created today (Manila)
+  const today      = manilaDate(0);
+  const todayStart = today; // dedupe window: due reminders created today (Manila)
 
   const { data: items, error } = await sb.from('work_items')
     .select('id, project_id, name, completed_at, work_item_assignees(user_id)')
-    .eq('target_date', tomorrow)
+    .eq('target_date', today)
     .eq('archived', 0);
 
   if (error) {
@@ -56,7 +57,7 @@ export const GET = route(async (req: Request) => {
       await createNotification({
         userId: uid,
         type:   'task_due',
-        title:  'Your task is due tomorrow',
+        title:  'Your task is due today',
         body:   String(it.name ?? ''),
         link,
       });
@@ -64,5 +65,5 @@ export const GET = route(async (req: Request) => {
     }
   }
 
-  return NextResponse.json({ ranAt: new Date().toISOString(), tomorrow, created });
+  return NextResponse.json({ ranAt: new Date().toISOString(), today, created });
 });

@@ -19,6 +19,7 @@ import {
 import { STATUS_LABEL, STATUS_COLOR } from './onboarder-row';
 import { CreateOnboarderForm } from './onboarder-forms';
 import { OnboarderFilterBar } from './onboarder-filter-bar';
+import { OnboardingHelpButton } from './onboarding-help';
 
 // ─── Stage groupings (3 happy lanes + 1 terminal lane) ──────────────────────
 
@@ -151,6 +152,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
         action={
           !tableMissing && !unexpectedError ? (
             <div className="flex flex-wrap items-start justify-end gap-2">
+              <OnboardingHelpButton />
               <Link
                 href="/onboarders/setup"
                 className="inline-flex h-10 items-center gap-2 rounded-xl border border-(--rs-neutral-grey-200) bg-white px-4 text-sm font-semibold text-(--rs-neutral-grey-700) hover:bg-(--rs-neutral-grey-50) transition-colors"

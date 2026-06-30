@@ -9,7 +9,9 @@ import {
   type WorkItemPatch,
 } from '@/lib/tickets';
 import { canEditWorkItem, canArchiveWorkItem, canViewProject, getProjectCaps } from '@/lib/permissions';
+import { notifyTaskAssigned, newlyAddedAssignees } from '@/lib/notifications';
 import { route, requireSession, parseBody, forbidden, notFound } from '@/lib/api';
+import { sanitizeRichText } from '@/lib/sanitize';
 
 export const runtime = 'nodejs';
 
@@ -60,12 +62,37 @@ export const PATCH = route(async (req: Request, { params }: { params: Promise<{ 
   if (!caps.canEditDates) delete patch.target_date;
   if (!caps.canEditAssignees) delete patch.assigneeUserIds;
 
+  // The description is now rich-text HTML (Tiptap). Sanitize server-side as the
+  // authoritative pass — the client sanitizes too, but never trust the client.
+  if (typeof patch.description === 'string') {
+    patch.description = sanitizeRichText(patch.description);
+  }
+
   try {
     await patchWorkItem(id, patch);
     for (const a of diffActivity(before, patch)) {
       await logActivity(Number(id), session.id, a.action, a.from, a.to);
     }
     const updated = await getWorkItemDetail(id);
+
+    // Notify each NEWLY-added assignee (in-app bell + opt-in email). Diff the
+    // pre-patch assignee list against the requested one; self-adds are dropped
+    // by createNotification's actor===recipient guard. Best-effort: never let a
+    // notification hiccup fail the save.
+    if (patch.assigneeUserIds) {
+      const added = newlyAddedAssignees(before.assignee_ids ?? [], patch.assigneeUserIds);
+      if (added.length) {
+        const name = updated?.name ?? before.name;
+        await Promise.all(added.map((uid) =>
+          notifyTaskAssigned({
+            userId:   uid,
+            actorId:  session.id,
+            workItem: { id: before.id, projectId: before.project_id, name },
+          }).catch(() => { /* swallow — bell/email is secondary to the patch */ }),
+        ));
+      }
+    }
+
     return NextResponse.json(updated);
   } catch (err) {
     return NextResponse.json(

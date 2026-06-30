@@ -11,7 +11,9 @@ import {
   type TaskDetailCrumb,
 } from '@/lib/task-detail-navigation';
 import { isAllowedTaskImageUpload } from '@/lib/task-image-uploads';
-import { MentionTextarea, extractMentionedIds } from '@/components/mention-textarea.client';
+import { RichTextEditor } from '@/components/rich-text-editor.client';
+import { RichText } from '@/components/rich-text';
+import { sanitizeRichText, isRichTextEmpty } from '@/lib/sanitize';
 import type { ProjectCaps } from '@/lib/permissions';
 
 // ── Shape we get from /api/tickets/work-items/[id] ─────────────────────────
@@ -309,7 +311,10 @@ export function TaskDetailSheet({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: name.trim(),
-          description,
+          // Description is now rich-text HTML. The PATCH route (not owned here)
+          // doesn't sanitize, so sanitize client-side before submit. <RichText>
+          // sanitizes again at render (defense in depth).
+          description: sanitizeRichText(description),
           priority,
           state: stateId,
           cycle_id: cycleId ? Number(cycleId) : null,
@@ -336,15 +341,15 @@ export function TaskDetailSheet({
   };
 
   const handlePostComment = async () => {
-    if (!item || !newComment.trim()) return;
+    if (!item || isRichTextEmpty(newComment)) return;
     setPostingComment(true); setError('');
     try {
-      const trimmed = newComment.trim();
-      const mentions = extractMentionedIds(trimmed, members.map(m => ({ user_id: m.user_id, name: m.name })));
+      // Send the editor HTML; the server parses @mention nodes (data-id) from it,
+      // sanitizes, and fires notifications.
       const res = await fetch(`/api/tickets/work-items/${item.id}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: trimmed, mentions }),
+        body: JSON.stringify({ body: newComment }),
       });
       if (!res.ok) {
         const d = (await res.json().catch(() => ({}))) as { error?: string };
@@ -641,14 +646,18 @@ export function TaskDetailSheet({
               </Field>
 
               <Field label="Description">
-                <textarea
-                  value={description}
-                  onChange={e => setDescription(e.target.value)}
-                  rows={isWide ? 14 : 4}
-                  disabled={!canEdit}
-                  placeholder={canEdit ? 'Add a description…' : 'No description'}
-                  className={`w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 resize-y focus:border-(--rs-primary-400) focus:outline-none disabled:cursor-not-allowed disabled:bg-(--rs-neutral-grey-50) disabled:opacity-70 ${isWide ? 'text-[15px] leading-relaxed' : 'text-sm'}`}
-                />
+                {canEdit ? (
+                  <RichTextEditor
+                    value={description}
+                    onChange={setDescription}
+                    placeholder="Add a description…"
+                    bodyClassName={`overflow-y-auto ${isWide ? 'max-h-[60vh] min-h-[220px]' : 'min-h-[120px]'}`}
+                  />
+                ) : isRichTextEmpty(description) ? (
+                  <p className="text-sm italic text-(--rs-neutral-grey-400)">No description</p>
+                ) : (
+                  <RichText html={description} className={isWide ? 'text-[15px] leading-relaxed text-(--rs-neutral-grey-800)' : 'text-sm text-(--rs-neutral-grey-800)'} />
+                )}
                 {descriptionImageUrls.length > 0 && (
                   <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {descriptionImageUrls.map((url, index) => (
@@ -947,23 +956,23 @@ export function TaskDetailSheet({
                       )}
                     </div>
                   </div>
-                  <p className="text-sm text-(--rs-neutral-grey-800) whitespace-pre-wrap">{c.body}</p>
+                  <RichText html={c.body} className="text-sm text-(--rs-neutral-grey-800)" />
                 </div>
               ))}
 
               <div className="pt-2 space-y-2">
-                <MentionTextarea
+                <RichTextEditor
                   value={newComment}
                   onChange={setNewComment}
-                  members={members}
-                  rows={3}
                   placeholder="Write a comment… use @ to tag a teammate"
-                  className="w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm resize-y focus:border-(--rs-primary-400) focus:outline-none"
-                  onSubmitShortcut={handlePostComment}
+                  bodyClassName="min-h-[84px] overflow-y-auto"
+                  enableMentions
+                  enableEmoji
+                  mentionUsers={members.map(m => ({ id: m.user_id, name: m.name }))}
                 />
                 <button
                   onClick={handlePostComment}
-                  disabled={postingComment || !newComment.trim()}
+                  disabled={postingComment || isRichTextEmpty(newComment)}
                   className="flex min-h-10 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                   style={{ background: 'var(--rs-primary-500)' }}
                 >

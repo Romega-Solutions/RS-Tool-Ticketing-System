@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Pencil, Check, X, Loader2, UserPlus, Eye, EyeOff, Users, UserMinus, RotateCcw, FileText, ArrowUp, ArrowDown, ChevronsUpDown, SlidersHorizontal, Mail, MailCheck } from 'lucide-react';
+import { Pencil, X, Loader2, UserPlus, Eye, EyeOff, Users, UserMinus, RotateCcw, FileText, ArrowUp, ArrowDown, ChevronsUpDown, SlidersHorizontal, Mail, MailCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { SendSetupEmailDialog, type SetupEmailTarget } from '@/components/send-setup-email-dialog';
 import { createClient } from '@/lib/supabase/client';
+import { roleDisplayLabel } from '@/lib/rbac';
 import { formatPhtRange, pacificRange } from '@/lib/schedule';
 
 export type UserRow = {
@@ -31,7 +32,9 @@ export type UserRow = {
   setupEmailSentAt: string | null;
 };
 
-const ROLE_OPTIONS = ['intern', 'ic', 'lead', 'admin'];
+// Selectable roles (stored value is the lowercase string; the dropdown shows the
+// proper display label via roleDisplayLabel). 'founder' = Admin access.
+const ROLE_OPTIONS = ['intern', 'ic', 'lead', 'admin', 'founder'];
 
 // Canonical departments, shown alphabetically in the selection dropdowns.
 const DEPARTMENTS = [
@@ -45,6 +48,7 @@ const DEPARTMENTS = [
 
 const ROLE_BADGE: Record<string, string> = {
   admin:   'bg-purple-100 text-purple-700 border-purple-200',
+  founder: 'bg-purple-100 text-purple-700 border-purple-200',
   ceo:     'bg-purple-100 text-purple-700 border-purple-200',
   lead:    'bg-blue-100 text-blue-700 border-blue-200',
   tl:      'bg-blue-100 text-blue-700 border-blue-200',
@@ -151,8 +155,36 @@ function pstLabel(start: string | null, end: string | null): { range: string; zo
   return pacificRange(start, end);
 }
 
-const dateInputCls = 'text-xs border border-(--rs-neutral-grey-300) rounded px-2 py-1 bg-white w-full';
-const timeInputCls = 'text-xs border border-(--rs-neutral-grey-300) rounded px-1.5 py-1 bg-white tabular-nums';
+// Client-side mirror of the PATCH /api/admin/users validation rules so errors
+// surface in the editor dialog before submit (dates YYYY-MM-DD, http(s) drive
+// URL, rate ≥ 0, approved hours 1–60). Returns an error string, or null if valid.
+function validateEditForm(f: EditState): string | null {
+  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+  const dateChecks: [string, string][] = [
+    ['Date of birth', f.dateOfBirth],
+    ['Start date', f.startDate],
+    ['End date', f.endDate],
+  ];
+  for (const [label, value] of dateChecks) {
+    if (value.trim() && !dateRe.test(value.trim())) return `${label} must be YYYY-MM-DD`;
+  }
+  if (f.driveUrl.trim()) {
+    try {
+      const u = new URL(f.driveUrl.trim());
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'Drive link must be an http(s) URL';
+    } catch {
+      return 'Drive link must be a valid URL';
+    }
+  }
+  if (f.hourlyRateUsd.trim()) {
+    const n = Number(f.hourlyRateUsd.trim());
+    if (!Number.isFinite(n)) return 'Hourly rate must be a number';
+    if (n < 0) return 'Hourly rate cannot be negative';
+  }
+  const ah = Number((f.approvedHoursPerWeek || '15').trim());
+  if (!Number.isInteger(ah) || ah < 1 || ah > 60) return 'Approved hours must be between 1 and 60';
+  return null;
+}
 
 export function UserManagementTable({ initialUsers, currentUserId }: { initialUsers: UserRow[]; currentUserId?: number }) {
   const [userList, setUserList] = useState<UserRow[]>(initialUsers);
@@ -229,8 +261,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
     };
   }, []);
 
-  // Edit existing user
-  const [editingId, setEditingId]   = useState<number | null>(null);
+  // Edit existing user — the editor lives inside the profile dialog (profileUser).
   const [editForm, setEditForm]     = useState<EditState>({ role: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '', dateOfBirth: '', startDate: '', endDate: '', driveUrl: '', approvedHoursPerWeek: '15', schedulePhtStart: '', schedulePhtEnd: '' });
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState('');
@@ -256,8 +287,10 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
   const [creating, setCreating]           = useState(false);
   const [createError, setCreateError]     = useState('');
 
-  const startEdit = (user: UserRow) => {
-    setEditingId(user.id);
+  // Open the profile dialog as an editor — seeds editForm from the row.
+  const openProfile = (user: UserRow) => {
+    setProfileUser(user);
+    setError('');
     setEditForm({
       role: user.role,
       isActive: user.isActive,
@@ -272,11 +305,16 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       schedulePhtStart: user.schedulePhtStart ?? '',
       schedulePhtEnd: user.schedulePhtEnd ?? '',
     });
-    setError('');
   };
-  const cancelEdit = () => { setEditingId(null); setError(''); };
+  const closeProfile = () => { setProfileUser(null); setError(''); };
 
-  const saveEdit = async (userId: number) => {
+  // Save the editable profile dialog → PATCH /api/admin/users (which already
+  // accepts every one of these fields). Validates client-side first.
+  const saveProfile = async () => {
+    if (!profileUser) return;
+    const invalid = validateEditForm(editForm);
+    if (invalid) { setError(invalid); return; }
+    const userId = profileUser.id;
     setSaving(true);
     setError('');
     try {
@@ -302,7 +340,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       const data = (await res.json()) as { user?: UserRow; error?: string };
       if (!res.ok) { setError(data.error ?? 'Failed to save'); return; }
       if (data.user) setUserList(prev => prev.map(u => u.id === userId ? data.user! : u));
-      setEditingId(null);
+      setProfileUser(null);
     } catch {
       setError('Request failed');
     } finally {
@@ -453,20 +491,16 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
             </thead>
             <tbody className="divide-y divide-(--rs-neutral-grey-100)">
               {sortedUsers.map(user => {
-                const isEditing = editingId === user.id;
                 const badge = ROLE_BADGE[user.role.toLowerCase()] ?? ROLE_BADGE.ic;
-                const pst = pstLabel(
-                  isEditing ? (editForm.schedulePhtStart || null) : user.schedulePhtStart,
-                  isEditing ? (editForm.schedulePhtEnd || null) : user.schedulePhtEnd,
-                );
+                const pst = pstLabel(user.schedulePhtStart, user.schedulePhtEnd);
                 return (
                   <tr key={user.id} className={`hover:bg-(--rs-neutral-grey-50) transition-colors ${!user.isActive ? 'opacity-50' : ''}`}>
                     <td className="px-4 py-3">
                       <button
                         type="button"
-                        onClick={() => setProfileUser(user)}
+                        onClick={() => openProfile(user)}
                         className="text-left font-medium text-(--rs-neutral-grey-900) hover:underline cursor-pointer"
-                        title="View full profile"
+                        title="View / edit profile"
                       >
                         {user.name}
                       </button>
@@ -480,37 +514,15 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
 
                     {show('role') && (
                       <td className="px-4 py-3">
-                        {isEditing ? (
-                          <select
-                            value={editForm.role}
-                            onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))}
-                            className="text-xs border border-(--rs-neutral-grey-300) rounded px-2 py-1 bg-white w-full"
-                          >
-                            {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
-                          </select>
-                        ) : (
-                          <span className={`inline-block text-xs px-2 py-0.5 rounded border font-medium ${badge}`}>
-                            {user.role}
-                          </span>
-                        )}
+                        <span className={`inline-block text-xs px-2 py-0.5 rounded border font-medium ${badge}`}>
+                          {roleDisplayLabel(user.role)}
+                        </span>
                       </td>
                     )}
 
                     {show('team') && (
                       <td className="px-4 py-3">
-                        {isEditing ? (
-                          <select
-                            value={editForm.team}
-                            onChange={e => setEditForm(f => ({ ...f, team: e.target.value }))}
-                            aria-label="Team"
-                            className="text-xs border border-(--rs-neutral-grey-300) rounded px-2 py-1 bg-white w-full"
-                          >
-                            <option value="">— No team —</option>
-                            {Array.from(new Set([editForm.team, ...DEPARTMENTS].filter(Boolean))).map(d => (
-                              <option key={d} value={d}>{d}</option>
-                            ))}
-                          </select>
-                        ) : user.team ? (
+                        {user.team ? (
                           <span className="text-xs text-(--rs-neutral-grey-700)">{user.team}</span>
                         ) : (
                           <span className="text-xs text-(--rs-neutral-grey-300) italic">No team</span>
@@ -521,31 +533,14 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                     {/* Approved Hours */}
                     {show('approvedHoursPerWeek') && (
                       <td className="px-4 py-3 text-center">
-                        {isEditing ? (
-                          <input
-                            type="number" min={1} max={60} aria-label="Approved weekly hours"
-                            value={editForm.approvedHoursPerWeek}
-                            onChange={e => setEditForm(f => ({ ...f, approvedHoursPerWeek: e.target.value }))}
-                            className="text-xs w-16 border border-(--rs-neutral-grey-300) rounded px-2 py-1 text-center tabular-nums"
-                          />
-                        ) : (
-                          <span className="text-sm text-(--rs-neutral-grey-700) tabular-nums">{user.approvedHoursPerWeek} hrs</span>
-                        )}
+                        <span className="text-sm text-(--rs-neutral-grey-700) tabular-nums">{user.approvedHoursPerWeek} hrs</span>
                       </td>
                     )}
 
                     {/* Schedule PHT */}
                     {show('schedulePht') && (
                       <td className="px-4 py-3">
-                        {isEditing ? (
-                          <div className="flex items-center gap-1">
-                            <input type="time" aria-label="Schedule start (PHT)" value={editForm.schedulePhtStart}
-                              onChange={e => setEditForm(f => ({ ...f, schedulePhtStart: e.target.value }))} className={timeInputCls} />
-                            <span className="text-(--rs-neutral-grey-300)">–</span>
-                            <input type="time" aria-label="Schedule end (PHT)" value={editForm.schedulePhtEnd}
-                              onChange={e => setEditForm(f => ({ ...f, schedulePhtEnd: e.target.value }))} className={timeInputCls} />
-                          </div>
-                        ) : user.schedulePhtStart && user.schedulePhtEnd ? (
+                        {user.schedulePhtStart && user.schedulePhtEnd ? (
                           <span className="text-xs text-(--rs-neutral-grey-700) tabular-nums whitespace-nowrap">{formatPhtRange(user.schedulePhtStart, user.schedulePhtEnd)}</span>
                         ) : (
                           <span className="text-xs text-(--rs-neutral-grey-300) italic">—</span>
@@ -569,29 +564,17 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
 
                     {show('isActive') && (
                       <td className="px-4 py-3 text-center">
-                        {isEditing ? (
-                          <input
-                            type="checkbox"
-                            checked={editForm.isActive}
-                            onChange={e => setEditForm(f => ({ ...f, isActive: e.target.checked }))}
-                            className="w-4 h-4 rounded accent-(--rs-primary-500)"
-                          />
-                        ) : (
-                          <span
-                            className={`inline-block w-2.5 h-2.5 rounded-full ${user.isActive ? 'bg-green-500' : 'bg-(--rs-neutral-grey-300)'}`}
-                            title={user.isActive ? 'Active' : 'Inactive'}
-                          />
-                        )}
+                        <span
+                          className={`inline-block w-2.5 h-2.5 rounded-full ${user.isActive ? 'bg-green-500' : 'bg-(--rs-neutral-grey-300)'}`}
+                          title={user.isActive ? 'Active' : 'Inactive'}
+                        />
                       </td>
                     )}
 
                     {/* Birth Date */}
                     {show('dateOfBirth') && (
                       <td className="px-4 py-3">
-                        {isEditing ? (
-                          <input type="date" aria-label="Birth date" value={editForm.dateOfBirth}
-                            onChange={e => setEditForm(f => ({ ...f, dateOfBirth: e.target.value }))} className={dateInputCls} />
-                        ) : user.dateOfBirth ? (
+                        {user.dateOfBirth ? (
                           <span className="text-xs text-(--rs-neutral-grey-700) whitespace-nowrap">{fmtDate(user.dateOfBirth)}</span>
                         ) : (
                           <span className="text-xs text-(--rs-neutral-grey-300) italic">—</span>
@@ -602,10 +585,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                     {/* Start Date */}
                     {show('startDate') && (
                       <td className="px-4 py-3">
-                        {isEditing ? (
-                          <input type="date" aria-label="Start date" value={editForm.startDate}
-                            onChange={e => setEditForm(f => ({ ...f, startDate: e.target.value }))} className={dateInputCls} />
-                        ) : user.startDate ? (
+                        {user.startDate ? (
                           <span className="text-xs text-(--rs-neutral-grey-700) whitespace-nowrap">{fmtDate(user.startDate)}</span>
                         ) : (
                           <span className="text-xs text-(--rs-neutral-grey-300) italic">—</span>
@@ -616,10 +596,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                     {/* End Date */}
                     {show('endDate') && (
                       <td className="px-4 py-3">
-                        {isEditing ? (
-                          <input type="date" aria-label="End date" value={editForm.endDate}
-                            onChange={e => setEditForm(f => ({ ...f, endDate: e.target.value }))} className={dateInputCls} />
-                        ) : user.endDate ? (
+                        {user.endDate ? (
                           <span className="text-xs text-(--rs-neutral-grey-700) whitespace-nowrap">{fmtDate(user.endDate)}</span>
                         ) : (
                           <span className="text-xs text-(--rs-neutral-grey-300) italic">—</span>
@@ -630,12 +607,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                     {/* Drive file */}
                     {show('driveUrl') && (
                       <td className="px-4 py-3 text-center">
-                        {isEditing ? (
-                          <input type="url" aria-label="Google Drive link" value={editForm.driveUrl}
-                            onChange={e => setEditForm(f => ({ ...f, driveUrl: e.target.value }))}
-                            placeholder="https://drive.google.com/…"
-                            className="text-xs border border-(--rs-neutral-grey-300) rounded px-2 py-1 bg-white w-full min-w-[10rem]" />
-                        ) : user.driveUrl ? (
+                        {user.driveUrl ? (
                           <a href={user.driveUrl} target="_blank" rel="noopener noreferrer"
                             title="Open Google Drive file"
                             className="inline-flex text-(--rs-primary-600) hover:text-(--rs-primary-700)">
@@ -649,14 +621,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
 
                     {show('memberCode') && (
                       <td className="px-4 py-3">
-                        {isEditing ? (
-                          <input
-                            value={editForm.memberCode}
-                            onChange={e => setEditForm(f => ({ ...f, memberCode: e.target.value }))}
-                            placeholder="e.g. ACNG-1"
-                            className="text-xs w-full border border-(--rs-neutral-grey-300) rounded px-2 py-1 font-mono"
-                          />
-                        ) : user.memberCode ? (
+                        {user.memberCode ? (
                           <code className="text-[11px] font-mono text-(--rs-neutral-grey-600)">{user.memberCode}</code>
                         ) : (
                           <span className="text-xs text-(--rs-neutral-grey-300) italic">Not set</span>
@@ -666,21 +631,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
 
                     {show('hourlyRateUsd') && (
                       <td className="px-4 py-3 text-right">
-                        {isEditing ? (
-                          <div className="relative">
-                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-(--rs-neutral-grey-400)">$</span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              inputMode="decimal"
-                              value={editForm.hourlyRateUsd}
-                              onChange={e => setEditForm(f => ({ ...f, hourlyRateUsd: e.target.value }))}
-                              placeholder="0.00"
-                              className="text-xs w-full border border-(--rs-neutral-grey-300) rounded pl-5 pr-2 py-1 text-right tabular-nums"
-                            />
-                          </div>
-                        ) : user.hourlyRateUsd != null ? (
+                        {user.hourlyRateUsd != null ? (
                           <span className="text-sm font-medium text-(--rs-neutral-grey-800) tabular-nums">$ {formatUsd(user.hourlyRateUsd)}</span>
                         ) : (
                           <span className="text-xs text-(--rs-neutral-grey-300) italic">Not set</span>
@@ -689,49 +640,36 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                     )}
 
                     <td className="px-4 py-3 text-right">
-                      {isEditing ? (
-                        <div className="flex items-center justify-end gap-1">
-                          <Button size="icon" variant="ghost" className="w-7 h-7 text-green-600 hover:text-green-700 hover:bg-green-50"
-                            onClick={() => saveEdit(user.id)} disabled={saving} title="Save">
-                            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      <div className="flex items-center justify-end gap-1">
+                        <Button size="sm" variant="ghost"
+                          className="h-7 px-2.5 text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-900)"
+                          onClick={() => openProfile(user)}>
+                          <Pencil className="w-3.5 h-3.5 mr-1" />Edit
+                        </Button>
+                        {user.isActive && (
+                          <Button size="icon" variant="ghost"
+                            className="w-7 h-7 text-(--rs-neutral-grey-400) hover:text-(--rs-primary-700) hover:bg-(--rs-primary-50)"
+                            onClick={() => setSetupEmailUser({ id: user.id, name: user.name, email: user.email, role: user.role, team: user.team })}
+                            title={user.setupEmailSentAt ? 'Resend account-setup email' : 'Send account-setup email'}>
+                            {user.setupEmailSentAt ? <MailCheck className="w-3.5 h-3.5" /> : <Mail className="w-3.5 h-3.5" />}
                           </Button>
-                          <Button size="icon" variant="ghost" className="w-7 h-7 text-red-400 hover:text-red-600 hover:bg-red-50"
-                            onClick={cancelEdit} disabled={saving} title="Cancel">
-                            <X className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-end gap-1">
-                          <Button size="sm" variant="ghost"
-                            className="h-7 px-2.5 text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-900)"
-                            onClick={() => startEdit(user)}>
-                            <Pencil className="w-3.5 h-3.5 mr-1" />Edit
-                          </Button>
-                          {user.isActive && (
-                            <Button size="icon" variant="ghost"
-                              className="w-7 h-7 text-(--rs-neutral-grey-400) hover:text-(--rs-primary-700) hover:bg-(--rs-primary-50)"
-                              onClick={() => setSetupEmailUser({ id: user.id, name: user.name, email: user.email, role: user.role, team: user.team })}
-                              title={user.setupEmailSentAt ? 'Resend account-setup email' : 'Send account-setup email'}>
-                              {user.setupEmailSentAt ? <MailCheck className="w-3.5 h-3.5" /> : <Mail className="w-3.5 h-3.5" />}
+                        )}
+                        {currentUserId !== user.id && (
+                          user.isActive ? (
+                            <Button size="sm" variant="ghost"
+                              className="h-7 px-2.5 text-red-500 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => setPendingRemove(user)} title="Remove (deactivate)">
+                              <UserMinus className="w-3.5 h-3.5 mr-1" />Remove
                             </Button>
-                          )}
-                          {currentUserId !== user.id && (
-                            user.isActive ? (
-                              <Button size="sm" variant="ghost"
-                                className="h-7 px-2.5 text-red-500 hover:text-red-700 hover:bg-red-50"
-                                onClick={() => setPendingRemove(user)} title="Remove (deactivate)">
-                                <UserMinus className="w-3.5 h-3.5 mr-1" />Remove
-                              </Button>
-                            ) : (
-                              <Button size="sm" variant="ghost"
-                                className="h-7 px-2.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
-                                onClick={() => setActive(user, true)} disabled={togglingActive} title="Restore (reactivate)">
-                                <RotateCcw className="w-3.5 h-3.5 mr-1" />Restore
-                              </Button>
-                            )
-                          )}
-                        </div>
-                      )}
+                          ) : (
+                            <Button size="sm" variant="ghost"
+                              className="h-7 px-2.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                              onClick={() => setActive(user, true)} disabled={togglingActive} title="Restore (reactivate)">
+                              <RotateCcw className="w-3.5 h-3.5 mr-1" />Restore
+                            </Button>
+                          )
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -797,7 +735,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                 <Field label="Role">
                   <select value={newForm.role} onChange={e => setNewForm(f => ({ ...f, role: e.target.value }))}
                     className={inputCls}>
-                    {ROLE_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                    {ROLE_OPTIONS.map(r => <option key={r} value={r}>{roleDisplayLabel(r)}</option>)}
                   </select>
                 </Field>
                 <Field label="Department">
@@ -887,46 +825,136 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
         </div>
       )}
 
-      {/* ── Profile popup (clicking a name) ─────────────────────────────── */}
-      <Dialog open={profileUser !== null} onOpenChange={(o) => { if (!o) setProfileUser(null); }}>
-        <DialogContent className="max-w-lg">
-          {profileUser && (
-            <>
-              <DialogHeader>
-                <DialogTitle>{profileUser.name}</DialogTitle>
-                <p className="text-sm text-(--rs-neutral-grey-500)">{profileUser.username} · {profileUser.email}</p>
-              </DialogHeader>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                <ProfileField label="Role" value={profileUser.role} />
-                <ProfileField label="Team" value={profileUser.team ?? '—'} />
-                <ProfileField label="Job Title" value={profileUser.jobTitle ?? '—'} />
-                <ProfileField label="Member Code" value={profileUser.memberCode ?? '—'} />
-                <ProfileField label="Approved Hours" value={`${profileUser.approvedHoursPerWeek} hrs`} />
-                <ProfileField label="Status" value={profileUser.isActive ? 'Active' : 'Inactive'} />
-                <ProfileField label="Schedule (PHT)" value={(profileUser.schedulePhtStart && profileUser.schedulePhtEnd) ? formatPhtRange(profileUser.schedulePhtStart, profileUser.schedulePhtEnd) : '—'} />
-                <ProfileField label="Schedule (PST)" value={(() => { const p = pstLabel(profileUser.schedulePhtStart, profileUser.schedulePhtEnd); return p ? `${p.range} ${p.zone}` : '—'; })()} />
-                <ProfileField label="Birth Date" value={profileUser.dateOfBirth ? fmtDate(profileUser.dateOfBirth) : '—'} />
-                <ProfileField label="Start Date" value={profileUser.startDate ? fmtDate(profileUser.startDate) : '—'} />
-                <ProfileField label="End Date" value={profileUser.endDate ? fmtDate(profileUser.endDate) : '—'} />
-                <ProfileField label="Rate (USD/hr)" value={profileUser.hourlyRateUsd != null ? `$ ${formatUsd(profileUser.hourlyRateUsd)}` : '—'} />
-                <div className="col-span-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-(--rs-neutral-grey-400)">Drive file</p>
-                  {profileUser.driveUrl ? (
-                    <a href={profileUser.driveUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-(--rs-primary-600) hover:underline inline-flex items-center gap-1">
-                      <FileText className="w-3.5 h-3.5" /> Open file
-                    </a>
-                  ) : <p className="text-sm text-(--rs-neutral-grey-400)">—</p>}
-                </div>
-              </div>
-              <DialogFooter>
-                {currentUserId !== profileUser.id && (
-                  <Button onClick={() => { const u = profileUser; setProfileUser(null); startEdit(u); }} className="gap-2">
-                    <Pencil className="w-4 h-4" /> Edit
-                  </Button>
+      {/* ── Profile editor (clicking a name / Edit) ─────────────────────── */}
+      <Dialog open={profileUser !== null} onOpenChange={(o) => { if (!o) closeProfile(); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          {profileUser && (() => {
+            // The admin endpoint refuses self-edits, so your own row is read-only.
+            const isSelf = currentUserId === profileUser.id;
+            const pst = pstLabel(
+              isSelf ? profileUser.schedulePhtStart : (editForm.schedulePhtStart || null),
+              isSelf ? profileUser.schedulePhtEnd : (editForm.schedulePhtEnd || null),
+            );
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle>{profileUser.name}</DialogTitle>
+                  {/* Identity — sourced from the org chart, not editable here. */}
+                  <p className="text-sm text-(--rs-neutral-grey-500)">{profileUser.username} · {profileUser.email}</p>
+                  {profileUser.jobTitle && (
+                    <p className="text-xs text-(--rs-neutral-grey-400)">{profileUser.jobTitle}</p>
+                  )}
+                </DialogHeader>
+
+                {isSelf ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                      <ProfileField label="Role" value={roleDisplayLabel(profileUser.role)} />
+                      <ProfileField label="Team" value={profileUser.team ?? '—'} />
+                      <ProfileField label="Member Code" value={profileUser.memberCode ?? '—'} />
+                      <ProfileField label="Approved Hours" value={`${profileUser.approvedHoursPerWeek} hrs`} />
+                      <ProfileField label="Status" value={profileUser.isActive ? 'Active' : 'Inactive'} />
+                      <ProfileField label="Schedule (PHT)" value={(profileUser.schedulePhtStart && profileUser.schedulePhtEnd) ? formatPhtRange(profileUser.schedulePhtStart, profileUser.schedulePhtEnd) : '—'} />
+                      <ProfileField label="Schedule (PST)" value={pst ? `${pst.range} ${pst.zone}` : '—'} />
+                      <ProfileField label="Birth Date" value={profileUser.dateOfBirth ? fmtDate(profileUser.dateOfBirth) : '—'} />
+                      <ProfileField label="Start Date" value={profileUser.startDate ? fmtDate(profileUser.startDate) : '—'} />
+                      <ProfileField label="End Date" value={profileUser.endDate ? fmtDate(profileUser.endDate) : '—'} />
+                      <ProfileField label="Rate (USD/hr)" value={profileUser.hourlyRateUsd != null ? `$ ${formatUsd(profileUser.hourlyRateUsd)}` : '—'} />
+                    </div>
+                    <p className="text-xs text-(--rs-neutral-grey-500)">Use the profile page to edit your own account.</p>
+                    <DialogFooter>
+                      <Button variant="ghost" onClick={closeProfile}>Close</Button>
+                    </DialogFooter>
+                  </>
+                ) : (
+                  <>
+                    {error && (
+                      <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2.5 rounded-lg text-sm">{error}</div>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
+                      <Field label="Role">
+                        <select value={editForm.role} onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))} className={inputCls}>
+                          {ROLE_OPTIONS.map(r => <option key={r} value={r}>{roleDisplayLabel(r)}</option>)}
+                        </select>
+                      </Field>
+                      <Field label="Team">
+                        <select value={editForm.team} onChange={e => setEditForm(f => ({ ...f, team: e.target.value }))} aria-label="Team" className={inputCls}>
+                          <option value="">— No team —</option>
+                          {Array.from(new Set([editForm.team, ...DEPARTMENTS].filter(Boolean))).map(d => (
+                            <option key={d} value={d}>{d}</option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label="Member Code">
+                        <input value={editForm.memberCode} onChange={e => setEditForm(f => ({ ...f, memberCode: e.target.value }))}
+                          placeholder="e.g. ACNG-1" className={`${inputCls} font-mono`} />
+                      </Field>
+                      <Field label="Approved Hours / week">
+                        <input type="number" min={1} max={60} inputMode="numeric" value={editForm.approvedHoursPerWeek}
+                          onChange={e => setEditForm(f => ({ ...f, approvedHoursPerWeek: e.target.value }))}
+                          className={`${inputCls} tabular-nums`} placeholder="15" />
+                      </Field>
+                      <Field label="Hourly Rate (USD)">
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-(--rs-neutral-grey-400)">$</span>
+                          <input type="number" min="0" step="0.01" inputMode="decimal" value={editForm.hourlyRateUsd}
+                            onChange={e => setEditForm(f => ({ ...f, hourlyRateUsd: e.target.value }))}
+                            className={`${inputCls} pl-7 tabular-nums`} placeholder="0.00" />
+                        </div>
+                      </Field>
+                      <Field label="Status">
+                        <label className="flex items-center gap-2.5 text-sm text-(--rs-neutral-grey-700) cursor-pointer h-[42px]">
+                          <input type="checkbox" checked={editForm.isActive}
+                            onChange={e => setEditForm(f => ({ ...f, isActive: e.target.checked }))}
+                            className="w-4 h-4 rounded accent-(--rs-primary-500)" />
+                          {editForm.isActive ? 'Active' : 'Inactive'}
+                        </label>
+                      </Field>
+                      <Field label="Schedule start (PHT)">
+                        <input type="time" aria-label="Schedule start (PHT)" value={editForm.schedulePhtStart}
+                          onChange={e => setEditForm(f => ({ ...f, schedulePhtStart: e.target.value }))} className={inputCls} />
+                      </Field>
+                      <Field label="Schedule end (PHT)">
+                        <input type="time" aria-label="Schedule end (PHT)" value={editForm.schedulePhtEnd}
+                          onChange={e => setEditForm(f => ({ ...f, schedulePhtEnd: e.target.value }))} className={inputCls} />
+                      </Field>
+                      {pst && (
+                        <p className="sm:col-span-2 -mt-2 text-xs text-(--rs-neutral-grey-500)">
+                          Pacific time: <span className="font-medium tabular-nums">{pst.range} {pst.zone}</span>
+                        </p>
+                      )}
+                      <Field label="Date of Birth">
+                        <input type="date" aria-label="Birth date" value={editForm.dateOfBirth}
+                          onChange={e => setEditForm(f => ({ ...f, dateOfBirth: e.target.value }))} className={inputCls} />
+                      </Field>
+                      <Field label="Start Date">
+                        <input type="date" aria-label="Start date" value={editForm.startDate}
+                          onChange={e => setEditForm(f => ({ ...f, startDate: e.target.value }))} className={inputCls} />
+                      </Field>
+                      <Field label="End Date">
+                        <input type="date" aria-label="End date" value={editForm.endDate}
+                          onChange={e => setEditForm(f => ({ ...f, endDate: e.target.value }))} className={inputCls} />
+                      </Field>
+                      <div className="sm:col-span-2">
+                        <Field label="Google Drive File (link)">
+                          <input type="url" aria-label="Google Drive link" value={editForm.driveUrl}
+                            onChange={e => setEditForm(f => ({ ...f, driveUrl: e.target.value }))}
+                            placeholder="https://drive.google.com/…" className={inputCls} />
+                        </Field>
+                      </div>
+                    </div>
+                    <DialogFooter>
+                      <Button variant="ghost" onClick={closeProfile} disabled={saving}>Cancel</Button>
+                      <Button onClick={saveProfile} disabled={saving} className="gap-2">
+                        {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                        {saving ? 'Saving…' : 'Save'}
+                      </Button>
+                    </DialogFooter>
+                  </>
                 )}
-              </DialogFooter>
-            </>
-          )}
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

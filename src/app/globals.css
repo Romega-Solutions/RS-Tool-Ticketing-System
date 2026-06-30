@@ -101,7 +101,11 @@ input,
 textarea,
 select,
 [contenteditable="true"],
-[role="textbox"] {
+[role="textbox"],
+.rs-richtext,
+.rs-richtext *,
+[data-selectable],
+[data-selectable] * {
   -webkit-user-select: text !important;
   -moz-user-select: text !important;
   -ms-user-select: text !important;

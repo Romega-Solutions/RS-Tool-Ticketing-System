@@ -10,6 +10,8 @@
 // import resolvePlaceholders for its live preview. The Supabase-backed default
 // get/save accessors live in src/lib/email-templates-store.ts.
 
+import { publicBaseUrl } from '@/lib/app-url';
+
 export const ACCOUNT_SETUP_KEY = 'account_setup';
 
 // Built-in fallback used when the DB row is missing (fresh DB / pre-migration).
@@ -145,4 +147,124 @@ export function resolvePlaceholders(
     text: toText(template.body, values),
     html: wrapHtml(toHtmlBody(template.body, values)),
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notification emails — the HTML/text rendered for every bell event the
+// recipient has opted into (see src/lib/notifications.ts). One shared shell:
+// brand header, a headline, an optional body line, an optional task-detail box
+// (Title / Description / Priority / Due Date) and a SINGLE CTA button that deep
+// links into the portal. Pure + unit-tested.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type NotificationTaskMeta = {
+  title?:       string | null;
+  description?: string | null;
+  priority?:    string | null;
+  dueDate?:     string | null;
+};
+
+const PRIORITY_LABEL: Record<string, string> = {
+  urgent: 'Urgent', high: 'High', medium: 'Medium', low: 'Low', none: 'None',
+};
+
+function priorityLabel(p?: string | null): string {
+  if (!p) return 'None';
+  const k = p.toLowerCase();
+  return PRIORITY_LABEL[k] ?? (p.charAt(0).toUpperCase() + p.slice(1));
+}
+
+function dueLabel(d?: string | null): string {
+  if (!d) return 'No due date';
+  // target_date is a 'YYYY-MM-DD' string; keep just the date part if a time slipped in.
+  return String(d).slice(0, 10);
+}
+
+// Rich-text task descriptions are stored as HTML — flatten to readable text for
+// the email (strip tags, collapse whitespace) then escape on render.
+function stripToText(s: string): string {
+  return s
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function truncate(s: string, max = 280): string {
+  return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s;
+}
+
+function ctaButton(url: string, label: string): string {
+  return (
+    `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 4px">` +
+    `<tr><td style="border-radius:8px;background:#0a72cf">` +
+    `<a href="${escapeHtml(url)}" style="display:inline-block;padding:11px 22px;` +
+    `font-size:14px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px">${escapeHtml(label)}</a>` +
+    `</td></tr></table>`
+  );
+}
+
+function detailRow(label: string, valueHtml: string): string {
+  return (
+    `<tr>` +
+    `<td style="padding:6px 12px 6px 0;font-size:12px;font-weight:600;color:#4b5563;` +
+    `vertical-align:top;white-space:nowrap">${escapeHtml(label)}</td>` +
+    `<td style="padding:6px 0;font-size:14px;color:#1f2a37;vertical-align:top">${valueHtml}</td>` +
+    `</tr>`
+  );
+}
+
+// Absolute, externally-clickable deep link for the CTA (never localhost).
+function actionHref(link?: string | null): string {
+  const base = publicBaseUrl();
+  if (!link) return base;
+  return link.startsWith('/') ? `${base}${link}` : `${base}/${link}`;
+}
+
+export function renderNotificationEmail(input: {
+  title:  string;
+  body?:  string | null;
+  link?:  string | null;
+  task?:  NotificationTaskMeta | null;
+}): ResolvedEmail {
+  const actionUrl = actionHref(input.link);
+  const title = input.title?.trim() || 'You have a new notification';
+  const bodyLine = (input.body ?? '').trim();
+  const task = input.task ?? null;
+  const descText = task?.description ? truncate(stripToText(task.description)) : '';
+
+  // ── HTML ──
+  let inner =
+    `<div style="font-size:17px;font-weight:700;color:#1f2a37;margin-bottom:8px">${escapeHtml(title)}</div>`;
+  if (bodyLine) {
+    inner += `<div style="font-size:14px;line-height:1.6;color:#374151">${literalHtml(bodyLine)}</div>`;
+  }
+  if (task) {
+    let rows = detailRow('Title', escapeHtml(task.title?.trim() || title));
+    if (descText) rows += detailRow('Description', literalHtml(descText));
+    rows += detailRow('Priority', escapeHtml(priorityLabel(task.priority)));
+    rows += detailRow('Due Date', escapeHtml(dueLabel(task.dueDate)));
+    inner +=
+      `<table role="presentation" cellpadding="0" cellspacing="0" ` +
+      `style="width:100%;margin-top:16px;border:1px solid #e5e7eb;border-radius:10px;` +
+      `border-collapse:separate;background:#f9fafb;padding:6px 14px">${rows}</table>`;
+  }
+  inner += ctaButton(actionUrl, 'Open in Romega Portal');
+
+  // ── Plain text (fallback) ──
+  const lines: string[] = [title];
+  if (bodyLine) lines.push('', bodyLine);
+  if (task) {
+    lines.push('');
+    lines.push(`Title: ${task.title?.trim() || title}`);
+    if (descText) lines.push(`Description: ${descText}`);
+    lines.push(`Priority: ${priorityLabel(task.priority)}`);
+    lines.push(`Due Date: ${dueLabel(task.dueDate)}`);
+  }
+  lines.push('', `Open in Romega Portal: ${actionUrl}`, '', '— Romega Solutions');
+
+  return { subject: title, html: wrapHtml(inner), text: lines.join('\n') };
 }

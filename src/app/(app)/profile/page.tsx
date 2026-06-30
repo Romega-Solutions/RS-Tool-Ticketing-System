@@ -4,6 +4,28 @@ import { useEffect, useState } from 'react';
 import { Loader2, Save, RefreshCw, CheckCircle2 } from 'lucide-react';
 import type { OrgPerson } from '@/lib/orgchart';
 
+type NotificationPrefs = {
+  email:        boolean;
+  mentions:     boolean;
+  dueToday:     boolean;
+  approvals:    boolean;
+  projectAdded: boolean;
+  taskAdded:    boolean;
+};
+
+const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
+  email: true, mentions: true, dueToday: true, approvals: true, projectAdded: true, taskAdded: true,
+};
+
+// Per-event toggles shown under the master "Email me notifications" switch.
+const NOTIFICATION_EVENTS: Array<{ key: keyof NotificationPrefs; label: string; hint: string }> = [
+  { key: 'mentions',     label: 'Mentions',          hint: 'When someone @mentions you in a comment.' },
+  { key: 'dueToday',     label: 'Due today',         hint: 'When a task assigned to you is due.' },
+  { key: 'approvals',    label: 'Approvals',         hint: 'When a time-correction request is decided.' },
+  { key: 'projectAdded', label: 'Added to project',  hint: 'When you are added to a project.' },
+  { key: 'taskAdded',    label: 'Added to a task',   hint: 'When you are assigned to a task.' },
+];
+
 type ProfileUser = {
   id: number;
   username: string;
@@ -16,6 +38,7 @@ type ProfileUser = {
   isActive: boolean;
   reminderEnabled: boolean;
   reminderIntervalMinutes: number;
+  notificationPrefs?: NotificationPrefs;
 };
 
 type FxRate = { rate: number; fetchedAt: string; stale: boolean };
@@ -83,6 +106,7 @@ export default function ProfilePage() {
   // reminder settings remain editable here.
   const [form, setForm] = useState({
     password: '', reminderEnabled: true, reminderIntervalMinutes: 120,
+    notificationPrefs: DEFAULT_NOTIFICATION_PREFS,
   });
 
   useEffect(() => {
@@ -97,6 +121,7 @@ export default function ProfilePage() {
           password: '',
           reminderEnabled: data.user.reminderEnabled ?? true,
           reminderIntervalMinutes: data.user.reminderIntervalMinutes ?? 120,
+          notificationPrefs: { ...DEFAULT_NOTIFICATION_PREFS, ...(data.user.notificationPrefs ?? {}) },
         });
 
         if (data.user.email || data.user.name) {
@@ -176,12 +201,17 @@ export default function ProfilePage() {
         password: form.password,
         reminderEnabled: form.reminderEnabled,
         reminderIntervalMinutes: form.reminderIntervalMinutes,
+        notificationPrefs: form.notificationPrefs,
       };
       const res  = await fetch('/api/profile/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await res.json() as { user?: ProfileUser; error?: string };
       if (!res.ok || !data.user) { setError(data.error || 'Failed to update profile'); return; }
       setUser(data.user);
-      setForm(prev => ({ ...prev, password: '' }));
+      setForm(prev => ({
+        ...prev,
+        password: '',
+        notificationPrefs: { ...DEFAULT_NOTIFICATION_PREFS, ...(data.user!.notificationPrefs ?? {}) },
+      }));
       setSuccess('Saved.');
     } catch { setError('Failed to update profile'); }
     finally  { setSaving(false); }
@@ -356,6 +386,48 @@ export default function ProfilePage() {
                     <option value={180}>Every 3 hrs</option>
                   </select>
                 )}
+              </div>
+            </div>
+
+            {/* Notification emails — master switch + per-event opt-outs */}
+            <div className="border-t border-(--rs-neutral-grey-100)" />
+            <div>
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-(--rs-neutral-grey-800)">Email Notifications</p>
+                  <p className="text-xs text-(--rs-neutral-grey-400)">Get an email for bell activity. The in-app bell is unaffected.</p>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer select-none shrink-0">
+                  <div className="relative">
+                    <input type="checkbox" className="sr-only peer" checked={form.notificationPrefs.email}
+                      onChange={e => setForm(p => ({ ...p, notificationPrefs: { ...p.notificationPrefs, email: e.target.checked } }))} />
+                    <div className="w-9 h-5 rounded-full bg-(--rs-neutral-grey-200) peer-checked:bg-(--rs-primary-500) transition-colors" />
+                    <div className="absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-4" />
+                  </div>
+                  <span className="text-xs text-(--rs-neutral-grey-600)">{form.notificationPrefs.email ? 'On' : 'Off'}</span>
+                </label>
+              </div>
+
+              <div className={`mt-3 rounded-lg border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) divide-y divide-(--rs-neutral-grey-100) transition-opacity ${form.notificationPrefs.email ? '' : 'opacity-50'}`}>
+                {NOTIFICATION_EVENTS.map(ev => (
+                  <div key={ev.key} className="flex items-center justify-between gap-4 px-4 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-(--rs-neutral-grey-800)">{ev.label}</p>
+                      <p className="text-xs text-(--rs-neutral-grey-500)">{ev.hint}</p>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer select-none shrink-0">
+                      <div className="relative">
+                        <input type="checkbox" className="sr-only peer"
+                          disabled={!form.notificationPrefs.email}
+                          checked={form.notificationPrefs[ev.key]}
+                          onChange={e => setForm(p => ({ ...p, notificationPrefs: { ...p.notificationPrefs, [ev.key]: e.target.checked } }))} />
+                        <div className="w-9 h-5 rounded-full bg-(--rs-neutral-grey-200) peer-checked:bg-(--rs-primary-500) transition-colors peer-disabled:cursor-not-allowed" />
+                        <div className="absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform peer-checked:translate-x-4" />
+                      </div>
+                      <span className="text-xs text-(--rs-neutral-grey-600) w-6">{form.notificationPrefs[ev.key] ? 'On' : 'Off'}</span>
+                    </label>
+                  </div>
+                ))}
               </div>
             </div>
 

@@ -122,11 +122,15 @@ function mapState(r: Row): PlaneState {
   };
 }
 
-export async function getProjects(opts?: { team?: string | null }): Promise<PlaneProject[]> {
+export async function getProjects(
+  opts?: { team?: string | null; archived?: 0 | 1 },
+): Promise<PlaneProject[]> {
   const sb = createAdminClient();
+  // Default to active projects; pass `archived: 1` for the Archived tab.
+  const archived = opts?.archived ?? 0;
   let q = sb.from('projects')
     .select('id, name, identifier, description, network, team, auto_archive_done_days')
-    .eq('archived', 0)
+    .eq('archived', archived)
     .order('name');
   // Empty string or `null` is treated as "no filter".
   if (opts?.team) q = q.eq('team', opts.team);
@@ -1192,5 +1196,60 @@ export async function updateProject(
 
 export async function archiveProject(projectId: string): Promise<void> {
   // Soft-delete via the existing `archived` flag (already filtered out of getProjects).
-  return updateProject(projectId, { archived: 1 });
+  // Also stamp `archived_at` so the project shows up in the "Project Activity" feed
+  // and the Archived tab can sort by when it was archived.
+  const sb = createAdminClient();
+  const now = new Date().toISOString();
+  const { error } = await sb.from('projects')
+    .update({ archived: 1, archived_at: now, updated_at: now })
+    .eq('id', Number(projectId));
+  if (error) throw new PlaneApiError(502, `projects/${projectId}`);
+}
+
+export async function restoreProject(projectId: string): Promise<void> {
+  // Un-archive: flip the flag back and clear the timestamp (no longer archived).
+  const sb = createAdminClient();
+  const { error } = await sb.from('projects')
+    .update({ archived: 0, archived_at: null, updated_at: new Date().toISOString() })
+    .eq('id', Number(projectId));
+  if (error) throw new PlaneApiError(502, `projects/${projectId}`);
+}
+
+export interface ProjectActivityEntry {
+  projectId: string;
+  projectName: string;
+  identifier: string;
+  action: 'created' | 'archived';
+  at: string;
+}
+
+/**
+ * Read-only "digital footprint" of project lifecycle events, derived (no extra
+ * table) from `projects.created_at` + `projects.archived_at`. Each project
+ * contributes a `created` event and, if currently archived, an `archived`
+ * event. Sorted newest-first. Optionally scoped to a team to match the page.
+ */
+export async function getProjectActivity(
+  opts?: { team?: string | null },
+): Promise<ProjectActivityEntry[]> {
+  const sb = createAdminClient();
+  let q = sb.from('projects')
+    .select('id, name, identifier, team, created_at, archived_at');
+  if (opts?.team) q = q.eq('team', opts.team);
+  const { data, error } = await q;
+  if (error) throw new PlaneApiError(500, 'project-activity');
+
+  const entries: ProjectActivityEntry[] = [];
+  for (const r of (data ?? []) as Row[]) {
+    const base = {
+      projectId: String(r.id),
+      projectName: String(r.name),
+      identifier: String(r.identifier ?? ''),
+    };
+    if (r.created_at) entries.push({ ...base, action: 'created', at: String(r.created_at) });
+    // archived_at is cleared on restore, so its presence == currently archived.
+    if (r.archived_at) entries.push({ ...base, action: 'archived', at: String(r.archived_at) });
+  }
+  entries.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+  return entries;
 }

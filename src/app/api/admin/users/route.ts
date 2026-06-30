@@ -44,7 +44,7 @@ function parseDriveUrl(raw: unknown): { ok: true; value: string | null } | { ok:
 
 // All known role strings — any value outside this set is rejected
 const VALID_ROLES = new Set([
-  'intern', 'ic', 'lead', 'admin', 'ceo', 'owner', 'superadmin',
+  'intern', 'ic', 'lead', 'admin', 'founder', 'ceo', 'owner', 'superadmin',
   'team_lead', 'teamlead', 'manager', 'tl',
 ]);
 

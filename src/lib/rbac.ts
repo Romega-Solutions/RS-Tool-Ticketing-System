@@ -74,7 +74,7 @@ export function defaultToolAccess(role: AppRole, team: string | null): GateableT
 export function normalizeRole(role: unknown): AppRole {
   const value = String(role || '').trim().toLowerCase();
 
-  if (['admin', 'ceo', 'owner', 'superadmin'].includes(value)) {
+  if (['admin', 'ceo', 'founder', 'owner', 'superadmin'].includes(value)) {
     return 'admin';
   }
 
@@ -190,4 +190,14 @@ export function roleLabel(role: AppRole): string {
   if (role === 'lead')   return 'Lead';
   if (role === 'intern') return 'Intern';
   return 'IC';
+}
+
+// Display a RAW (DB) role string with proper UI casing:
+//   Intern | IC | Lead | Admin | Founder
+// Special-cases raw 'ceo'/'founder' → 'Founder' BEFORE normalizing, because both
+// normalize to 'admin' and we'd otherwise lose the distinct "Founder" label.
+export function roleDisplayLabel(rawRole: string): string {
+  const raw = String(rawRole || '').trim().toLowerCase();
+  if (raw === 'ceo' || raw === 'founder') return 'Founder';
+  return roleLabel(normalizeRole(rawRole));
 }
