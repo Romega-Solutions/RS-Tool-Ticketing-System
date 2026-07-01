@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { revalidateTag } from 'next/cache';
 import { getLabels, createLabel } from '@/lib/tickets';
 import { canViewProject, canManageProject } from '@/lib/permissions';
 import { route, requireSession, parseBody, badRequest, forbidden } from '@/lib/api';
+import { projectLabelsTag } from '@/lib/cache-tags';
 
 export const runtime = 'nodejs';
 
@@ -32,7 +34,9 @@ export const POST = route(async (req: Request, { params }: { params: Promise<{ p
   if (!name) throw badRequest('name is required');
 
   try {
-    return NextResponse.json(await createLabel(projectId, name, body.color ?? '#6b7280'));
+    const label = await createLabel(projectId, name, body.color ?? '#6b7280');
+    revalidateTag(projectLabelsTag(projectId));
+    return NextResponse.json(label);
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Failed' },

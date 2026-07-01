@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { deleteLabel } from '@/lib/tickets';
 import { canManageProject } from '@/lib/permissions';
 import { route, requireSession, forbidden } from '@/lib/api';
+import { projectLabelsTag } from '@/lib/cache-tags';
 
 export const runtime = 'nodejs';
 
@@ -16,6 +18,7 @@ export const DELETE = route(async (_req: Request, ctx: LabelCtx) => {
 
   try {
     await deleteLabel(labelId);
+    revalidateTag(projectLabelsTag(projectId));
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(

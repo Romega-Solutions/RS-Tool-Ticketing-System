@@ -4,6 +4,8 @@
 // renamed yet; they no longer have anything to do with Plane.so.
 import { createAdminClient } from '@/lib/supabase/admin';
 import { mapOrgDeptToAppTeam } from '@/lib/orgchart';
+import { unstable_cache } from 'next/cache';
+import { projectStatesTag, projectLabelsTag, projectCyclesTag, USERS_LIST_TAG } from '@/lib/cache-tags';
 
 export interface PlaneProject {
   id: string;
@@ -148,26 +150,40 @@ export async function getProjectName(projectId: number | string): Promise<string
 }
 
 export async function getProjectStates(projectId: string): Promise<PlaneState[]> {
-  const sb = createAdminClient();
-  const { data, error } = await sb
-    .from('project_states')
-    .select('id, name, group, color, sequence')
-    .eq('project_id', Number(projectId))
-    .order('sequence');
-  if (error) throw new PlaneApiError(500, `states/${projectId}`);
-  return (data ?? []).map(mapState);
+  const rows = await unstable_cache(
+    async () => {
+      const sb = createAdminClient();
+      const { data, error } = await sb
+        .from('project_states')
+        .select('id, name, group, color, sequence')
+        .eq('project_id', Number(projectId))
+        .order('sequence');
+      if (error) throw new PlaneApiError(500, `states/${projectId}`);
+      return data ?? [];
+    },
+    ['project-states', projectId],
+    { revalidate: 300, tags: [projectStatesTag(projectId)] },
+  )();
+  return rows.map(mapState);
 }
 
 export async function getWorkspaceMembers(): Promise<PlaneMember[]> {
-  const sb = createAdminClient();
   // `id` is the integer users.id stringified. The legacy plane_member_id
   // column is gone — user_id is the canonical assignee key now.
-  const { data, error } = await sb
-    .from('users')
-    .select('id, name, email')
-    .eq('is_active', 1);
-  if (error) throw new PlaneApiError(500, 'members');
-  return (data ?? []).map((u: Row) => ({
+  const rows = await unstable_cache(
+    async () => {
+      const sb = createAdminClient();
+      const { data, error } = await sb
+        .from('users')
+        .select('id, name, email')
+        .eq('is_active', 1);
+      if (error) throw new PlaneApiError(500, 'members');
+      return data ?? [];
+    },
+    ['workspace-members'],
+    { revalidate: 300, tags: [USERS_LIST_TAG] },
+  )();
+  return rows.map((u: Row) => ({
     id: String(u.id),
     display_name: String(u.name),
     email: String(u.email ?? ''),
@@ -569,13 +585,20 @@ export interface Label {
 }
 
 export async function getLabels(projectId: string): Promise<Label[]> {
-  const sb = createAdminClient();
-  const { data, error } = await sb.from('labels')
-    .select('id, project_id, name, color')
-    .eq('project_id', Number(projectId))
-    .order('name');
-  if (error) throw new PlaneApiError(500, `labels/${projectId}`);
-  return (data ?? []).map((r: Row) => ({
+  const rows = await unstable_cache(
+    async () => {
+      const sb = createAdminClient();
+      const { data, error } = await sb.from('labels')
+        .select('id, project_id, name, color')
+        .eq('project_id', Number(projectId))
+        .order('name');
+      if (error) throw new PlaneApiError(500, `labels/${projectId}`);
+      return data ?? [];
+    },
+    ['project-labels', projectId],
+    { revalidate: 300, tags: [projectLabelsTag(projectId)] },
+  )();
+  return rows.map((r: Row) => ({
     id: Number(r.id), project_id: Number(r.project_id),
     name: String(r.name), color: String(r.color),
   }));
@@ -851,14 +874,21 @@ export interface Cycle {
 }
 
 export async function getCycles(projectId: string): Promise<Cycle[]> {
-  const sb = createAdminClient();
-  const { data, error } = await sb.from('cycles')
-    .select('id, project_id, name, start_date, end_date, archived')
-    .eq('project_id', Number(projectId))
-    .eq('archived', 0)
-    .order('start_date', { ascending: false });
-  if (error) throw new PlaneApiError(500, `cycles/${projectId}`);
-  return (data ?? []).map((r: Row) => ({
+  const rows = await unstable_cache(
+    async () => {
+      const sb = createAdminClient();
+      const { data, error } = await sb.from('cycles')
+        .select('id, project_id, name, start_date, end_date, archived')
+        .eq('project_id', Number(projectId))
+        .eq('archived', 0)
+        .order('start_date', { ascending: false });
+      if (error) throw new PlaneApiError(500, `cycles/${projectId}`);
+      return data ?? [];
+    },
+    ['project-cycles', projectId],
+    { revalidate: 300, tags: [projectCyclesTag(projectId)] },
+  )();
+  return rows.map((r: Row) => ({
     id: Number(r.id), project_id: Number(r.project_id),
     name: String(r.name), start_date: String(r.start_date),
     end_date: String(r.end_date), archived: Number(r.archived ?? 0),

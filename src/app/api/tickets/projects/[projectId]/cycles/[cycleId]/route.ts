@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { revalidateTag } from 'next/cache';
 import { updateCycle, deleteCycle } from '@/lib/tickets';
 import { canManageProject } from '@/lib/permissions';
 import { route, requireSession, parseBody, forbidden } from '@/lib/api';
+import { projectCyclesTag } from '@/lib/cache-tags';
 
 export const runtime = 'nodejs';
 
@@ -26,6 +28,7 @@ export const PATCH = route(async (req: Request, ctx: CycleCtx) => {
 
   try {
     await updateCycle(cycleId, body);
+    revalidateTag(projectCyclesTag(projectId));
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(
@@ -43,6 +46,7 @@ export const DELETE = route(async (_req: Request, ctx: CycleCtx) => {
   }
   try {
     await deleteCycle(cycleId);
+    revalidateTag(projectCyclesTag(projectId));
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(

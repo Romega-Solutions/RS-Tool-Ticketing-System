@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { revalidateTag } from 'next/cache';
 import { getCycles, createCycle } from '@/lib/tickets';
 import { canViewProject, canManageProject } from '@/lib/permissions';
 import { route, requireSession, parseBody, badRequest, forbidden } from '@/lib/api';
+import { projectCyclesTag } from '@/lib/cache-tags';
 
 export const runtime = 'nodejs';
 
@@ -36,9 +38,9 @@ export const POST = route(async (req: Request, { params }: { params: Promise<{ p
   }
 
   try {
-    return NextResponse.json(
-      await createCycle(projectId, name, body.startDate, body.endDate),
-    );
+    const cycle = await createCycle(projectId, name, body.startDate, body.endDate);
+    revalidateTag(projectCyclesTag(projectId));
+    return NextResponse.json(cycle);
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Failed' },
