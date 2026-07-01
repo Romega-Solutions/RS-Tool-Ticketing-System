@@ -1,0 +1,26 @@
+CREATE INDEX IF NOT EXISTS "attendance_user_idx" ON "attendance" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "candidates_assigned_to_idx" ON "candidates" USING btree ("assigned_to");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "candidates_created_by_idx" ON "candidates" USING btree ("created_by");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "candidates_status_idx" ON "candidates" USING btree ("status");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "leads_assigned_to_idx" ON "leads" USING btree ("assigned_to");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "leads_stage_idx" ON "leads" USING btree ("stage");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "lms_course_assignments_course_idx" ON "lms_course_assignments" USING btree ("course_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "lms_lesson_comments_lesson_idx" ON "lms_lesson_comments" USING btree ("lesson_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "lms_lesson_comments_user_idx" ON "lms_lesson_comments" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "lms_lesson_completions_lesson_idx" ON "lms_lesson_completions" USING btree ("lesson_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "lms_lessons_course_idx" ON "lms_lessons" USING btree ("course_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "lms_quiz_attempts_user_idx" ON "lms_quiz_attempts" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "lms_quiz_attempts_quiz_idx" ON "lms_quiz_attempts" USING btree ("quiz_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "overtime_requests_user_idx" ON "overtime_requests" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "project_members_user_idx" ON "project_members" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "saved_views_user_idx" ON "saved_views" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "saved_views_project_idx" ON "saved_views" USING btree ("project_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "timesheet_edit_requests_user_idx" ON "timesheet_edit_requests" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "timesheet_edit_requests_timesheet_idx" ON "timesheet_edit_requests" USING btree ("timesheet_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "timesheets_user_idx" ON "timesheets" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "work_item_activity_work_item_idx" ON "work_item_activity" USING btree ("work_item_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "work_item_assignees_work_item_idx" ON "work_item_assignees" USING btree ("work_item_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "work_item_assignees_user_idx" ON "work_item_assignees" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "work_item_comments_work_item_idx" ON "work_item_comments" USING btree ("work_item_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "work_items_state_idx" ON "work_items" USING btree ("state_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "work_items_cycle_idx" ON "work_items" USING btree ("cycle_id");
