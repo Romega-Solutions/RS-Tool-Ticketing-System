@@ -46,6 +46,8 @@ Task 11 (verification) ──→ depends on ALL of: 2, 4, 5, 6, 7, 8, 9, 10
 
 **Cache convention used throughout Stream C:** every `unstable_cache(...)` call uses `{ revalidate: 300, tags: [...] }` — a 5-minute safety-net TTL in addition to tag-based invalidation, so a missed `revalidateTag` call never causes indefinitely stale data.
 
+**Correction found during implementation (applies to every `revalidateTag(...)` call in Tasks 7-10 below):** Next.js 16.2.6 (the version actually installed) changed `revalidateTag`'s signature to require a second argument — `revalidateTag(tag: string, profile: string | { expire?: number })`. The single-arg form used in earlier drafts of this plan is deprecated and fails `tsc`/`next build`'s typecheck (`TS2554`). All `revalidateTag(...)` calls below are written with `, { expire: 0 }` as the second argument, which reproduces the immediate-expiration behavior this plan's manual-verification steps expect (per `node_modules/next/dist/docs/01-app/03-api-reference/04-functions/revalidateTag.md` — `'max'`, the docs' general recommendation, gives stale-while-revalidate semantics instead, which would NOT satisfy "confirm it updates immediately"). Verified working (clean `tsc --noEmit`, 332/332 tests passing) in the Task 7 implementation.
+
 ---
 
 ## Task 1: DB indexes — schema.ts
@@ -280,6 +282,14 @@ Expected: a new `drizzle/00XX_<auto-name>.sql` file appears, containing only `CR
 - [ ] **Step 2: Review the generated SQL**
 
 Read the new file. Confirm every statement is `CREATE INDEX "..." ON "..." ("...");` and the index names match Task 1's naming (`<table>_<col>_idx`). If anything unexpected appears (a DROP, a column change), STOP — do not proceed to Step 3; something is wrong with schema.ts vs. the migration history and needs investigation before touching the live DB.
+
+- [ ] **Step 2.5: Patch in `IF NOT EXISTS` — required, found during Task 1's code-quality review**
+
+A direct query against the live production Postgres (`pg_indexes`) found that **13 of the 26 index names Task 1 added are already present on the live database** — created previously by one-shot scripts in `docs/migrations/*.sql` (e.g. `add-candidates-table.sql`, `add-leads-table.sql`, `add-overtime-requests.sql`, `add-pm-phase1.sql`, `add-lms.sql`) whose DDL was never reflected back into `schema.ts`. This is the same class of drift `CLAUDE.md` already documents for the `positions`/onboarders/ATS-history tables. Confirmed pre-existing on prod: `candidates_assigned_to_idx`, `candidates_created_by_idx`, `candidates_status_idx`, `leads_assigned_to_idx`, `leads_stage_idx`, `lms_lesson_comments_lesson_idx` (live definition is composite `(lesson_id, created_at)` — a strict superset of the single-column version this migration would create under the same name), `overtime_requests_user_idx`, `saved_views_project_idx`, `saved_views_user_idx`, `work_item_activity_work_item_idx`, `work_item_assignees_user_idx`, `work_item_comments_work_item_idx`, `work_items_cycle_idx`.
+
+Since Drizzle's migration journal has never recorded these (schema.ts never declared them before Task 1), `drizzle-kit generate` emits plain `CREATE INDEX "..." ON "..." (...)` — no `IF NOT EXISTS` — for all 26, including the 13 duplicates. Running `drizzle-kit migrate` unmodified will hit `ERROR 42P07: relation "..." already exists` on the first duplicate it reaches and **abort the entire migration file as one transaction** — very likely blocking the 13 genuinely-new indexes too, not just the duplicates.
+
+**Fix:** edit the generated `drizzle/00XX_<auto-name>.sql` file and add `IF NOT EXISTS` to every `CREATE INDEX` statement (i.e. `CREATE INDEX IF NOT EXISTS "..." ON "..." (...);`). This makes the migration idempotent and safe to run regardless of which of the 26 already exist — for the one name/definition mismatch (`lms_lesson_comments_lesson_idx`), `IF NOT EXISTS` means the migration no-ops and the live composite index (which already covers `lesson_id` as its leftmost column) is kept as-is — functionally fine, no action needed beyond the `IF NOT EXISTS` addition itself.
 
 - [ ] **Step 3: STOP — confirm before applying to production**
 
@@ -715,22 +725,22 @@ import { LMS_COURSES_TAG } from '@/lib/cache-tags';
 
 In `createCourse`, after `revalidatePath('/admin/learning');` (line 49), add:
 ```ts
-  revalidateTag(LMS_COURSES_TAG);
+  revalidateTag(LMS_COURSES_TAG, { expire: 0 });
 ```
 
 In `updateCourse`, after the three `revalidatePath(...)` calls (lines 72-74), add:
 ```ts
-  revalidateTag(LMS_COURSES_TAG);
+  revalidateTag(LMS_COURSES_TAG, { expire: 0 });
 ```
 
 In `togglePublishCourse`, after the three `revalidatePath(...)` calls (lines 85-87), add:
 ```ts
-  revalidateTag(LMS_COURSES_TAG);
+  revalidateTag(LMS_COURSES_TAG, { expire: 0 });
 ```
 
 In `deleteCourse`, after `revalidatePath('/admin/learning');` (line 95) and before `redirect('/admin/learning');` (line 96), add:
 ```ts
-  revalidateTag(LMS_COURSES_TAG);
+  revalidateTag(LMS_COURSES_TAG, { expire: 0 });
 ```
 
 - [ ] **Step 4: Typecheck**
@@ -870,25 +880,25 @@ import { ATS_POSITIONS_TAG, atsPositionTag } from '@/lib/cache-tags';
 
 In `createPosition`, after `revalidatePath('/recruiting/positions');` (line 62), add:
 ```ts
-  revalidateTag(ATS_POSITIONS_TAG);
+  revalidateTag(ATS_POSITIONS_TAG, { expire: 0 });
 ```
 
 In `updatePosition`, after `revalidatePath('/recruiting/positions');` (line 88), add:
 ```ts
-  revalidateTag(ATS_POSITIONS_TAG);
-  revalidateTag(atsPositionTag(id));
+  revalidateTag(ATS_POSITIONS_TAG, { expire: 0 });
+  revalidateTag(atsPositionTag(id), { expire: 0 });
 ```
 
 In `updatePositionStatus`, after `revalidatePath('/recruiting/positions');` (line 102), add:
 ```ts
-  revalidateTag(ATS_POSITIONS_TAG);
-  revalidateTag(atsPositionTag(id));
+  revalidateTag(ATS_POSITIONS_TAG, { expire: 0 });
+  revalidateTag(atsPositionTag(id), { expire: 0 });
 ```
 
 In `deletePosition`, after `revalidatePath('/recruiting/positions');` (line 113), add:
 ```ts
-  revalidateTag(ATS_POSITIONS_TAG);
-  revalidateTag(atsPositionTag(id));
+  revalidateTag(ATS_POSITIONS_TAG, { expire: 0 });
+  revalidateTag(atsPositionTag(id), { expire: 0 });
 ```
 
 - [ ] **Step 4: Typecheck**
@@ -965,14 +975,14 @@ export const GET = route(async () => {
 
 In the POST handler, after the `await recordAudit({...})` call (around line 297) and before the `return NextResponse.json({ user: { ... } }, { status: 201 });`, add:
 ```ts
-    revalidateTag(USERS_LIST_TAG);
+    revalidateTag(USERS_LIST_TAG, { expire: 0 });
 ```
 
 - [ ] **Step 3: PATCH handler — invalidate after successful update**
 
 In the PATCH handler, after the audit block closes (around line 473, the `if (before) { ... }` block) and before the final `return NextResponse.json({ user: { ... } });`, add:
 ```ts
-  revalidateTag(USERS_LIST_TAG);
+  revalidateTag(USERS_LIST_TAG, { expire: 0 });
 ```
 
 - [ ] **Step 4: `src/app/api/profile/me/route.ts` — GET: merge into one Promise.all (waterfall fix)**
@@ -1022,7 +1032,7 @@ import { USERS_LIST_TAG } from '@/lib/cache-tags';
 
 In the PUT handler, after `await admin.from('users').update(payload).eq('id', session.id);` (line 125), add:
 ```ts
-  revalidateTag(USERS_LIST_TAG);
+  revalidateTag(USERS_LIST_TAG, { expire: 0 });
 ```
 This is required because a user editing their own profile writes to the same `users` table the admin Users list (Step 1 above) reads — without this, the admin list would silently serve stale data after any self-service profile edit.
 
@@ -1233,7 +1243,7 @@ In the `POST` handler, after `return NextResponse.json(await createLabel(project
 ```ts
   try {
     const label = await createLabel(projectId, name, body.color ?? '#6b7280');
-    revalidateTag(projectLabelsTag(projectId));
+    revalidateTag(projectLabelsTag(projectId), { expire: 0 });
     return NextResponse.json(label);
   } catch (err) {
     return NextResponse.json(
@@ -1261,7 +1271,7 @@ with:
 ```ts
   try {
     await deleteLabel(labelId);
-    revalidateTag(projectLabelsTag(projectId));
+    revalidateTag(projectLabelsTag(projectId), { expire: 0 });
     return NextResponse.json({ ok: true });
   } catch (err) {
 ```
@@ -1286,7 +1296,7 @@ with:
 ```ts
   try {
     const cycle = await createCycle(projectId, name, body.startDate, body.endDate);
-    revalidateTag(projectCyclesTag(projectId));
+    revalidateTag(projectCyclesTag(projectId), { expire: 0 });
     return NextResponse.json(cycle);
   } catch (err) {
 ```
@@ -1309,7 +1319,7 @@ with:
 ```ts
   try {
     await updateCycle(cycleId, body);
-    revalidateTag(projectCyclesTag(projectId));
+    revalidateTag(projectCyclesTag(projectId), { expire: 0 });
     return NextResponse.json({ ok: true });
   } catch (err) {
 ```
@@ -1324,7 +1334,7 @@ with:
 ```ts
   try {
     await deleteCycle(cycleId);
-    revalidateTag(projectCyclesTag(projectId));
+    revalidateTag(projectCyclesTag(projectId), { expire: 0 });
     return NextResponse.json({ ok: true });
   } catch (err) {
 ```
