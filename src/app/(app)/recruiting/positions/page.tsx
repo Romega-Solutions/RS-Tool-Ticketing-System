@@ -29,6 +29,9 @@ const getCachedPositionRows = unstable_cache(
       .select('id, job_title, placement_type, location, compensation, employment_type, openings, job_description, is_open, created_at, created_by')
       .order('created_at', { ascending: false })
       .limit(200);
+    if (error && !isTableMissing(error.message)) {
+      throw new Error(error.message);
+    }
     return { data: data as Position[] | null, errorMessage: error?.message ?? null };
   },
   ['ats-position-rows'],
@@ -47,7 +50,7 @@ export default async function PositionsPage() {
   const errorMsg = errorMessage ?? undefined;
   const tableMissing = isTableMissing(errorMsg);
   const unexpectedError = errorMsg && !tableMissing ? errorMsg : null;
-  const rawPositions = (data as Position[] | null) ?? [];
+  const rawPositions = data ?? [];
 
   // Resolve creator ids → names with a single lookup (same id→name map pattern
   // the candidates pages use).

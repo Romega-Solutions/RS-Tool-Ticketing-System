@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { Briefcase, MapPin, Clock, Banknote, AlertCircle } from 'lucide-react';
 import { ApplyForm } from './apply-form';
 import { RichText } from '@/components/rich-text';
-import { ATS_POSITIONS_TAG, atsPositionTag } from '@/lib/cache-tags';
+import { atsPositionTag } from '@/lib/cache-tags';
 
 type Position = {
   id:              number;
@@ -30,10 +30,13 @@ async function getCachedPosition(id: number) {
         .select('id, job_title, location, compensation, employment_type, openings, job_description, is_open')
         .eq('id', id)
         .maybeSingle();
+      if (error && !error.message?.toLowerCase().includes('does not exist')) {
+        throw new Error(error.message);
+      }
       return { data: data as Position | null, errorMessage: error?.message ?? null };
     },
     ['ats-position-detail', String(id)],
-    { revalidate: 300, tags: [ATS_POSITIONS_TAG, atsPositionTag(id)] },
+    { revalidate: 300, tags: [atsPositionTag(id)] },
   )();
 }
 
