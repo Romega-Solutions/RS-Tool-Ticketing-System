@@ -28,16 +28,15 @@ export const POST = route(async (req: Request) => {
   if (!name) throw badRequest('Name is required');
 
   const email = user.email;
-  const orgProfile = await lookupOrgAuthProfileByEmail(email);
 
   const now = new Date().toISOString();
 
   const admin = createAdminClient();
-  const { data: existing } = await admin
-    .from('users')
-    .select('id, role')
-    .eq('email', email)
-    .maybeSingle();
+  const [orgProfile, existingResult] = await Promise.all([
+    lookupOrgAuthProfileByEmail(email),
+    admin.from('users').select('id, role').eq('email', email).maybeSingle(),
+  ]);
+  const existing = existingResult.data;
 
   if (!existing && !orgProfile) {
     throw forbidden('Your email is not listed in the Romega org chart.');
