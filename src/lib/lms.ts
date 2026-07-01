@@ -1,6 +1,8 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { normalizeRole, type AppRole } from '@/lib/rbac';
 import { computeQuizGate, type QuizGate } from '@/lib/lms-quiz';
+import { unstable_cache } from 'next/cache';
+import { LMS_COURSES_TAG } from '@/lib/cache-tags';
 
 export type LmsScope = 'foundation' | 'department' | 'intern';
 export type LessonType = 'text' | 'video' | 'mixed';
@@ -47,17 +49,24 @@ export function userInCourseAudience(course: LmsCourse, user: CourseAudience): b
 
 // Published courses visible to the user, ordered by scope priority then sort_order.
 // Foundation first, then Intern (if applicable), then the user's Department.
+const getCachedPublishedCourseRows = unstable_cache(
+  async () => {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from('lms_courses')
+      .select('id, title, description, scope, department, cover_image_url, is_published, enforcement, sort_order, created_at, updated_at')
+      .eq('is_published', 1)
+      .order('sort_order', { ascending: true });
+    if (error) throw new Error(`visibleCoursesFor: ${error.message}`);
+    return data ?? [];
+  },
+  ['lms-published-courses'],
+  { revalidate: 300, tags: [LMS_COURSES_TAG] },
+);
+
 export async function visibleCoursesFor(user: CourseAudience): Promise<LmsCourse[]> {
-  const admin = createAdminClient();
-  const { data, error } = await admin
-    .from('lms_courses')
-    .select('id, title, description, scope, department, cover_image_url, is_published, enforcement, sort_order, created_at, updated_at')
-    .eq('is_published', 1)
-    .order('sort_order', { ascending: true });
-
-  if (error) throw new Error(`visibleCoursesFor: ${error.message}`);
-
-  const all = (data ?? []).map(rowToCourse);
+  const rows = await getCachedPublishedCourseRows();
+  const all = rows.map(rowToCourse);
   const visible = all.filter(c => userInCourseAudience(c, user));
   // Stable scope ordering: foundation → intern → department
   const rank: Record<LmsScope, number> = { foundation: 0, intern: 1, department: 2 };

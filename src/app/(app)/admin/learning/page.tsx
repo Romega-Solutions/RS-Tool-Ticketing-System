@@ -6,6 +6,8 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { userInCourseAudience, type LmsCourse } from '@/lib/lms';
 import { Card, CardContent } from '@/components/ui/card';
 import { BookOpen, Users, GraduationCap, BarChart3 } from 'lucide-react';
+import { unstable_cache } from 'next/cache';
+import { LMS_COURSES_TAG } from '@/lib/cache-tags';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +29,20 @@ function scopeLabel(scope: string, department: string | null): string {
   return scope;
 }
 
+const getCachedAdminCourseRows = unstable_cache(
+  async () => {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from('lms_courses')
+      .select('id, title, scope, department, enforcement, is_published, created_at')
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(`admin course list: ${error.message}`);
+    return data ?? [];
+  },
+  ['lms-admin-course-rows'],
+  { revalidate: 300, tags: [LMS_COURSES_TAG] },
+);
+
 export default async function AdminLearningPage() {
   const session = await getSession();
   if (!session) redirect('/login');
@@ -42,9 +58,7 @@ export default async function AdminLearningPage() {
     { data: assignRows },
     { data: completionRows },
   ] = await Promise.all([
-    admin.from('lms_courses')
-      .select('id, title, scope, department, enforcement, is_published, created_at')
-      .order('created_at', { ascending: false }),
+    getCachedAdminCourseRows().then(data => ({ data })),
     admin.from('users').select('id, role, team').eq('is_active', 1),
     admin.from('lms_lessons').select('id, course_id'),
     admin.from('lms_course_assignments').select('course_id, user_id'),

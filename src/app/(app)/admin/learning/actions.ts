@@ -1,6 +1,6 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -8,6 +8,7 @@ import { getSession } from '@/lib/session';
 import { canAccessAdmin } from '@/lib/rbac';
 import { uploadLessonVideo } from '@/lib/storage';
 import { extractYoutubeId, isYoutubeUrl } from '@/lib/youtube';
+import { LMS_COURSES_TAG } from '@/lib/cache-tags';
 
 async function requireAdmin() {
   const session = await getSession();
@@ -47,6 +48,7 @@ export async function createCourse(input: unknown): Promise<{ id: number }> {
     .single();
   if (error || !data) throw new Error(`createCourse failed: ${error?.message ?? 'no row'}`);
   revalidatePath('/admin/learning');
+  revalidateTag(LMS_COURSES_TAG, { expire: 0 });
   return { id: data.id };
 }
 
@@ -72,6 +74,7 @@ export async function updateCourse(id: number, input: unknown): Promise<void> {
   revalidatePath('/admin/learning');
   revalidatePath(`/admin/learning/${id}`);
   revalidatePath('/learning');
+  revalidateTag(LMS_COURSES_TAG, { expire: 0 });
 }
 
 export async function togglePublishCourse(id: number, isPublished: boolean): Promise<void> {
@@ -85,6 +88,7 @@ export async function togglePublishCourse(id: number, isPublished: boolean): Pro
   revalidatePath('/admin/learning');
   revalidatePath(`/admin/learning/${id}`);
   revalidatePath('/learning');
+  revalidateTag(LMS_COURSES_TAG, { expire: 0 });
 }
 
 export async function deleteCourse(id: number): Promise<void> {
@@ -93,6 +97,7 @@ export async function deleteCourse(id: number): Promise<void> {
   const { error } = await admin.from('lms_courses').delete().eq('id', id);
   if (error) throw new Error(`deleteCourse failed: ${error.message}`);
   revalidatePath('/admin/learning');
+  revalidateTag(LMS_COURSES_TAG, { expire: 0 });
   redirect('/admin/learning');
 }
 
