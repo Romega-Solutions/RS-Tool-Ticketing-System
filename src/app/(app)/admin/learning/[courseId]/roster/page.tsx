@@ -22,8 +22,19 @@ export default async function AdminRosterPage({
   if (!canAccessAdmin(session.role)) redirect('/dashboard');
 
   const admin = createAdminClient();
-  const { data: courseRow } = await admin
-    .from('lms_courses').select('*').eq('id', id).maybeSingle();
+  const [
+    { data: courseRow },
+    { data: users },
+    { data: lessons },
+    { data: assigns },
+    { data: certs },
+  ] = await Promise.all([
+    admin.from('lms_courses').select('*').eq('id', id).maybeSingle(),
+    admin.from('users').select('id, name, email, team, role, is_active').eq('is_active', 1).order('name', { ascending: true }),
+    admin.from('lms_lessons').select('id').eq('course_id', id),
+    admin.from('lms_course_assignments').select('user_id, due_at').eq('course_id', id),
+    admin.from('lms_certificates').select('user_id').eq('course_id', id),
+  ]);
   if (!courseRow) notFound();
   const course: LmsCourse = {
     id: courseRow.id, title: courseRow.title, description: courseRow.description,
@@ -33,13 +44,6 @@ export default async function AdminRosterPage({
     createdAt: courseRow.created_at, updatedAt: courseRow.updated_at,
   };
 
-  const { data: users } = await admin
-    .from('users')
-    .select('id, name, email, team, role, is_active')
-    .eq('is_active', 1)
-    .order('name', { ascending: true });
-
-  const { data: lessons } = await admin.from('lms_lessons').select('id').eq('course_id', id);
   const lessonIds = ((lessons ?? []) as { id: number }[]).map(l => l.id);
   const total = lessonIds.length;
 
@@ -51,15 +55,10 @@ export default async function AdminRosterPage({
     completedByUser.set(c.user_id, (completedByUser.get(c.user_id) ?? 0) + 1);
   }
 
-  const { data: assigns } = await admin
-    .from('lms_course_assignments').select('user_id, due_at').eq('course_id', id);
   type ARow = { user_id: number; due_at: string | null };
   const dueByUser = new Map<number, string | null>(
     ((assigns ?? []) as ARow[]).map(a => [a.user_id, a.due_at]),
   );
-
-  const { data: certs } = await admin
-    .from('lms_certificates').select('user_id').eq('course_id', id);
   const certifiedSet = new Set(((certs ?? []) as { user_id: number }[]).map(c => c.user_id));
 
   // Roster = users whose role/team falls into the audience OR who have an
