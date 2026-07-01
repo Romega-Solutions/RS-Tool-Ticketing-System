@@ -35,7 +35,7 @@ export const POST = route(async (req: Request, { params }: { params: Promise<{ p
 
   try {
     const label = await createLabel(projectId, name, body.color ?? '#6b7280');
-    revalidateTag(projectLabelsTag(projectId));
+    revalidateTag(projectLabelsTag(projectId), { expire: 0 });
     return NextResponse.json(label);
   } catch (err) {
     return NextResponse.json(

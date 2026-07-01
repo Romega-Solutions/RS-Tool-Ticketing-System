@@ -39,7 +39,7 @@ export const POST = route(async (req: Request, { params }: { params: Promise<{ p
 
   try {
     const cycle = await createCycle(projectId, name, body.startDate, body.endDate);
-    revalidateTag(projectCyclesTag(projectId));
+    revalidateTag(projectCyclesTag(projectId), { expire: 0 });
     return NextResponse.json(cycle);
   } catch (err) {
     return NextResponse.json(

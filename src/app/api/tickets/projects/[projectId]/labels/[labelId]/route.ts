@@ -18,7 +18,7 @@ export const DELETE = route(async (_req: Request, ctx: LabelCtx) => {
 
   try {
     await deleteLabel(labelId);
-    revalidateTag(projectLabelsTag(projectId));
+    revalidateTag(projectLabelsTag(projectId), { expire: 0 });
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(

@@ -28,7 +28,7 @@ export const PATCH = route(async (req: Request, ctx: CycleCtx) => {
 
   try {
     await updateCycle(cycleId, body);
-    revalidateTag(projectCyclesTag(projectId));
+    revalidateTag(projectCyclesTag(projectId), { expire: 0 });
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(
@@ -46,7 +46,7 @@ export const DELETE = route(async (_req: Request, ctx: CycleCtx) => {
   }
   try {
     await deleteCycle(cycleId);
-    revalidateTag(projectCyclesTag(projectId));
+    revalidateTag(projectCyclesTag(projectId), { expire: 0 });
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(
