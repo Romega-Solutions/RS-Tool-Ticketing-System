@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { revalidateTag } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { hash } from 'bcryptjs';
 import { normalizeRole } from '@/lib/rbac';
 import { mergeNotificationPrefs } from '@/lib/notifications';
 import { route, requireSession, parseBody, badRequest, notFound } from '@/lib/api';
+import { USERS_LIST_TAG } from '@/lib/cache-tags';
 
 export const runtime = 'nodejs';
 
@@ -33,18 +35,13 @@ export const GET = route(async () => {
   const session = await requireSession();
 
   const admin = createAdminClient();
-  const { data: user } = await admin
-    .from('users')
-    .select('*')
-    .eq('id', session.id)
-    .maybeSingle();
-
-  if (!user) throw notFound('User not found');
-
-  const [{ data: teamRows }, { data: jobTitleRows }] = await Promise.all([
+  const [{ data: user }, { data: teamRows }, { data: jobTitleRows }] = await Promise.all([
+    admin.from('users').select('*').eq('id', session.id).maybeSingle(),
     admin.from('users').select('team').not('team', 'is', null).eq('is_active', 1),
     admin.from('users').select('job_title').not('job_title', 'is', null).eq('is_active', 1),
   ]);
+
+  if (!user) throw notFound('User not found');
 
   const availableTeams = [...new Set(
     (teamRows ?? [])
@@ -123,6 +120,7 @@ export const PUT = route(async (req: Request) => {
 
   const admin = createAdminClient();
   await admin.from('users').update(payload).eq('id', session.id);
+  revalidateTag(USERS_LIST_TAG);
 
   const { data: updated } = await admin.from('users').select('*').eq('id', session.id).maybeSingle();
   if (!updated) throw notFound('User not found');

@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
+import { unstable_cache, revalidateTag } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { hash } from 'bcryptjs';
 import { route, requireAdmin } from '@/lib/api';
 import { recordAudit, deriveUserPatchAction } from '@/lib/audit';
 import { enforceRateLimit, keyByUser } from '@/lib/rate-limit';
 import { isGateableToolKey, defaultToolAccess, normalizeRole } from '@/lib/rbac';
+import { USERS_LIST_TAG } from '@/lib/cache-tags';
 
 export const runtime = 'nodejs';
 
@@ -102,15 +104,23 @@ async function findAuthUserByEmail(
   return null;
 }
 
+const getCachedUserRows = unstable_cache(
+  async () => {
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from('users')
+      .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active, tool_access, date_of_birth, start_date, end_date, drive_url, approved_hours_per_week, schedule_pht_start, schedule_pht_end, setup_email_sent_at')
+      .order('name');
+    return data ?? [];
+  },
+  ['admin-user-rows'],
+  { revalidate: 300, tags: [USERS_LIST_TAG] },
+);
+
 export const GET = route(async () => {
   await requireAdmin();
 
-  const admin = createAdminClient();
-  const { data } = await admin
-    .from('users')
-    .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active, tool_access, date_of_birth, start_date, end_date, drive_url, approved_hours_per_week, schedule_pht_start, schedule_pht_end, setup_email_sent_at')
-    .order('name');
-  const allUsers = data ?? [];
+  const allUsers = await getCachedUserRows();
 
   const mapped = allUsers.map((u: Record<string, unknown>) => ({
     id:            u.id,
@@ -296,6 +306,8 @@ export const POST = route(async (req: Request) => {
       details: { role, team },
     });
 
+    revalidateTag(USERS_LIST_TAG);
+
     return NextResponse.json({
       user: {
         id:            inserted.id,
@@ -471,6 +483,8 @@ export const PATCH = route(async (req: Request) => {
       await recordAudit({ actorId: session.id, action, targetUserId: body.id, details });
     }
   }
+
+  revalidateTag(USERS_LIST_TAG);
 
   return NextResponse.json({
     user: {
