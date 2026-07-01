@@ -62,7 +62,9 @@ export const timesheets = pgTable('timesheets', {
   editedBy:        integer('edited_by'),
   editedAt:        text('edited_at'),
   createdAt:       text('created_at').default(sql`CURRENT_TIMESTAMP`),
-});
+}, (t) => [
+  index('timesheets_user_idx').on(t.userId),
+]);
 
 // Overtime admin-approval queue. A contractor cut at the 15h weekly cap files a
 // request; an admin approves it with a bounded grant (`grantedSeconds`, e.g. +2h)
@@ -82,7 +84,9 @@ export const overtimeRequests = pgTable('overtime_requests', {
   // Bounded overtime grant in seconds, added to this user's 15h weekly allowance
   // for `weekStart` while status='approved'. e.g. a +2h grant = 7200.
   grantedSeconds: integer('granted_seconds'),
-});
+}, (t) => [
+  index('overtime_requests_user_idx').on(t.userId),
+]);
 
 // IC self-service time-edit requests. An IC asks to correct a clock-in/out
 // session; the request enters 'pending' and never overwrites the timesheet
@@ -105,7 +109,10 @@ export const timesheetEditRequests = pgTable('timesheet_edit_requests', {
   decidedBy:         integer('decided_by'),
   decidedAt:         text('decided_at'),
   decisionComment:   text('decision_comment'),             // mandatory on denial
-});
+}, (t) => [
+  index('timesheet_edit_requests_user_idx').on(t.userId),
+  index('timesheet_edit_requests_timesheet_idx').on(t.timesheetId),
+]);
 
 export const presencePings = pgTable('presence_pings', {
   id:              text('id').primaryKey(),
@@ -188,7 +195,11 @@ export const candidates = pgTable('candidates', {
   consentMethod:      text('consent_method'), // link | manual
   createdAt:      text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt:      text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (t) => [
+  index('candidates_assigned_to_idx').on(t.assignedTo),
+  index('candidates_created_by_idx').on(t.createdBy),
+  index('candidates_status_idx').on(t.status),
+]);
 
 export const leads = pgTable('leads', {
   id:         serial('id').primaryKey(),
@@ -201,7 +212,10 @@ export const leads = pgTable('leads', {
   assignedTo: integer('assigned_to'),
   createdAt:  text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt:  text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (t) => [
+  index('leads_assigned_to_idx').on(t.assignedTo),
+  index('leads_stage_idx').on(t.stage),
+]);
 
 export const briefings = pgTable('briefings', {
   id:          serial('id').primaryKey(),
@@ -257,7 +271,9 @@ export const attendance = pgTable('attendance', {
   editedBy:        integer('edited_by'),
   editedAt:        text('edited_at'),
   createdAt:       text('created_at').default(sql`CURRENT_TIMESTAMP`),
-});
+}, (t) => [
+  index('attendance_user_idx').on(t.userId),
+]);
 
 export const projects = pgTable('projects', {
   id:          serial('id').primaryKey(),
@@ -314,13 +330,18 @@ export const workItems = pgTable('work_items', {
   updatedAt:    text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (t) => [
   unique('work_items_project_seq_unique').on(t.projectId, t.sequenceId),
+  index('work_items_state_idx').on(t.stateId),
+  index('work_items_cycle_idx').on(t.cycleId),
 ]);
 
 export const workItemAssignees = pgTable('work_item_assignees', {
   id:         serial('id').primaryKey(),
   workItemId: integer('work_item_id').notNull().references(() => workItems.id, { onDelete: 'cascade' }),
   userId:     integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-});
+}, (t) => [
+  index('work_item_assignees_work_item_idx').on(t.workItemId),
+  index('work_item_assignees_user_idx').on(t.userId),
+]);
 
 export const workItemComments = pgTable('work_item_comments', {
   id:         serial('id').primaryKey(),
@@ -329,7 +350,9 @@ export const workItemComments = pgTable('work_item_comments', {
   body:       text('body').notNull(),
   createdAt:  text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt:  text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (t) => [
+  index('work_item_comments_work_item_idx').on(t.workItemId),
+]);
 
 export const labels = pgTable('labels', {
   id:        serial('id').primaryKey(),
@@ -356,6 +379,7 @@ export const projectMembers = pgTable('project_members', {
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (t) => [
   unique('project_members_unique').on(t.projectId, t.userId),
+  index('project_members_user_idx').on(t.userId),
 ]);
 
 export const workItemActivity = pgTable('work_item_activity', {
@@ -366,7 +390,9 @@ export const workItemActivity = pgTable('work_item_activity', {
   fromValue:  text('from_value'),
   toValue:    text('to_value'),
   createdAt:  text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (t) => [
+  index('work_item_activity_work_item_idx').on(t.workItemId),
+]);
 
 export const savedViews = pgTable('saved_views', {
   id:        serial('id').primaryKey(),
@@ -375,7 +401,10 @@ export const savedViews = pgTable('saved_views', {
   name:      text('name').notNull(),
   filters:   jsonb('filters').notNull(),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (t) => [
+  index('saved_views_user_idx').on(t.userId),
+  index('saved_views_project_idx').on(t.projectId),
+]);
 
 // ─── LMS ──────────────────────────────────────────────────────────────────
 // Learning Management System — see docs/LMS_BUILD_PLAN.md.
@@ -413,7 +442,9 @@ export const lmsLessons = pgTable('lms_lessons', {
   sortOrder:            integer('sort_order').notNull().default(0),
   createdAt:            text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt:            text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (t) => [
+  index('lms_lessons_course_idx').on(t.courseId),
+]);
 
 export const lmsLessonCompletions = pgTable('lms_lesson_completions', {
   id:          serial('id').primaryKey(),
@@ -422,6 +453,7 @@ export const lmsLessonCompletions = pgTable('lms_lesson_completions', {
   completedAt: text('completed_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (t) => [
   unique('lms_lesson_completions_user_lesson_unique').on(t.userId, t.lessonId),
+  index('lms_lesson_completions_lesson_idx').on(t.lessonId),
 ]);
 
 // Phase 2 — quizzes & certificates (schema ready; UI lands in a follow-up commit on this branch)
@@ -454,7 +486,10 @@ export const lmsQuizAttempts = pgTable('lms_quiz_attempts', {
   passed:      integer('passed').notNull(),
   startedAt:   text('started_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   submittedAt: text('submitted_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (t) => [
+  index('lms_quiz_attempts_user_idx').on(t.userId),
+  index('lms_quiz_attempts_quiz_idx').on(t.quizId),
+]);
 
 export const lmsCertificates = pgTable('lms_certificates', {
   id:        serial('id').primaryKey(),
@@ -479,6 +514,7 @@ export const lmsCourseAssignments = pgTable('lms_course_assignments', {
   lastRemindedAt: text('last_reminded_at'),
 }, (t) => [
   unique('lms_course_assignments_user_course_unique').on(t.userId, t.courseId),
+  index('lms_course_assignments_course_idx').on(t.courseId),
 ]);
 
 export const lmsLessonComments = pgTable('lms_lesson_comments', {
@@ -490,7 +526,10 @@ export const lmsLessonComments = pgTable('lms_lesson_comments', {
   pinned:    integer('pinned').notNull().default(0),
   deletedAt: text('deleted_at'),
   createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (t) => [
+  index('lms_lesson_comments_lesson_idx').on(t.lessonId),
+  index('lms_lesson_comments_user_idx').on(t.userId),
+]);
 
 // Admin-action audit trail. Records who did what to whom (user create / role
 // change / (de)activate). Best-effort writes (see src/lib/audit.ts); also a
