@@ -114,21 +114,28 @@ export const GET = route(async (req: Request) => {
     if (session.role !== 'admin') {
       usersQuery = usersQuery.eq('team', session.team ?? '');
     }
-    const { data: teamUsersData } = await usersQuery;
+
+    const [{ data: teamUsersData }, resolvePhoto] = await Promise.all([
+      usersQuery,
+      getPhotoResolver(),
+    ]);
     const teamUsers = teamUsersData ?? [];
-    const resolvePhoto = await getPhotoResolver();
-
     const userIds = teamUsers.map((u: { id: number }) => u.id);
-    let records: AttendanceRow[] = [];
-    if (userIds.length > 0) {
-      const { data } = await admin
-        .from('attendance')
-        .select('*')
-        .in('user_id', userIds)
-        .in('week_start', mondays);
-      records = (data ?? []) as AttendanceRow[];
-    }
 
+    const lastDayNum = new Date(Number(monthParam.split('-')[0]), Number(monthParam.split('-')[1]), 0).getDate();
+    const monthStart = `${monthParam}-01`;
+    const monthEnd   = `${monthParam}-${String(lastDayNum).padStart(2, '0')}`;
+
+    const [attendanceResult, timesheetResult] = await Promise.all([
+      userIds.length > 0
+        ? admin.from('attendance').select('*').in('user_id', userIds).in('week_start', mondays)
+        : Promise.resolve({ data: [] as AttendanceRow[] }),
+      userIds.length > 0
+        ? admin.from('timesheets').select('user_id, duration_seconds')
+            .in('user_id', userIds).gte('date', monthStart).lte('date', monthEnd).not('duration_seconds', 'is', null)
+        : Promise.resolve({ data: [] as { user_id: number; duration_seconds: number }[] }),
+    ]);
+    const records = (attendanceResult.data ?? []) as AttendanceRow[];
     const workdays = countWorkdaysInMonth(monthParam);
     const recordsByUserAndWeek = new Map(records.map(record => [`${record.user_id}:${record.week_start}`, record] as const));
 
@@ -165,22 +172,10 @@ export const GET = route(async (req: Request) => {
       };
     });
 
-    // Fetch timesheet hours for the month
-    const lastDayNum = new Date(Number(monthParam.split('-')[0]), Number(monthParam.split('-')[1]), 0).getDate();
-    const monthStart = `${monthParam}-01`;
-    const monthEnd   = `${monthParam}-${String(lastDayNum).padStart(2, '0')}`;
+    // Aggregate timesheet hours for the month (fetched in parallel above)
     const monthTsMap: Record<number, number> = {};
-    if (userIds.length > 0) {
-      const { data: tsData1 } = await admin
-        .from('timesheets')
-        .select('user_id, duration_seconds')
-        .in('user_id', userIds)
-        .gte('date', monthStart)
-        .lte('date', monthEnd)
-        .not('duration_seconds', 'is', null);
-      for (const ts of (tsData1 ?? []) as { user_id: number; duration_seconds: number }[]) {
-        monthTsMap[ts.user_id] = (monthTsMap[ts.user_id] ?? 0) + ts.duration_seconds;
-      }
+    for (const ts of (timesheetResult.data ?? []) as { user_id: number; duration_seconds: number }[]) {
+      monthTsMap[ts.user_id] = (monthTsMap[ts.user_id] ?? 0) + ts.duration_seconds;
     }
 
     const summaryWithHours = summary.map(row => ({ ...row, totalSeconds: monthTsMap[row.userId] ?? 0 }));
@@ -193,29 +188,52 @@ export const GET = route(async (req: Request) => {
   const weekStart = getMondayOfWeek(weekParam);
   if (!weekStart) throw badRequest('week must be a Monday date (YYYY-MM-DD)');
 
-  const { data: rawRecordsData } = await admin
-    .from('attendance')
-    .select('*')
-    .eq('week_start', weekStart);
-  const rawRecords = rawRecordsData ?? [];
-
   let usersQuery = admin.from('users').select('id, name, email, team, role, member_code, hourly_rate_usd, approved_hours_per_week').eq('is_active', 1);
   if (session.role !== 'admin') {
     usersQuery = usersQuery.eq('team', session.team ?? '');
   }
-  const { data: teamUsersData2 } = await usersQuery;
+
+  const [{ data: rawRecordsData }, { data: teamUsersData2 }, resolvePhoto] = await Promise.all([
+    admin.from('attendance').select('*').eq('week_start', weekStart),
+    usersQuery,
+    getPhotoResolver(),
+  ]);
+  const rawRecords = rawRecordsData ?? [];
   const teamUsers = teamUsersData2 ?? [];
-  const resolvePhoto = await getPhotoResolver();
 
   // Resolve attendance editor display names for the audit-trail tooltip.
   const attEditorIds = [...new Set((rawRecords as AttendanceRow[])
     .map(r => r.edited_by)
     .filter((v): v is number => typeof v === 'number'))];
-  const attEditorNames: Record<number, string> = {};
-  if (attEditorIds.length > 0) {
-    const { data: editors } = await admin.from('users').select('id, name').in('id', attEditorIds);
-    for (const e of (editors ?? []) as { id: number; name: string }[]) attEditorNames[e.id] = e.name;
+
+  // Build Mon–Sun ISO date strings for timesheet lookup
+  const weekDates: string[] = [];
+  const base = new Date(weekStart + 'T00:00:00');
+  for (let i = 0; i < 7; i++) {
+    weekDates.push(toLocalISO(new Date(base.getTime() + i * 86400000)));
   }
+  const userIds = (teamUsers as { id: number }[]).map(u => u.id);
+
+  const [editorsResult, tsResult, openResult, grantResult] = await Promise.all([
+    attEditorIds.length > 0
+      ? admin.from('users').select('id, name').in('id', attEditorIds)
+      : Promise.resolve({ data: [] as { id: number; name: string }[] }),
+    userIds.length > 0
+      ? admin.from('timesheets').select('user_id, date, duration_seconds')
+          .in('user_id', userIds).in('date', weekDates).not('duration_seconds', 'is', null)
+      : Promise.resolve({ data: [] as { user_id: number; date: string; duration_seconds: number }[] }),
+    userIds.length > 0
+      ? admin.from('timesheets').select('user_id, clocked_in_at')
+          .in('user_id', userIds).in('date', weekDates).is('clocked_out_at', null)
+      : Promise.resolve({ data: [] as { user_id: number; clocked_in_at: string }[] }),
+    userIds.length > 0
+      ? admin.from('overtime_requests').select('user_id, granted_seconds')
+          .in('user_id', userIds).eq('week_start', weekStart).eq('status', 'approved')
+      : Promise.resolve({ data: [] as { user_id: number; granted_seconds: number | null }[] }),
+  ]);
+
+  const attEditorNames: Record<number, string> = {};
+  for (const e of (editorsResult.data ?? []) as { id: number; name: string }[]) attEditorNames[e.id] = e.name;
 
   // Map snake_case DB rows to camelCase for the client
   const records = (rawRecords as AttendanceRow[]).map(r => ({
@@ -235,27 +253,11 @@ export const GET = route(async (req: Request) => {
     editedByName:     r.edited_by != null ? (attEditorNames[r.edited_by] ?? 'an admin') : null,
   }));
 
-  // Build Mon–Sun ISO date strings for timesheet lookup
-  const weekDates: string[] = [];
-  const base = new Date(weekStart + 'T00:00:00');
-  for (let i = 0; i < 7; i++) {
-    weekDates.push(toLocalISO(new Date(base.getTime() + i * 86400000)));
-  }
-
-  // Fetch timesheet durations per user per day (multiple sessions per day summed)
-  const userIds = (teamUsers as { id: number }[]).map(u => u.id);
+  // Timesheet durations per user per day (multiple sessions per day summed) — fetched in parallel above
   const timesheetsByDay: Record<string, number> = {}; // "userId:date" → seconds
-  if (userIds.length > 0) {
-    const { data: tsData2 } = await admin
-      .from('timesheets')
-      .select('user_id, date, duration_seconds')
-      .in('user_id', userIds)
-      .in('date', weekDates)
-      .not('duration_seconds', 'is', null);
-    for (const ts of (tsData2 ?? []) as { user_id: number; date: string; duration_seconds: number }[]) {
-      const key = `${ts.user_id}:${ts.date}`;
-      timesheetsByDay[key] = (timesheetsByDay[key] ?? 0) + ts.duration_seconds;
-    }
+  for (const ts of (tsResult.data ?? []) as { user_id: number; date: string; duration_seconds: number }[]) {
+    const key = `${ts.user_id}:${ts.date}`;
+    timesheetsByDay[key] = (timesheetsByDay[key] ?? 0) + ts.duration_seconds;
   }
 
   // Open (still-clocked-in) sessions whose day falls in this week, so the client
@@ -270,26 +272,11 @@ export const GET = route(async (req: Request) => {
     baseByUser[u.id] = (u.approved_hours_per_week != null ? Number(u.approved_hours_per_week) : 15) * 3600;
   }
   for (const id of userIds) allowanceByUser[id] = baseByUser[id] ?? WEEKLY_CAP_SECONDS;
-  if (userIds.length > 0) {
-    const { data: openData } = await admin
-      .from('timesheets')
-      .select('user_id, clocked_in_at')
-      .in('user_id', userIds)
-      .in('date', weekDates)
-      .is('clocked_out_at', null);
-    for (const o of (openData ?? []) as { user_id: number; clocked_in_at: string }[]) {
-      openSessions[o.user_id] = o.clocked_in_at;
-    }
-
-    const { data: grantData } = await admin
-      .from('overtime_requests')
-      .select('user_id, granted_seconds')
-      .in('user_id', userIds)
-      .eq('week_start', weekStart)
-      .eq('status', 'approved');
-    for (const g of (grantData ?? []) as { user_id: number; granted_seconds: number | null }[]) {
-      allowanceByUser[g.user_id] = (allowanceByUser[g.user_id] ?? WEEKLY_CAP_SECONDS) + (g.granted_seconds ?? 0);
-    }
+  for (const o of (openResult.data ?? []) as { user_id: number; clocked_in_at: string }[]) {
+    openSessions[o.user_id] = o.clocked_in_at;
+  }
+  for (const g of (grantResult.data ?? []) as { user_id: number; granted_seconds: number | null }[]) {
+    allowanceByUser[g.user_id] = (allowanceByUser[g.user_id] ?? WEEKLY_CAP_SECONDS) + (g.granted_seconds ?? 0);
   }
 
   const usersOut = (teamUsers as { id: number; name: string; email: string | null; team: string | null; role: string; member_code: string | null; hourly_rate_usd: number | string | null }[])
