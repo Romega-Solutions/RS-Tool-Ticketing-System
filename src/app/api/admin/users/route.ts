@@ -306,7 +306,7 @@ export const POST = route(async (req: Request) => {
       details: { role, team },
     });
 
-    revalidateTag(USERS_LIST_TAG);
+    revalidateTag(USERS_LIST_TAG, { expire: 0 });
 
     return NextResponse.json({
       user: {
@@ -484,7 +484,7 @@ export const PATCH = route(async (req: Request) => {
     }
   }
 
-  revalidateTag(USERS_LIST_TAG);
+  revalidateTag(USERS_LIST_TAG, { expire: 0 });
 
   return NextResponse.json({
     user: {

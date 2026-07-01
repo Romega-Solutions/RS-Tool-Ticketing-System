@@ -120,7 +120,7 @@ export const PUT = route(async (req: Request) => {
 
   const admin = createAdminClient();
   await admin.from('users').update(payload).eq('id', session.id);
-  revalidateTag(USERS_LIST_TAG);
+  revalidateTag(USERS_LIST_TAG, { expire: 0 });
 
   const { data: updated } = await admin.from('users').select('*').eq('id', session.id).maybeSingle();
   if (!updated) throw notFound('User not found');
