@@ -1,8 +1,10 @@
 import { notFound } from 'next/navigation';
+import { unstable_cache } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { Briefcase, MapPin, Clock, Banknote, AlertCircle } from 'lucide-react';
 import { ApplyForm } from './apply-form';
 import { RichText } from '@/components/rich-text';
+import { ATS_POSITIONS_TAG, atsPositionTag } from '@/lib/cache-tags';
 
 type Position = {
   id:              number;
@@ -19,6 +21,22 @@ function employmentLabel(v: string | null) {
   return v === 'part_time' ? 'Part time' : 'Full time';
 }
 
+async function getCachedPosition(id: number) {
+  return unstable_cache(
+    async () => {
+      const supabase = createAdminClient();
+      const { data, error } = await supabase
+        .from('positions')
+        .select('id, job_title, location, compensation, employment_type, openings, job_description, is_open')
+        .eq('id', id)
+        .maybeSingle();
+      return { data: data as Position | null, errorMessage: error?.message ?? null };
+    },
+    ['ats-position-detail', String(id)],
+    { revalidate: 300, tags: [ATS_POSITIONS_TAG, atsPositionTag(id)] },
+  )();
+}
+
 export default async function ApplyPage({
   params,
 }: {
@@ -28,14 +46,9 @@ export default async function ApplyPage({
   const id = parseInt(positionId, 10);
   if (!Number.isInteger(id) || id <= 0) notFound();
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from('positions')
-    .select('id, job_title, location, compensation, employment_type, openings, job_description, is_open')
-    .eq('id', id)
-    .maybeSingle();
+  const { data, errorMessage } = await getCachedPosition(id);
 
-  if (error?.message?.toLowerCase().includes('does not exist')) {
+  if (errorMessage?.toLowerCase().includes('does not exist')) {
     return <NotConfigured />;
   }
   if (!data) notFound();

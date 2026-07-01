@@ -1,10 +1,11 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
 import { hasToolAccess } from '@/lib/rbac';
 import { sanitizeRichText, isRichTextEmpty } from '@/lib/sanitize';
+import { ATS_POSITIONS_TAG, atsPositionTag } from '@/lib/cache-tags';
 
 const PLACEMENTS  = new Set(['internal', 'external']);
 const EMPLOYMENTS = new Set(['full_time', 'part_time']);
@@ -60,6 +61,7 @@ export async function createPosition(formData: FormData) {
   if (error) throw new Error(`Failed to create position: ${error.message}`);
 
   revalidatePath('/recruiting/positions');
+  revalidateTag(ATS_POSITIONS_TAG);
 }
 
 export async function updatePosition(id: number, formData: FormData) {
@@ -86,6 +88,8 @@ export async function updatePosition(id: number, formData: FormData) {
   if (error) throw new Error(`Failed to update position: ${error.message}`);
 
   revalidatePath('/recruiting/positions');
+  revalidateTag(ATS_POSITIONS_TAG);
+  revalidateTag(atsPositionTag(id));
 }
 
 export async function updatePositionStatus(id: number, isOpen: boolean) {
@@ -100,6 +104,8 @@ export async function updatePositionStatus(id: number, isOpen: boolean) {
   if (error) throw new Error(`Failed to update position: ${error.message}`);
 
   revalidatePath('/recruiting/positions');
+  revalidateTag(ATS_POSITIONS_TAG);
+  revalidateTag(atsPositionTag(id));
 }
 
 export async function deletePosition(id: number) {
@@ -111,4 +117,6 @@ export async function deletePosition(id: number) {
   if (error) throw new Error(`Failed to delete position: ${error.message}`);
 
   revalidatePath('/recruiting/positions');
+  revalidateTag(ATS_POSITIONS_TAG);
+  revalidateTag(atsPositionTag(id));
 }

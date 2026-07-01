@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { unstable_cache } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { Card, CardContent } from '@/components/ui/card';
 import { Briefcase, AlertCircle } from 'lucide-react';
@@ -9,6 +10,7 @@ import { AtsTabs } from '../ats-tabs';
 import { PositionForm } from './position-form';
 import { type Position } from './position-table-row';
 import { PositionsTable } from './positions-table.client';
+import { ATS_POSITIONS_TAG } from '@/lib/cache-tags';
 
 function isTableMissing(msg: string | undefined) {
   if (!msg) return false;
@@ -19,6 +21,20 @@ function isTableMissing(msg: string | undefined) {
   return m.includes('does not exist') && (m.includes('relation') || m.includes('column'));
 }
 
+const getCachedPositionRows = unstable_cache(
+  async () => {
+    const supabase = createAdminClient();
+    const { data, error } = await supabase
+      .from('positions')
+      .select('id, job_title, placement_type, location, compensation, employment_type, openings, job_description, is_open, created_at, created_by')
+      .order('created_at', { ascending: false })
+      .limit(200);
+    return { data: data as Position[] | null, errorMessage: error?.message ?? null };
+  },
+  ['ats-position-rows'],
+  { revalidate: 300, tags: [ATS_POSITIONS_TAG] },
+);
+
 export default async function PositionsPage() {
   const session = await getSession();
   if (!session || !hasToolAccess('recruiting', session.role, session.toolAccess)) {
@@ -26,15 +42,11 @@ export default async function PositionsPage() {
   }
 
   const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from('positions')
-    .select('id, job_title, placement_type, location, compensation, employment_type, openings, job_description, is_open, created_at, created_by')
-    .order('created_at', { ascending: false })
-    .limit(200);
+  const { data, errorMessage } = await getCachedPositionRows();
 
-  const errorMsg = error?.message;
+  const errorMsg = errorMessage ?? undefined;
   const tableMissing = isTableMissing(errorMsg);
-  const unexpectedError = error && !tableMissing ? errorMsg : null;
+  const unexpectedError = errorMsg && !tableMissing ? errorMsg : null;
   const rawPositions = (data as Position[] | null) ?? [];
 
   // Resolve creator ids → names with a single lookup (same id→name map pattern
