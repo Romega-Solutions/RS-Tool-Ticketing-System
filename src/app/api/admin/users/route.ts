@@ -107,10 +107,11 @@ async function findAuthUserByEmail(
 const getCachedUserRows = unstable_cache(
   async () => {
     const admin = createAdminClient();
-    const { data } = await admin
+    const { data, error } = await admin
       .from('users')
       .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active, tool_access, date_of_birth, start_date, end_date, drive_url, approved_hours_per_week, schedule_pht_start, schedule_pht_end, setup_email_sent_at')
       .order('name');
+    if (error) throw new Error(`getCachedUserRows: ${error.message}`);
     return data ?? [];
   },
   ['admin-user-rows'],
@@ -306,7 +307,11 @@ export const POST = route(async (req: Request) => {
       details: { role, team },
     });
 
-    revalidateTag(USERS_LIST_TAG, { expire: 0 });
+    try {
+      revalidateTag(USERS_LIST_TAG, { expire: 0 });
+    } catch {
+      // Best-effort cache invalidation — must not roll back the user we just created.
+    }
 
     return NextResponse.json({
       user: {
