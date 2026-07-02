@@ -165,4 +165,61 @@ describe('route hardening coverage', () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'weekStart must be a Monday (YYYY-MM-DD)' });
   });
+
+  it('project comment creation is blocked for a user without comment access', async () => {
+    const createProjectComment = vi.fn();
+    mockSession(user());
+    vi.doMock('@/lib/permissions', () => ({
+      canCommentOnProject: vi.fn().mockResolvedValue(false),
+    }));
+    vi.doMock('@/lib/tickets', () => ({ createProjectComment }));
+
+    const { POST } = await import('@/app/api/tickets/projects/[projectId]/comments/route');
+    const res = await POST(
+      jsonReq('POST', { body: '<p>hello</p>' }),
+      { params: Promise.resolve({ projectId: '7' }) },
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'Forbidden' });
+    expect(createProjectComment).not.toHaveBeenCalled();
+  });
+
+  it('project comment creation rejects an empty body before calling the ticket service', async () => {
+    const createProjectComment = vi.fn();
+    mockSession(user());
+    vi.doMock('@/lib/permissions', () => ({
+      canCommentOnProject: vi.fn().mockResolvedValue(true),
+    }));
+    vi.doMock('@/lib/tickets', () => ({ createProjectComment }));
+
+    const { POST } = await import('@/app/api/tickets/projects/[projectId]/comments/route');
+    const res = await POST(
+      jsonReq('POST', { body: '<p></p>' }),
+      { params: Promise.resolve({ projectId: '7' }) },
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'body is required' });
+    expect(createProjectComment).not.toHaveBeenCalled();
+  });
+
+  it('project comments listing is blocked for a user without project view access', async () => {
+    const getProjectComments = vi.fn();
+    mockSession(user());
+    vi.doMock('@/lib/permissions', () => ({
+      canViewProject: vi.fn().mockResolvedValue(false),
+    }));
+    vi.doMock('@/lib/tickets', () => ({ getProjectComments }));
+
+    const { GET } = await import('@/app/api/tickets/projects/[projectId]/comments/route');
+    const res = await GET(
+      new Request('http://localhost/api/test'),
+      { params: Promise.resolve({ projectId: '7' }) },
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'Forbidden' });
+    expect(getProjectComments).not.toHaveBeenCalled();
+  });
 });
