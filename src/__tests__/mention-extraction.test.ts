@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractMentionUserIds } from '@/app/api/tickets/work-items/[id]/comments/route';
+import { extractMentionUserIds } from '@/lib/mentions';
 
 // The Tiptap Mention extension serializes a mention as:
 //   <span data-type="mention" data-id="123" data-label="Name">@Name</span>
