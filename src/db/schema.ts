@@ -354,6 +354,17 @@ export const workItemComments = pgTable('work_item_comments', {
   index('work_item_comments_work_item_idx').on(t.workItemId),
 ]);
 
+export const projectComments = pgTable('project_comments', {
+  id:         serial('id').primaryKey(),
+  projectId:  integer('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  authorId:   integer('author_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  body:       text('body').notNull(),
+  createdAt:  text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt:  text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  index('project_comments_project_idx').on(t.projectId),
+]);
+
 export const labels = pgTable('labels', {
   id:        serial('id').primaryKey(),
   projectId: integer('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
