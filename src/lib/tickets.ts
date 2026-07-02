@@ -575,6 +575,72 @@ export async function getComment(commentId: string): Promise<{ id: number; autho
   return { id: Number(data.id), author_id: Number(data.author_id), work_item_id: Number(data.work_item_id) };
 }
 
+// ── Project Comments ───────────────────────────────────────────────────
+
+export interface ProjectComment {
+  id: number;
+  project_id: number;
+  author_id: number;
+  author_name: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function getProjectComments(projectId: string): Promise<ProjectComment[]> {
+  const sb = createAdminClient();
+  const { data, error } = await sb.from('project_comments')
+    .select('id, project_id, author_id, body, created_at, updated_at, users(name)')
+    .eq('project_id', Number(projectId))
+    .order('created_at');
+  if (error) throw new PlaneApiError(500, `project-comments/${projectId}`);
+  return (data ?? []).map((r: Row) => ({
+    id: Number(r.id),
+    project_id: Number(r.project_id),
+    author_id: Number(r.author_id),
+    author_name: String((r.users as Row | null)?.name ?? 'Unknown'),
+    body: String(r.body),
+    created_at: String(r.created_at),
+    updated_at: String(r.updated_at),
+  }));
+}
+
+export async function createProjectComment(projectId: string, authorId: number, body: string): Promise<ProjectComment> {
+  const sb = createAdminClient();
+  const { data, error } = await sb.from('project_comments').insert({
+    project_id: Number(projectId),
+    author_id: authorId,
+    body,
+  }).select('id').single();
+  if (error || !data) throw new PlaneApiError(502, `project-comments create`);
+  const all = await getProjectComments(projectId);
+  const found = all.find(c => c.id === Number(data.id));
+  if (!found) throw new PlaneApiError(502, `project-comments readback`);
+  return found;
+}
+
+export async function updateProjectComment(commentId: string, body: string): Promise<void> {
+  const sb = createAdminClient();
+  const { error } = await sb.from('project_comments')
+    .update({ body, updated_at: new Date().toISOString() })
+    .eq('id', Number(commentId));
+  if (error) throw new PlaneApiError(502, `project-comments/${commentId}`);
+}
+
+export async function deleteProjectComment(commentId: string): Promise<void> {
+  const sb = createAdminClient();
+  const { error } = await sb.from('project_comments').delete().eq('id', Number(commentId));
+  if (error) throw new PlaneApiError(502, `project-comments/${commentId}`);
+}
+
+export async function getProjectComment(commentId: string): Promise<{ id: number; author_id: number; project_id: number } | null> {
+  const sb = createAdminClient();
+  const { data } = await sb.from('project_comments')
+    .select('id, author_id, project_id').eq('id', Number(commentId)).maybeSingle();
+  if (!data) return null;
+  return { id: Number(data.id), author_id: Number(data.author_id), project_id: Number(data.project_id) };
+}
+
 // ── Labels ──────────────────────────────────────────────────────────────
 
 export interface Label {
