@@ -3,7 +3,7 @@ import { getSession } from '@/lib/session';
 import { getProjectCaps } from '@/lib/permissions';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
-import { AlertCircle, Settings } from 'lucide-react';
+import { AlertCircle, MessageSquare, Settings } from 'lucide-react';
 import { KanbanBoard } from '@/components/kanban-board';
 
 const EXCLUDED_GROUPS = new Set(['cancelled', 'canceled']);
@@ -60,14 +60,22 @@ export default async function ProjectBoardPage({
             {!loadError && ' · Scroll sideways to review states · Drag cards to move them'}
           </p>
         </div>
-        {caps.canManage && (
+        <div className="flex items-center gap-2">
           <Link
-            href={`/projects/${id}/settings`}
+            href={`/projects/${id}/discussion`}
             className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm text-(--rs-neutral-grey-600) transition-colors hover:border-(--rs-primary-300) hover:text-(--rs-primary-700)"
           >
-            <Settings className="w-3.5 h-3.5" /> Settings
+            <MessageSquare className="w-3.5 h-3.5" /> Discussion
           </Link>
-        )}
+          {caps.canManage && (
+            <Link
+              href={`/projects/${id}/settings`}
+              className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm text-(--rs-neutral-grey-600) transition-colors hover:border-(--rs-primary-300) hover:text-(--rs-primary-700)"
+            >
+              <Settings className="w-3.5 h-3.5" /> Settings
+            </Link>
+          )}
+        </div>
       </div>
 
       {loadError && (
