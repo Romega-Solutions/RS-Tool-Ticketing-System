@@ -222,4 +222,42 @@ describe('route hardening coverage', () => {
     expect(await res.json()).toEqual({ error: 'Forbidden' });
     expect(getProjectComments).not.toHaveBeenCalled();
   });
+
+  it('project comment update is blocked for a non-author, non-admin user', async () => {
+    const updateProjectComment = vi.fn();
+    mockSession(user({ id: 11, role: 'ic' }));
+    vi.doMock('@/lib/tickets', () => ({
+      getProjectComment: vi.fn().mockResolvedValue({ id: 5, author_id: 99, project_id: 7 }),
+      updateProjectComment,
+    }));
+
+    const { PATCH } = await import('@/app/api/tickets/projects/[projectId]/comments/[commentId]/route');
+    const res = await PATCH(
+      jsonReq('PATCH', { body: 'edited' }),
+      { params: Promise.resolve({ projectId: '7', commentId: '5' }) },
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'Forbidden' });
+    expect(updateProjectComment).not.toHaveBeenCalled();
+  });
+
+  it('project comment delete is blocked for a non-author, non-admin user', async () => {
+    const deleteProjectComment = vi.fn();
+    mockSession(user({ id: 11, role: 'ic' }));
+    vi.doMock('@/lib/tickets', () => ({
+      getProjectComment: vi.fn().mockResolvedValue({ id: 5, author_id: 99, project_id: 7 }),
+      deleteProjectComment,
+    }));
+
+    const { DELETE } = await import('@/app/api/tickets/projects/[projectId]/comments/[commentId]/route');
+    const res = await DELETE(
+      jsonReq('DELETE', {}),
+      { params: Promise.resolve({ projectId: '7', commentId: '5' }) },
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'Forbidden' });
+    expect(deleteProjectComment).not.toHaveBeenCalled();
+  });
 });
