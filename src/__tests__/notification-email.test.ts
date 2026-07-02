@@ -120,9 +120,9 @@ describe('renderNotificationEmail', () => {
     // Exactly one CTA anchor.
     expect((r.html.match(/Open in Romega Portal/g) ?? []).length).toBe(1);
     // Absolute deep link (never localhost).
-    expect(r.html).toContain('https://rs-tool-ticketing-system.vercel.app/projects/3?task=42');
+    expect(r.html).toContain('https://portal.romega-solutions.com/projects/3?task=42');
     expect(r.text).toContain('Priority: High');
-    expect(r.text).toContain('Open in Romega Portal: https://rs-tool-ticketing-system.vercel.app/projects/3?task=42');
+    expect(r.text).toContain('Open in Romega Portal: https://portal.romega-solutions.com/projects/3?task=42');
   });
 
   it('builds a non-task email (no task box) from title/body/link', () => {
@@ -133,7 +133,7 @@ describe('renderNotificationEmail', () => {
     });
     expect(r.html).not.toContain('Priority');
     expect(r.html).toContain('Open in Romega Portal');
-    expect(r.html).toContain('https://rs-tool-ticketing-system.vercel.app/projects/7');
+    expect(r.html).toContain('https://portal.romega-solutions.com/projects/7');
   });
 
   it('escapes hostile task content (no raw markup injection)', () => {

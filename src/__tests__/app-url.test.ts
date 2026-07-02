@@ -24,8 +24,8 @@ describe('publicBaseUrl — base for links in outbound email', () => {
   });
 
   it('uses an explicit non-localhost env URL, trimming any trailing slash', () => {
-    process.env.APP_BASE_URL = 'https://rs-tool-ticketing-system.vercel.app/';
-    expect(publicBaseUrl()).toBe('https://rs-tool-ticketing-system.vercel.app');
+    process.env.APP_BASE_URL = 'https://portal.romega-solutions.com/';
+    expect(publicBaseUrl()).toBe('https://portal.romega-solutions.com');
   });
 
   it('never returns a 127.0.0.1 URL', () => {

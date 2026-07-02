@@ -10,9 +10,9 @@ That route exchanges the Supabase auth code for a session, creates the `public.u
 
 For the current deployment, use:
 
-- App base URL: `https://rs-tool-ticketing-system.vercel.app`
-- Auth callback URL: `https://rs-tool-ticketing-system.vercel.app/auth/callback`
-- Example protected app page: `https://rs-tool-ticketing-system.vercel.app/attendance`
+- App base URL: `https://portal.romega-solutions.com`
+- Auth callback URL: `https://portal.romega-solutions.com/auth/callback`
+- Example protected app page: `https://portal.romega-solutions.com/attendance`
 
 ## Supabase Dashboard settings
 
@@ -25,7 +25,7 @@ Set these values:
 1. `Site URL`
 
 ```text
-https://rs-tool-ticketing-system.vercel.app
+https://portal.romega-solutions.com
 ```
 
 2. `Redirect URLs`
@@ -33,7 +33,7 @@ https://rs-tool-ticketing-system.vercel.app
 Add at least these:
 
 ```text
-https://rs-tool-ticketing-system.vercel.app/auth/callback
+https://portal.romega-solutions.com/auth/callback
 http://localhost:3000/auth/callback
 ```
 
@@ -52,7 +52,7 @@ emailRedirectTo: `${window.location.origin}/auth/callback`
 That means:
 
 - local sign-up sends users to `http://localhost:3000/auth/callback`
-- production sign-up sends users to `https://rs-tool-ticketing-system.vercel.app/auth/callback`
+- production sign-up sends users to `https://portal.romega-solutions.com/auth/callback`
 
 Both must be valid in Supabase.
 
@@ -61,7 +61,7 @@ Both must be valid in Supabase.
 In production, your app env should also match the deployed domain:
 
 ```env
-NEXT_PUBLIC_BASE_URL=https://rs-tool-ticketing-system.vercel.app
+NEXT_PUBLIC_BASE_URL=https://portal.romega-solutions.com
 ```
 
 This is used for app metadata and should stay aligned with the real deployment URL.

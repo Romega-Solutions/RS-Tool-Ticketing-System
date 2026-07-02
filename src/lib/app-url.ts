@@ -2,7 +2,7 @@
 // be externally clickable — never a localhost dev URL. An explicit non-localhost
 // env override wins; an empty or localhost value falls back to the canonical
 // production URL (see [[project_canonical_prod_url]]).
-export const CANONICAL_BASE_URL = 'https://rs-tool-ticketing-system.vercel.app';
+export const CANONICAL_BASE_URL = 'https://portal.romega-solutions.com';
 
 export function publicBaseUrl(): string {
   const raw = (process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_BASE_URL || '')

@@ -652,6 +652,7 @@ export function TaskDetailSheet({
                     onChange={setDescription}
                     placeholder="Add a description…"
                     bodyClassName={`overflow-y-auto ${isWide ? 'max-h-[60vh] min-h-[220px]' : 'min-h-[120px]'}`}
+                    enableEmoji
                   />
                 ) : isRichTextEmpty(description) ? (
                   <p className="text-sm italic text-(--rs-neutral-grey-400)">No description</p>

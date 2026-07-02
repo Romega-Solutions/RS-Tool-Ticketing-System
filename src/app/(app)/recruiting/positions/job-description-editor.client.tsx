@@ -7,7 +7,8 @@ import { RichTextEditor } from '@/components/rich-text-editor.client';
  * {@link RichTextEditor} that keeps a hidden input named `name` synced to the
  * editor's HTML, so it submits through the existing server-action FormData flow
  * (the action sanitizes it before storing). Behavior is unchanged: bold, italic,
- * underline, strikethrough, lists, and font-size — no mentions or emoji.
+ * underline, strikethrough, lists, font-size, and emoji — no mentions (no user
+ * list to tag on a public-facing job description).
  */
 export function JobDescriptionEditor({
   name, defaultValue, bodyClassName,
@@ -25,6 +26,7 @@ export function JobDescriptionEditor({
       defaultValue={defaultValue}
       bodyClassName={bodyClassName}
       placeholder="Responsibilities, requirements, and any other context candidates should know…"
+      enableEmoji
     />
   );
 }
