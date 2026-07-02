@@ -374,9 +374,13 @@ export const PATCH = route(async (req: Request) => {
 
   if (!body.id) return NextResponse.json({ error: 'id is required' }, { status: 400 });
 
-  // Admins cannot modify their own account through this endpoint
+  // Admins can change their own role here; every other field on their own
+  // account still must go through the profile page.
   if (body.id === session.id) {
-    return NextResponse.json({ error: 'Use the profile page to edit your own account' }, { status: 403 });
+    const otherFieldsPresent = Object.keys(body).some((k) => k !== 'id' && k !== 'role');
+    if (otherFieldsPresent || body.role === undefined) {
+      return NextResponse.json({ error: 'You can only change your own role here — use the profile page for other fields' }, { status: 403 });
+    }
   }
 
   if (body.role !== undefined && !VALID_ROLES.has(body.role)) {

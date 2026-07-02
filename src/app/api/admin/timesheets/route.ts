@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { computeOvertime } from '@/lib/utils';
 import { weeklySecondsForUser, baseWeeklySecondsForUser } from '@/lib/overtime-server';
-import { route, requireAdmin, requireReports } from '@/lib/api';
+import { route, requireAdmin, requireTool } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -22,9 +22,11 @@ function toLocalISO(d: Date): string {
 
 // GET /api/admin/timesheets?userId=X&week=YYYY-MM-DD
 // Returns all clock-in/out sessions for a specific user for that week.
-// Lead can only view their own team; admin can view anyone.
+// Gated the same way as the Attendance page/roster fetch: the per-user
+// Attendance checkbox (requireTool), not a hardcoded lead/admin role.
+// Non-admins can only view their own team (checked below).
 export const GET = route(async (req: Request) => {
-  const session = await requireReports();
+  const session = await requireTool('attendance');
 
   const { searchParams } = new URL(req.url);
   const userIdParam = searchParams.get('userId');

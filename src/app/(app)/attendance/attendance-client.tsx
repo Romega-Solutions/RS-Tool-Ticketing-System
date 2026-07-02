@@ -779,7 +779,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
       name: user.name,
       memberCode: user.memberCode ?? '',
       daySeconds,
-      weekSeconds: daySeconds.reduce((a, b) => a + b, 0),
+      periodSeconds: daySeconds.reduce((a, b) => a + b, 0),
       hourlyRateUsd: user.hourlyRateUsd ?? null,
     };
   });
@@ -788,16 +788,17 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
   const weeklyWiseAmounts: Record<string, number | null> = Object.fromEntries(
     timesheetMemberRows.map(r => [
       r.name,
-      r.hourlyRateUsd != null ? (r.weekSeconds / 3600) * r.hourlyRateUsd : null,
+      r.hourlyRateUsd != null ? (r.periodSeconds / 3600) * r.hourlyRateUsd : null,
     ]),
   );
   const timesheetMeta = {
-    weekRangeLabel:
+    rangeLabel:
       `${monday.getDate()} ${monday.toLocaleDateString('en-US', { month: 'short' })} ${monday.getFullYear()}`
       + ` - ${sunday.getDate()} ${sunday.toLocaleDateString('en-US', { month: 'short' })} ${sunday.getFullYear()}`,
     dayDateLabels: DAY_KEYS.map((_, i) =>
       new Date(monday.getTime() + i * 86400000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     ),
+    dayOfWeekLabels: DAY_KEYS.map(k => DAY_LABELS[k]),
   };
 
   const monthlyExportRows = monthlySummary.map(row => ({

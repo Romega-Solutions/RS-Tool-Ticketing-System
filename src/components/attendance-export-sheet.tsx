@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Sheet,
   SheetClose,
@@ -19,9 +19,13 @@ import {
   rowsToMarkdown,
   buildTimesheetCsv,
   buildWiseCsv,
+  buildCustomRangeExport,
+  isValidDateRange,
   type ExportRow,
   type TimesheetMemberRow,
   type TimesheetMeta,
+  type CustomRangeApiUser,
+  type CustomRangeExport,
 } from '@/lib/export-utils';
 
 type ExportFormat = 'csv' | 'md' | 'json';
@@ -59,6 +63,11 @@ const DURATION_LABEL: Record<DurationFormat, string> = {
 
 const DURATION_KEYS_WEEKLY  = ['saturday_hours', 'sunday_hours', 'week_total_hours'] as const;
 const DURATION_KEYS_MONTHLY = ['total_hours'] as const;
+const DURATION_KEYS_CUSTOM  = ['period_total_hours'] as const;
+
+// Stable reference so the `?? EMPTY_ROWS` fallback below doesn't create a new
+// array every render (which would defeat the useMemo hooks that depend on it).
+const EMPTY_ROWS: ExportRow[] = [];
 
 function reformatDurationCell(value: string, target: DurationFormat): string {
   if (target === 'human') return value;
@@ -88,9 +97,74 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
   // Set<string> ⇒ user has made a custom selection.
   const [customSelection, setCustomSelection]     = useState<Set<string> | null>(null);
 
+  // Custom Start–End range — independent of whatever week/month the page
+  // behind this sheet is currently showing. `page` (default) uses the props
+  // as-is; `custom` fetches its own data for the exact picked range.
+  const [rangeMode, setRangeMode]       = useState<'page' | 'custom'>('page');
+  const [rangeStart, setRangeStart]     = useState('');
+  const [rangeEnd, setRangeEnd]         = useState('');
+  const [rangeLoading, setRangeLoading] = useState(false);
+  const [rangeError, setRangeError]     = useState('');
+  const [rangeData, setRangeData]       = useState<CustomRangeExport | null>(null);
+
+  // Loading state is set by the handlers below (updateRangeStart/updateRangeEnd/
+  // selectCustomRangeMode) right before a dependency change they know will
+  // trigger this effect — mirrors changeWeekOffset's pattern on the page.
+  // The effect itself only ever setStates from inside the fetch's callbacks.
+  useEffect(() => {
+    if (rangeMode !== 'custom' || !isValidDateRange(rangeStart, rangeEnd)) return;
+
+    let cancelled = false;
+    fetch(`/api/attendance?start=${rangeStart}&end=${rangeEnd}`)
+      .then(r => r.json())
+      .then((d: { users?: CustomRangeApiUser[]; timesheetsByDay?: Record<string, number>; error?: string }) => {
+        if (cancelled) return;
+        if (d.error) { setRangeError(d.error); return; }
+        setRangeData(buildCustomRangeExport(rangeStart, rangeEnd, d.users ?? [], d.timesheetsByDay ?? {}));
+      })
+      .catch(() => { if (!cancelled) setRangeError('Failed to load data for this range.'); })
+      .finally(() => { if (!cancelled) setRangeLoading(false); });
+    return () => { cancelled = true; };
+  }, [rangeMode, rangeStart, rangeEnd]);
+
+  // Only arms the loading/error reset when the change will actually cause the
+  // effect above to re-fetch — avoids a stuck spinner if a picker re-fires the
+  // same value, or the sheet is already sitting in custom mode.
+  function selectCustomRangeMode() {
+    if (rangeMode !== 'custom' && isValidDateRange(rangeStart, rangeEnd)) {
+      setRangeLoading(true);
+      setRangeError('');
+    }
+    setRangeMode('custom');
+  }
+  function updateRangeStart(value: string) {
+    if (value !== rangeStart && isValidDateRange(value, rangeEnd)) {
+      setRangeLoading(true);
+      setRangeError('');
+    }
+    setRangeStart(value);
+  }
+  function updateRangeEnd(value: string) {
+    if (value !== rangeEnd && isValidDateRange(rangeStart, value)) {
+      setRangeLoading(true);
+      setRangeError('');
+    }
+    setRangeEnd(value);
+  }
+
+  // In custom mode, never fall back to the page's props — until rangeData has
+  // loaded for the picked dates, the exportable set is genuinely empty rather
+  // than silently reusing whatever week/month the page behind the sheet is on.
+  const effectiveRows                 = rangeMode === 'custom' ? (rangeData?.rows ?? EMPTY_ROWS) : rows;
+  const effectiveTimesheet            = rangeMode === 'custom' ? rangeData?.timesheet     : timesheet;
+  const effectiveWiseAmounts          = rangeMode === 'custom' ? (rangeData?.wiseAmounts ?? {}) : wiseAmounts;
+  const effectiveRangeLabel           = rangeMode === 'custom' ? (rangeData?.rangeLabel ?? 'Pick a custom range') : rangeLabel;
+  const effectiveJsonMeta             = rangeMode === 'custom' ? rangeData?.jsonMeta      : jsonMeta;
+  const effectiveWisePaymentReference = rangeMode === 'custom' ? rangeData?.wisePaymentReference : wisePaymentReference;
+
   const allMembers = useMemo(
-    () => Array.from(new Set(rows.map(r => String(r.member ?? '')).filter(Boolean))).sort(),
-    [rows],
+    () => Array.from(new Set(effectiveRows.map(r => String(r.member ?? '')).filter(Boolean))).sort(),
+    [effectiveRows],
   );
 
   const selectedMembers = useMemo(
@@ -102,10 +176,11 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
   const triggerLabel = mode === 'weekly' ? 'Export Week' : 'Export Month';
   const sheetTitle   = mode === 'weekly' ? 'Export Weekly Attendance Data' : 'Export Monthly Attendance Data';
 
-  const durationKeys: readonly string[] = mode === 'weekly' ? DURATION_KEYS_WEEKLY : DURATION_KEYS_MONTHLY;
+  const durationKeys: readonly string[] =
+    rangeMode === 'custom' ? DURATION_KEYS_CUSTOM : mode === 'weekly' ? DURATION_KEYS_WEEKLY : DURATION_KEYS_MONTHLY;
 
   const filteredRows = useMemo(() => {
-    let out = rows.filter(r => selectedMembers.has(String(r.member ?? '')));
+    let out = effectiveRows.filter(r => selectedMembers.has(String(r.member ?? '')));
 
     out = out.map(r => {
       const next: ExportRow = {};
@@ -128,15 +203,15 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
     });
 
     return out;
-  }, [rows, mode, includeNotes, includeWeekendHours, includeTotals, durationFormat, selectedMembers, durationKeys]);
+  }, [effectiveRows, mode, includeNotes, includeWeekendHours, includeTotals, durationFormat, selectedMembers, durationKeys]);
 
   // Templates only apply to CSV; Markdown/JSON always use the standard shape.
   const activeTemplate: CsvTemplate = format === 'csv' ? csvTemplate : 'standard';
-  const canTimesheet = mode === 'weekly' && !!timesheet;
+  const canTimesheet = !!effectiveTimesheet;
 
   const selectedTimesheetRows = useMemo(
-    () => (timesheet ? timesheet.rows.filter(r => selectedMembers.has(r.name)) : []),
-    [timesheet, selectedMembers],
+    () => (effectiveTimesheet ? effectiveTimesheet.rows.filter(r => selectedMembers.has(r.name)) : []),
+    [effectiveTimesheet, selectedMembers],
   );
   const selectedMemberNames = useMemo(
     () => allMembers.filter(m => selectedMembers.has(m)),
@@ -155,9 +230,9 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
   function buildAndDownload() {
     const dateSuffix = new Date().toISOString().slice(0, 10);
 
-    if (format === 'csv' && activeTemplate === 'timesheet' && timesheet) {
+    if (format === 'csv' && activeTemplate === 'timesheet' && effectiveTimesheet) {
       downloadTextFile(
-        buildTimesheetCsv(selectedTimesheetRows, timesheet.meta, fx),
+        buildTimesheetCsv(selectedTimesheetRows, effectiveTimesheet.meta, fx),
         `${baseName}_timesheet_${dateSuffix}.csv`,
         'text/csv',
       );
@@ -166,10 +241,10 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
     if (format === 'csv' && activeTemplate === 'wise') {
       const recipients = selectedMemberNames.map(name => ({
         name,
-        amountUsd: wiseAmounts?.[name] ?? null,
+        amountUsd: effectiveWiseAmounts?.[name] ?? null,
       }));
       downloadTextFile(
-        buildWiseCsv(recipients, { paymentReference: wisePaymentReference ?? rangeLabel }),
+        buildWiseCsv(recipients, { paymentReference: effectiveWisePaymentReference ?? effectiveRangeLabel }),
         `${baseName}_wise_${dateSuffix}.csv`,
         'text/csv',
       );
@@ -182,7 +257,7 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
     } else if (format === 'md') {
       downloadTextFile(rowsToMarkdown(filteredRows), filename, 'text/markdown');
     } else {
-      const payload = { ...(jsonMeta ?? {}), rows: filteredRows };
+      const payload = { ...(effectiveJsonMeta ?? {}), rows: filteredRows };
       downloadTextFile(JSON.stringify(payload, null, 2), filename, 'application/json');
     }
   }
@@ -236,7 +311,7 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
             {sheetTitle}
           </SheetTitle>
           <SheetDescription className="text-xs text-(--rs-neutral-grey-500)">
-            {rangeLabel}
+            {effectiveRangeLabel}
           </SheetDescription>
         </SheetHeader>
 
@@ -285,27 +360,32 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
                   className="w-full appearance-none rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 pr-8 text-sm text-(--rs-neutral-grey-900) hover:border-(--rs-neutral-grey-300) focus:outline-none focus:border-(--rs-primary-500) focus:ring-2 focus:ring-(--rs-primary-100)"
                 >
                   <option value="standard">Standard (one row per member)</option>
-                  {canTimesheet && <option value="timesheet">Weekly Timesheet — Romega payroll layout</option>}
+                  {canTimesheet && (
+                    <option value="timesheet">
+                      {rangeMode === 'custom' ? 'Timesheet' : 'Weekly Timesheet'} — Romega payroll layout
+                    </option>
+                  )}
                   <option value="wise">Wise payout — Selected-recipients template</option>
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-(--rs-neutral-grey-400)" />
               </div>
               {activeTemplate === 'timesheet' && (
                 <p className="text-[11px] text-(--rs-neutral-grey-400)">
-                  Per-day clocked hours Mon–Sun with totals footer. RATE/GROSS use each member’s USD rate (blank if no rate set)
+                  Per-day clocked hours with totals footer. RATE/GROSS use each member’s USD rate (blank if no rate set)
                   {fx ? `, plus live PHP columns at ₱${fx.rate.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/$1.` : '. (Live PHP rate unavailable — USD only.)'}
                 </p>
               )}
               {activeTemplate === 'wise' && (
                 <p className="text-[11px] text-(--rs-neutral-grey-400)">
-                  Wise upload — amount is the computed USD gross (hours × rate); blank if no rate set. recipientId stays blank — confirm recipients before sending. Reference: “{wisePaymentReference ?? rangeLabel}”.
+                  Wise upload — amount is the computed USD gross (hours × rate); blank if no rate set. recipientId stays blank — confirm recipients before sending. Reference: “{effectiveWisePaymentReference ?? effectiveRangeLabel}”.
                 </p>
               )}
             </section>
           )}
 
-          {/* Include (optional) */}
-          {activeTemplate === 'standard' && (
+          {/* Include (optional) — custom-range rows only ever carry a period
+              total, so these per-weekday toggles have nothing to act on there. */}
+          {activeTemplate === 'standard' && rangeMode === 'page' && (
           <section className="space-y-2.5">
             <h3 className="text-sm font-semibold text-(--rs-neutral-grey-800)">Include (optional)</h3>
             <div className="space-y-2">
@@ -332,20 +412,88 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
           </section>
           )}
 
-          {/* Date range (read-only display) */}
+          {/* Date range */}
           <section className="space-y-2.5">
             <h3 className="text-sm font-semibold text-(--rs-neutral-grey-800)">Date range</h3>
-            <div className="rounded-md border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-3 py-2.5">
-              <div className="text-[10px] font-bold uppercase tracking-wide text-(--rs-neutral-grey-400)">
-                {mode === 'weekly' ? 'Week' : 'Month'}
-              </div>
-              <div className="text-sm font-medium text-(--rs-neutral-grey-900) mt-0.5">
-                {rangeLabel}
-              </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setRangeMode('page')}
+                className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  rangeMode === 'page'
+                    ? 'border-(--rs-primary-500) bg-(--rs-primary-50) text-(--rs-primary-700)'
+                    : 'border-(--rs-neutral-grey-200) bg-white text-(--rs-neutral-grey-600) hover:border-(--rs-neutral-grey-300)'
+                }`}
+              >
+                {mode === 'weekly' ? 'This week' : 'This month'}
+              </button>
+              <button
+                type="button"
+                onClick={selectCustomRangeMode}
+                className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  rangeMode === 'custom'
+                    ? 'border-(--rs-primary-500) bg-(--rs-primary-50) text-(--rs-primary-700)'
+                    : 'border-(--rs-neutral-grey-200) bg-white text-(--rs-neutral-grey-600) hover:border-(--rs-neutral-grey-300)'
+                }`}
+              >
+                Custom range
+              </button>
             </div>
-            <p className="text-[11px] text-(--rs-neutral-grey-400)">
-              Change the range from the {mode === 'weekly' ? 'week' : 'month'} navigator on the page.
-            </p>
+
+            {rangeMode === 'page' ? (
+              <>
+                <div className="rounded-md border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-3 py-2.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-(--rs-neutral-grey-400)">
+                    {mode === 'weekly' ? 'Week' : 'Month'}
+                  </div>
+                  <div className="text-sm font-medium text-(--rs-neutral-grey-900) mt-0.5">
+                    {rangeLabel}
+                  </div>
+                </div>
+                <p className="text-[11px] text-(--rs-neutral-grey-400)">
+                  Change the range from the {mode === 'weekly' ? 'week' : 'month'} navigator on the page, or pick Custom range above.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <label className="block">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-(--rs-neutral-grey-400)">Start</span>
+                    <input
+                      type="date"
+                      value={rangeStart}
+                      max={rangeEnd || undefined}
+                      onChange={e => updateRangeStart(e.target.value)}
+                      className="mt-0.5 w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-1.5 text-sm text-(--rs-neutral-grey-900) focus:outline-none focus:border-(--rs-primary-500) focus:ring-2 focus:ring-(--rs-primary-100)"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-(--rs-neutral-grey-400)">End</span>
+                    <input
+                      type="date"
+                      value={rangeEnd}
+                      min={rangeStart || undefined}
+                      onChange={e => updateRangeEnd(e.target.value)}
+                      className="mt-0.5 w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-1.5 text-sm text-(--rs-neutral-grey-900) focus:outline-none focus:border-(--rs-primary-500) focus:ring-2 focus:ring-(--rs-primary-100)"
+                    />
+                  </label>
+                </div>
+                {rangeStart && rangeEnd && !isValidDateRange(rangeStart, rangeEnd) && (
+                  <p className="text-[11px] text-red-600">End date must be on or after the start date.</p>
+                )}
+                {rangeLoading && (
+                  <p className="text-[11px] text-(--rs-neutral-grey-400) flex items-center gap-1.5">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Loading data for this range…
+                  </p>
+                )}
+                {rangeError && isValidDateRange(rangeStart, rangeEnd) && (
+                  <p className="text-[11px] text-red-600">{rangeError}</p>
+                )}
+                {(!rangeStart || !rangeEnd) && (
+                  <p className="text-[11px] text-(--rs-neutral-grey-400)">Pick a start and end date to export.</p>
+                )}
+              </>
+            )}
           </section>
 
           {/* Filter by — Members */}
@@ -443,7 +591,7 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
           <Button
             size="sm"
             onClick={handleExport}
-            disabled={disabled || exporting}
+            disabled={disabled || exporting || rangeLoading}
             className="bg-(--rs-accent-500) text-white hover:bg-(--rs-accent-600)"
           >
             {exporting

@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getPhotoResolver } from '@/lib/orgchart';
-import { route, requireAdmin, requireReports, parseBody, badRequest } from '@/lib/api';
+import { route, requireAdmin, requireTool, parseBody, badRequest } from '@/lib/api';
 import { WEEKLY_CAP_SECONDS } from '@/lib/utils';
+import { isValidDateRange } from '@/lib/export-utils';
 
 export const runtime = 'nodejs';
 
@@ -98,10 +99,54 @@ type AttendanceRow = {
 };
 
 export const GET = route(async (req: Request) => {
-  const session = await requireReports();
+  // Same gate as the page itself (src/app/(app)/attendance/page.tsx): the
+  // per-user Attendance checkbox, not a hardcoded lead/admin role check —
+  // otherwise a checkbox-granted IC/intern can open the page but the team
+  // roster/records fetch below 403s.
+  const session = await requireTool('attendance');
 
   const { searchParams } = new URL(req.url);
+
+  // Custom range (payroll export) — validated before touching the DB so a bad
+  // range fails fast without needing a configured Supabase client.
+  const startParam = searchParams.get('start');
+  const endParam = searchParams.get('end');
+  if (startParam || endParam) {
+    if (!startParam || !endParam || !isValidDateRange(startParam, endParam)) {
+      throw badRequest('start and end must both be valid YYYY-MM-DD dates, with end on or after start');
+    }
+  }
+
   const admin = createAdminClient();
+
+  if (startParam && endParam) {
+    let usersQuery = admin.from('users').select('id, name, email, team, role, member_code, hourly_rate_usd').eq('is_active', 1);
+    if (session.role !== 'admin') {
+      usersQuery = usersQuery.eq('team', session.team ?? '');
+    }
+    const { data: teamUsersData } = await usersQuery;
+    const teamUsers = (teamUsersData ?? []) as { id: number; name: string; email: string | null; team: string | null; role: string; member_code: string | null; hourly_rate_usd: number | string | null }[];
+    const userIds = teamUsers.map(u => u.id);
+
+    const { data: tsData } = userIds.length > 0
+      ? await admin.from('timesheets').select('user_id, date, duration_seconds')
+          .in('user_id', userIds).gte('date', startParam).lte('date', endParam).not('duration_seconds', 'is', null)
+      : { data: [] as { user_id: number; date: string; duration_seconds: number }[] };
+
+    const timesheetsByDay: Record<string, number> = {};
+    for (const ts of (tsData ?? []) as { user_id: number; date: string; duration_seconds: number }[]) {
+      const key = `${ts.user_id}:${ts.date}`;
+      timesheetsByDay[key] = (timesheetsByDay[key] ?? 0) + ts.duration_seconds;
+    }
+
+    const usersOut = teamUsers.map(u => ({
+      id: u.id, name: u.name, team: u.team, role: u.role,
+      memberCode: u.member_code ?? null,
+      hourlyRateUsd: u.hourly_rate_usd == null ? null : Number(u.hourly_rate_usd),
+    }));
+
+    return NextResponse.json({ start: startParam, end: endParam, users: usersOut, timesheetsByDay });
+  }
 
   const monthParam = searchParams.get('month');
   if (monthParam) {

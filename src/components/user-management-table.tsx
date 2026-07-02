@@ -348,6 +348,30 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
     }
   };
 
+  // Self-edit is role-only — the API rejects any other field on your own
+  // account (see admin/users/route.ts), so this sends just { id, role }.
+  const saveOwnRole = async () => {
+    if (!profileUser) return;
+    const userId = profileUser.id;
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: userId, role: editForm.role }),
+      });
+      const data = (await res.json()) as { user?: UserRow; error?: string };
+      if (!res.ok) { setError(data.error ?? 'Failed to save'); return; }
+      if (data.user) setUserList(prev => prev.map(u => u.id === userId ? data.user! : u));
+      setProfileUser(null);
+    } catch {
+      setError('Request failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Soft remove (deactivate) or restore via the partial PATCH endpoint.
   const setActive = async (user: UserRow, active: boolean) => {
     setTogglingActive(true);
@@ -829,7 +853,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       <Dialog open={profileUser !== null} onOpenChange={(o) => { if (!o) closeProfile(); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           {profileUser && (() => {
-            // The admin endpoint refuses self-edits, so your own row is read-only.
+            // Self-edits are role-only — the API rejects every other field on
+            // your own account (see admin/users/route.ts).
             const isSelf = currentUserId === profileUser.id;
             const pst = pstLabel(
               isSelf ? profileUser.schedulePhtStart : (editForm.schedulePhtStart || null),
@@ -846,10 +871,20 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                   )}
                 </DialogHeader>
 
+                {error && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2.5 rounded-lg text-sm">{error}</div>
+                )}
+
                 {isSelf ? (
                   <>
                     <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                      <ProfileField label="Role" value={roleDisplayLabel(profileUser.role)} />
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-(--rs-neutral-grey-400) mb-1">Role</p>
+                        <select value={editForm.role} onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))}
+                          aria-label="Your role" className={inputCls}>
+                          {ROLE_OPTIONS.map(r => <option key={r} value={r}>{roleDisplayLabel(r)}</option>)}
+                        </select>
+                      </div>
                       <ProfileField label="Team" value={profileUser.team ?? '—'} />
                       <ProfileField label="Member Code" value={profileUser.memberCode ?? '—'} />
                       <ProfileField label="Approved Hours" value={`${profileUser.approvedHoursPerWeek} hrs`} />
@@ -861,16 +896,17 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                       <ProfileField label="End Date" value={profileUser.endDate ? fmtDate(profileUser.endDate) : '—'} />
                       <ProfileField label="Rate (USD/hr)" value={profileUser.hourlyRateUsd != null ? `$ ${formatUsd(profileUser.hourlyRateUsd)}` : '—'} />
                     </div>
-                    <p className="text-xs text-(--rs-neutral-grey-500)">Use the profile page to edit your own account.</p>
+                    <p className="text-xs text-(--rs-neutral-grey-500)">Only your role is editable here — use the profile page for everything else.</p>
                     <DialogFooter>
-                      <Button variant="ghost" onClick={closeProfile}>Close</Button>
+                      <Button variant="ghost" onClick={closeProfile} disabled={saving}>Cancel</Button>
+                      <Button onClick={saveOwnRole} disabled={saving || editForm.role === profileUser.role} className="gap-2">
+                        {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                        {saving ? 'Saving…' : 'Save'}
+                      </Button>
                     </DialogFooter>
                   </>
                 ) : (
                   <>
-                    {error && (
-                      <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2.5 rounded-lg text-sm">{error}</div>
-                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
                       <Field label="Role">
                         <select value={editForm.role} onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))} className={inputCls}>
