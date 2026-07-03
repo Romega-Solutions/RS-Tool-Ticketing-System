@@ -4,6 +4,14 @@ import { useMemo, useState, useTransition } from 'react';
 import { Mail, Search, Send, Users, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { sendBroadcastAction, type BroadcastActionState } from './actions';
 import type { BroadcastRecipient, BroadcastTarget } from '@/lib/broadcasts';
@@ -38,6 +46,7 @@ export function BroadcastCenter({ users }: Props) {
   const [inApp, setInApp] = useState(true);
   const [sendEmail, setSendEmail] = useState(true);
   const [result, setResult] = useState<BroadcastActionState | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const teams = useMemo(() => {
@@ -67,6 +76,16 @@ export function BroadcastCenter({ users }: Props) {
   const emailTargetCount = target === 'selected'
     ? users.filter(user => selectedSet.has(user.id) && user.email).length
     : users.filter(user => (target === 'all' || user.isActive) && user.email).length;
+  const selectedPreviewUsers = users.filter(user => selectedSet.has(user.id)).slice(0, 6);
+  const targetLabel = target === 'selected'
+    ? 'Selected users'
+    : target === 'all'
+      ? 'All users'
+      : 'Active users';
+  const deliveryLabel = [
+    inApp ? 'In-app notification' : null,
+    sendEmail ? 'Email through n8n' : null,
+  ].filter(Boolean).join(' + ');
 
   const toggleUser = (id: number) => {
     setSelectedIds((current) => (
@@ -82,6 +101,11 @@ export function BroadcastCenter({ users }: Props) {
   const clearSelected = () => {
     setSelectedIds([]);
     if (target === 'selected') setTarget('active');
+  };
+
+  const openPreview = () => {
+    setResult(null);
+    setPreviewOpen(true);
   };
 
   const submit = () => {
@@ -100,11 +124,13 @@ export function BroadcastCenter({ users }: Props) {
       if (next.ok) {
         setSubject('');
         setMessage('');
+        setPreviewOpen(false);
       }
     });
   };
 
   return (
+    <>
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
       <Card className="rounded-lg">
         <CardContent className="space-y-4">
@@ -289,14 +315,80 @@ export function BroadcastCenter({ users }: Props) {
           <Button
             type="button"
             className="w-full"
-            onClick={submit}
+            onClick={openPreview}
             disabled={isPending || !subject.trim() || !message.trim() || (!inApp && !sendEmail)}
           >
-            {isPending ? <Mail className="h-4 w-4 animate-pulse" /> : <Send className="h-4 w-4" />}
-            {isPending ? 'Sending...' : 'Send broadcast'}
+            <Send className="h-4 w-4" />
+            Preview broadcast
           </Button>
         </CardContent>
       </Card>
     </div>
+
+    <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+      <DialogContent className="max-h-[88vh] overflow-y-auto rounded-xl">
+        <DialogHeader>
+          <DialogTitle>Preview broadcast</DialogTitle>
+          <DialogDescription>
+            Review the announcement before sending it to the selected recipients.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-3 py-2">
+              <div className="text-xs font-semibold uppercase text-(--rs-neutral-grey-500)">Recipients</div>
+              <div className="mt-1 text-lg font-semibold text-(--rs-neutral-grey-900)">{targetCount}</div>
+              <div className="text-xs text-(--rs-neutral-grey-500)">{targetLabel}</div>
+            </div>
+            <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-3 py-2">
+              <div className="text-xs font-semibold uppercase text-(--rs-neutral-grey-500)">Email</div>
+              <div className="mt-1 text-lg font-semibold text-(--rs-neutral-grey-900)">{sendEmail ? emailTargetCount : 0}</div>
+              <div className="text-xs text-(--rs-neutral-grey-500)">Addresses available</div>
+            </div>
+            <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-3 py-2">
+              <div className="text-xs font-semibold uppercase text-(--rs-neutral-grey-500)">Delivery</div>
+              <div className="mt-1 text-sm font-semibold text-(--rs-neutral-grey-900)">{deliveryLabel}</div>
+            </div>
+          </div>
+
+          {target === 'selected' && (
+            <div className="rounded-lg border border-(--rs-neutral-grey-200) px-3 py-2">
+              <div className="text-xs font-semibold uppercase text-(--rs-neutral-grey-500)">Selected sample</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {selectedPreviewUsers.map(user => (
+                  <span key={user.id} className="rounded-full border border-(--rs-neutral-grey-200) bg-white px-2 py-1 text-xs text-(--rs-neutral-grey-700)">
+                    {user.name}
+                  </span>
+                ))}
+                {selectedIds.length > selectedPreviewUsers.length && (
+                  <span className="rounded-full border border-(--rs-neutral-grey-200) bg-white px-2 py-1 text-xs text-(--rs-neutral-grey-500)">
+                    +{selectedIds.length - selectedPreviewUsers.length} more
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-white p-4">
+            <div className="text-xs font-semibold uppercase text-(--rs-neutral-grey-500)">Subject</div>
+            <h3 className="mt-1 text-base font-semibold text-(--rs-neutral-grey-900)">{subject}</h3>
+            <div className="mt-4 text-xs font-semibold uppercase text-(--rs-neutral-grey-500)">Message</div>
+            <div className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-lg bg-(--rs-neutral-grey-50) p-3 text-sm leading-6 text-(--rs-neutral-grey-700)">
+              {message}
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={isPending} onClick={() => setPreviewOpen(false)}>Edit</Button>
+          <Button type="button" onClick={submit} disabled={isPending}>
+            {isPending ? <Mail className="h-4 w-4 animate-pulse" /> : <Send className="h-4 w-4" />}
+            {isPending ? 'Sending...' : 'Send now'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
