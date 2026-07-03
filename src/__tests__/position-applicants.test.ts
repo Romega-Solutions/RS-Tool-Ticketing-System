@@ -49,4 +49,14 @@ describe('position applicant matching', () => {
     expect(workflow).toContain('/recruiting/candidates/${body.candidateId}');
     expect(workflow).toContain('Application code: ${body.applicationCode}');
   });
+
+  it('does not load the full candidate list for one position applicants page', () => {
+    const page = readFileSync(
+      join(process.cwd(), 'src', 'app', '(app)', 'recruiting', 'positions', '[id]', 'applicants', 'page.tsx'),
+      'utf8',
+    );
+
+    expect(page).not.toContain('.limit(1000)');
+    expect(page).toContain(".eq('position_id', position.id)");
+  });
 });

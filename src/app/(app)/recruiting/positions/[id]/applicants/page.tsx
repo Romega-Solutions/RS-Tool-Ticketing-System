@@ -9,7 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { LeadToolHeader, StatCard } from '@/components/lead-tool-header';
 import { AtsTabs } from '../../../ats-tabs';
 import { CandidateDelete, CandidateRating, CandidateStatus } from '../../../candidates/candidate-row';
-import { candidateBelongsToPosition, displayApplicationCode, type PositionApplicantCandidate } from '@/lib/recruiting/position-applicants';
+import { displayApplicationCode, type PositionApplicantCandidate } from '@/lib/recruiting/position-applicants';
 
 type Position = {
   id: number;
@@ -50,6 +50,25 @@ function isMissingPositionIdColumn(msg: string | undefined) {
   return m.includes('position_id') && (m.includes('schema cache') || m.includes('column') || m.includes('does not exist'));
 }
 
+function sortApplicantsByCreatedAt(rows: Applicant[]): Applicant[] {
+  return [...rows].sort((a, b) => {
+    const av = new Date(a.created_at).getTime() || 0;
+    const bv = new Date(b.created_at).getTime() || 0;
+    return bv - av;
+  });
+}
+
+function uniqueApplicants(rows: Applicant[]): Applicant[] {
+  const seen = new Set<number>();
+  const out: Applicant[] = [];
+  for (const row of rows) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    out.push(row);
+  }
+  return out;
+}
+
 function formatDate(iso: string) {
   try {
     return new Date(iso).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -63,28 +82,38 @@ async function loadApplicants(
   position: Position,
 ): Promise<{ applicants: Applicant[]; setupError: string | null }> {
   const baseSelect = 'id, full_name, email, phone, position, source, status, rating, parsed_at, application_code, created_at';
-  const { data, error } = await supabase
+  const exact = await supabase
     .from('candidates')
     .select(`${baseSelect}, position_id`)
-    .order('created_at', { ascending: false })
-    .limit(1000);
+    .eq('position_id', position.id)
+    .order('created_at', { ascending: false });
 
-  if (!error) {
-    const rows = ((data ?? []) as Applicant[])
-      .filter((candidate) => candidateBelongsToPosition(candidate, position));
-    return { applicants: rows, setupError: null };
+  if (!exact.error) {
+    const legacy = await supabase
+      .from('candidates')
+      .select(`${baseSelect}, position_id`)
+      .is('position_id', null)
+      .eq('position', position.job_title)
+      .order('created_at', { ascending: false });
+
+    if (legacy.error) throw new Error(legacy.error.message);
+
+    const rows = uniqueApplicants([
+      ...((exact.data ?? []) as Applicant[]),
+      ...((legacy.data ?? []) as Applicant[]),
+    ]);
+    return { applicants: sortApplicantsByCreatedAt(rows), setupError: null };
   }
 
-  if (isMissingPositionIdColumn(error.message)) {
+  if (isMissingPositionIdColumn(exact.error.message)) {
     const fallback = await supabase
       .from('candidates')
       .select(baseSelect)
+      .eq('position', position.job_title)
       .order('created_at', { ascending: false })
-      .limit(1000);
+      .limit(200);
     if (!fallback.error) {
-      const rows = ((fallback.data ?? []) as Applicant[])
-        .filter((candidate) => candidateBelongsToPosition(candidate, position));
-      return { applicants: rows, setupError: null };
+      return { applicants: (fallback.data ?? []) as Applicant[], setupError: null };
     }
     if (isRelationMissing(fallback.error.message)) {
       return { applicants: [], setupError: fallback.error.message };
@@ -92,11 +121,11 @@ async function loadApplicants(
     throw new Error(fallback.error.message);
   }
 
-  if (isRelationMissing(error.message)) {
-    return { applicants: [], setupError: error.message };
+  if (isRelationMissing(exact.error.message)) {
+    return { applicants: [], setupError: exact.error.message };
   }
 
-  throw new Error(error.message);
+  throw new Error(exact.error.message);
 }
 
 export default async function PositionApplicantsPage({
