@@ -3,7 +3,7 @@ import { AppSidebar, MobileNav } from "@/components/app-sidebar";
 import { getSession } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { hasSupabaseConfig } from "@/lib/supabase/config";
+import { hasSupabaseAdminConfig, hasSupabaseConfig } from "@/lib/supabase/config";
 import { canAccessPath, defaultLandingPath, canAccessAdmin } from "@/lib/rbac";
 import { getPhotoResolver } from "@/lib/orgchart";
 import { hasIncompleteHardCourse, isPathExemptFromHardEnforcement } from "@/lib/lms-enforcement";
@@ -47,6 +47,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user?.email) {
+      redirect('/login');
+    }
+    if (!hasSupabaseAdminConfig()) {
       redirect('/login');
     }
     const admin = createAdminClient();
