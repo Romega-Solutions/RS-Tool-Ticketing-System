@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { candidateBelongsToPosition, countApplicantsByPosition } from '@/lib/recruiting/position-applicants';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { candidateBelongsToPosition, countApplicantsByPosition, displayApplicationCode } from '@/lib/recruiting/position-applicants';
 
 describe('position applicant matching', () => {
   const positions = [
@@ -30,5 +32,21 @@ describe('position applicant matching', () => {
       { id: 3, position_id: 20, position: 'Frontend Developer' },
       positions[1],
     )).toBe(true);
+  });
+
+  it('shows a stable application code label when present', () => {
+    expect(displayApplicationCode(' APP-2026-0042 ')).toBe('APP-2026-0042');
+    expect(displayApplicationCode(null)).toBe('No code');
+    expect(displayApplicationCode('')).toBe('No code');
+  });
+
+  it('keeps recruiter backup emails linked to the exact candidate record', () => {
+    const workflow = readFileSync(
+      join(process.cwd(), 'n8n', 'Romega ATS — Recruiter Notify.json'),
+      'utf8',
+    );
+
+    expect(workflow).toContain('/recruiting/candidates/${body.candidateId}');
+    expect(workflow).toContain('Application code: ${body.applicationCode}');
   });
 });

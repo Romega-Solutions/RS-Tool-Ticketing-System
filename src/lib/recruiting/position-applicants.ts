@@ -38,3 +38,8 @@ export function countApplicantsByPosition(
 
   return counts;
 }
+
+export function displayApplicationCode(code: string | null | undefined): string {
+  const normalized = (code ?? '').trim();
+  return normalized || 'No code';
+}

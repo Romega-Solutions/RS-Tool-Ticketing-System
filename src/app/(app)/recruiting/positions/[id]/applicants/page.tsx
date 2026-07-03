@@ -9,7 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { LeadToolHeader, StatCard } from '@/components/lead-tool-header';
 import { AtsTabs } from '../../../ats-tabs';
 import { CandidateDelete, CandidateRating, CandidateStatus } from '../../../candidates/candidate-row';
-import { candidateBelongsToPosition, type PositionApplicantCandidate } from '@/lib/recruiting/position-applicants';
+import { candidateBelongsToPosition, displayApplicationCode, type PositionApplicantCandidate } from '@/lib/recruiting/position-applicants';
 
 type Position = {
   id: number;
@@ -28,6 +28,7 @@ type Applicant = PositionApplicantCandidate & {
   status: string;
   rating: number | null;
   parsed_at: string | null;
+  application_code: string | null;
   created_at: string;
 };
 
@@ -61,7 +62,7 @@ async function loadApplicants(
   supabase: ReturnType<typeof createAdminClient>,
   position: Position,
 ): Promise<{ applicants: Applicant[]; setupError: string | null }> {
-  const baseSelect = 'id, full_name, email, phone, position, source, status, rating, parsed_at, created_at';
+  const baseSelect = 'id, full_name, email, phone, position, source, status, rating, parsed_at, application_code, created_at';
   const { data, error } = await supabase
     .from('candidates')
     .select(`${baseSelect}, position_id`)
@@ -224,6 +225,9 @@ export default async function PositionApplicantsPage({
                                   {candidate.phone && <span className="tabular-nums">{formatPhoneNumber(candidate.phone)}</span>}
                                 </div>
                               )}
+                              <div className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-(--rs-neutral-grey-500)">
+                                {displayApplicationCode(candidate.application_code)}
+                              </div>
                             </Link>
                           </td>
                           <td className="px-4 py-3.5 text-(--rs-neutral-grey-600)">
