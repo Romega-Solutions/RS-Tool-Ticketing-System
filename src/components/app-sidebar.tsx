@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import Image from "next/image";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap, BookMarked, Timer, BellRing, LayoutGrid } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap, BookMarked, Timer, BellRing, LayoutGrid, Megaphone } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { PersonAvatar } from "@/components/person-avatar";
@@ -33,6 +33,7 @@ const navItems = [
   { href: "/sales/leads",           label: "Sales",          icon: Users2,          category: "leadTools" },
   { href: "/attendance/requests",   label: "Time Approvals", icon: ClipboardList,   category: "leadTools" },
   // ── Admin — admin only
+  { href: "/admin/broadcasts",       label: "Broadcasts",     icon: Megaphone,      category: "admin"     },
   { href: "/admin/learning",        label: "Manage Learning",icon: BookOpen,        category: "admin"     },
   { href: "/admin/overtime",        label: "Overtime",       icon: Timer,           category: "admin"     },
   { href: "/admin/presence-pings",  label: "Ping Records",   icon: BellRing,        category: "admin"     },
