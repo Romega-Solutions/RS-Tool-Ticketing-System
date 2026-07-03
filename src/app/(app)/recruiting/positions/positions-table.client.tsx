@@ -7,7 +7,7 @@ import { PositionTableRow, type Position } from './position-table-row';
 
 type SortKey =
   | 'job_title' | 'placement_type' | 'location' | 'employment_type'
-  | 'openings' | 'created_by_name' | 'created_at' | 'is_open';
+  | 'openings' | 'applicant_count' | 'created_by_name' | 'created_at' | 'is_open';
 type SortDir = 'asc' | 'desc';
 
 const COLUMNS: { key: SortKey; label: string }[] = [
@@ -16,6 +16,7 @@ const COLUMNS: { key: SortKey; label: string }[] = [
   { key: 'location',        label: 'Location' },
   { key: 'employment_type', label: 'Type' },
   { key: 'openings',        label: 'Openings' },
+  { key: 'applicant_count', label: 'Applicants' },
   { key: 'created_by_name', label: 'Created by' },
   { key: 'created_at',      label: 'Opened' },
   { key: 'is_open',         label: 'Status' },
@@ -24,6 +25,7 @@ const COLUMNS: { key: SortKey; label: string }[] = [
 function sortValue(p: Position, key: SortKey): string | number {
   switch (key) {
     case 'openings':   return p.openings ?? 0;
+    case 'applicant_count': return p.applicant_count ?? 0;
     case 'is_open':    return p.is_open ? 1 : 0;
     case 'created_at': return new Date(p.created_at).getTime() || 0;
     case 'created_by_name': return (p.created_by_name ?? '').toLowerCase();

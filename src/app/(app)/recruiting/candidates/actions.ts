@@ -101,6 +101,16 @@ function normalizeText(v: string | null | undefined): string {
   return (v ?? '').toString().trim();
 }
 
+function isMissingColumnError(errorMessage: string | undefined, columnName: string): boolean {
+  const message = (errorMessage ?? '').toLowerCase();
+  const column = columnName.toLowerCase();
+  return message.includes(column) && (
+    message.includes('schema cache') ||
+    message.includes('column') ||
+    message.includes('does not exist')
+  );
+}
+
 function diffSimple(
   field: string,
   label: string,
@@ -150,6 +160,30 @@ async function mintApplicationCode(supabase: AdminClient): Promise<string | null
     return null;
   }
   return typeof data === 'string' ? data : null;
+}
+
+async function findPositionIdByTitle(
+  supabase: AdminClient,
+  jobTitle: string | null,
+): Promise<number | null> {
+  if (!jobTitle) return null;
+  const { data, error } = await supabase
+    .from('positions')
+    .select('id')
+    .eq('job_title', jobTitle)
+    .order('id', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    const message = error.message?.toLowerCase() ?? '';
+    if (message.includes('relation') && message.includes('does not exist')) return null;
+    console.warn('[ats] findPositionIdByTitle failed:', error.message);
+    return null;
+  }
+
+  const id = data?.id;
+  return Number.isInteger(id) ? Number(id) : null;
 }
 
 async function tryUploadResume(args: {
@@ -260,24 +294,41 @@ export async function createCandidate(formData: FormData) {
 
   const supabase = createAdminClient();
   const applicationCode = await mintApplicationCode(supabase);
+  const positionId = await findPositionIdByTitle(supabase, position);
 
-  const { data: inserted, error } = await supabase
+  const insertPayload = {
+    full_name:        fullName,
+    email,
+    phone,
+    position,
+    position_id:      positionId,
+    source,
+    linkedin_url:     linkedinUrl,
+    notes,
+    status:           'pending_response',
+    assigned_to:      session.id,
+    created_by:       session.id,
+    application_code: applicationCode,
+  };
+
+  let { data: inserted, error } = await supabase
     .from('candidates')
-    .insert({
-      full_name:        fullName,
-      email,
-      phone,
-      position,
-      source,
-      linkedin_url:     linkedinUrl,
-      notes,
-      status:           'pending_response',
-      assigned_to:      session.id,
-      created_by:       session.id,
-      application_code: applicationCode,
-    })
+    .insert(insertPayload)
     .select('id')
     .single();
+
+  if (error && isMissingColumnError(error.message, 'position_id')) {
+    const fallbackPayload = { ...insertPayload };
+    delete (fallbackPayload as Partial<typeof insertPayload>).position_id;
+    const retry = await supabase
+      .from('candidates')
+      .insert(fallbackPayload)
+      .select('id')
+      .single();
+    inserted = retry.data;
+    error = retry.error;
+  }
+
   if (error || !inserted) throw new Error(`Failed to create candidate: ${error?.message ?? 'unknown'}`);
 
   await writeHistory(supabase, inserted.id, session, [{
@@ -298,6 +349,8 @@ export async function createCandidate(formData: FormData) {
   }
 
   revalidatePath('/recruiting/candidates');
+  revalidatePath('/recruiting/positions');
+  if (positionId) revalidatePath(`/recruiting/positions/${positionId}/applicants`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -345,6 +398,7 @@ export async function updateCandidate(id: number, patch: CandidateEditPatch) {
     .filter(x => x.company || x.title || x.start_date || x.end_date || x.description);
 
   const supabase = createAdminClient();
+  const nextPositionId = await findPositionIdByTitle(supabase, positionClean);
   const { data: before, error: fetchError } = await supabase
     .from('candidates')
     .select('full_name, email, phone, position, education, experience')
@@ -353,18 +407,32 @@ export async function updateCandidate(id: number, patch: CandidateEditPatch) {
   if (fetchError) throw new Error(`Failed to load candidate: ${fetchError.message}`);
   if (!before) throw new Error('Candidate not found');
 
-  const { error: updateError } = await supabase
+  const updatePayload = {
+    full_name:  fullNameClean,
+    email:      emailClean,
+    phone:      phoneClean,
+    position:   positionClean,
+    position_id: nextPositionId,
+    education,
+    experience,
+    updated_at: new Date().toISOString(),
+  };
+
+  let { error: updateError } = await supabase
     .from('candidates')
-    .update({
-      full_name:  fullNameClean,
-      email:      emailClean,
-      phone:      phoneClean,
-      position:   positionClean,
-      education,
-      experience,
-      updated_at: new Date().toISOString(),
-    })
+    .update(updatePayload)
     .eq('id', id);
+
+  if (updateError && isMissingColumnError(updateError.message, 'position_id')) {
+    const fallbackPayload = { ...updatePayload };
+    delete (fallbackPayload as Partial<typeof updatePayload>).position_id;
+    const retry = await supabase
+      .from('candidates')
+      .update(fallbackPayload)
+      .eq('id', id);
+    updateError = retry.error;
+  }
+
   if (updateError) throw new Error(`Failed to update candidate: ${updateError.message}`);
 
   const entries: HistoryEntry[] = [];
@@ -385,6 +453,8 @@ export async function updateCandidate(id: number, patch: CandidateEditPatch) {
 
   revalidatePath('/recruiting/candidates');
   revalidatePath(`/recruiting/candidates/${id}`);
+  revalidatePath('/recruiting/positions');
+  if (nextPositionId) revalidatePath(`/recruiting/positions/${nextPositionId}/applicants`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -739,6 +809,7 @@ export async function deleteCandidate(id: number) {
   if (error) throw new Error(`Failed to delete candidate: ${error.message}`);
 
   revalidatePath('/recruiting/candidates');
+  revalidatePath('/recruiting/positions');
 }
 
 const DELETE_CANDIDATES_CONFIRMATION = 'DELETE CANDIDATES';
@@ -760,6 +831,7 @@ export async function deleteAllCandidates(confirmation: string) {
   }
 
   revalidatePath('/recruiting/candidates');
+  revalidatePath('/recruiting/positions');
   return { ok: true as const, deleted: ids.length };
 }
 
@@ -1020,6 +1092,7 @@ export async function createCandidateFromResume(formData: FormData): Promise<Par
   }
 
   revalidatePath('/recruiting/candidates');
+  revalidatePath('/recruiting/positions');
 
   return { ok: true, parsed, candidateId: inserted.id };
 }
@@ -1111,32 +1184,47 @@ export async function createPublicApplication(args: {
 
   const applicationCode = await mintApplicationCode(supabase);
 
-  const { data: inserted, error } = await supabase
+  const insertPayload = {
+    full_name:        cleanedName || (parsed?.full_name ? toProperName(parsed.full_name) : args.fullName),
+    email:            emailNorm,
+    phone:            cleanedPhone,
+    position:         position.job_title,
+    position_id:      position.id,
+    source:           'direct',
+    linkedin_url:     args.linkedinUrl || parsed?.linkedin || null,
+    notes:            args.message || null,
+    status:           'pending_response',
+    assigned_to:      position.created_by,
+    created_by:       null,
+    application_code: applicationCode,
+    location:         parsed?.location ?? null,
+    website:          parsed?.website ?? null,
+    summary:          parsed?.summary ?? null,
+    skills:           parsed?.skills ?? null,
+    experience:       parsed?.experience ?? null,
+    education:        parsed?.education ?? null,
+    certifications:   parsed?.certifications ?? null,
+    languages:        parsed?.languages ?? null,
+    parsed_at:        parsed ? new Date().toISOString() : null,
+  };
+
+  let { data: inserted, error } = await supabase
     .from('candidates')
-    .insert({
-      full_name:        cleanedName || (parsed?.full_name ? toProperName(parsed.full_name) : args.fullName),
-      email:            emailNorm,
-      phone:            cleanedPhone,
-      position:         position.job_title,
-      source:           'direct',
-      linkedin_url:     args.linkedinUrl || parsed?.linkedin || null,
-      notes:            args.message || null,
-      status:           'pending_response',
-      assigned_to:      position.created_by,
-      created_by:       null,
-      application_code: applicationCode,
-      location:         parsed?.location ?? null,
-      website:          parsed?.website ?? null,
-      summary:          parsed?.summary ?? null,
-      skills:           parsed?.skills ?? null,
-      experience:       parsed?.experience ?? null,
-      education:        parsed?.education ?? null,
-      certifications:   parsed?.certifications ?? null,
-      languages:        parsed?.languages ?? null,
-      parsed_at:        parsed ? new Date().toISOString() : null,
-    })
+    .insert(insertPayload)
     .select('id')
     .single();
+
+  if (error && isMissingColumnError(error.message, 'position_id')) {
+    const fallbackPayload = { ...insertPayload };
+    delete (fallbackPayload as Partial<typeof insertPayload>).position_id;
+    const retry = await supabase
+      .from('candidates')
+      .insert(fallbackPayload)
+      .select('id')
+      .single();
+    inserted = retry.data;
+    error = retry.error;
+  }
 
   if (error || !inserted) {
     return { ok: false, code: 'DB_ERROR', error: error?.message ?? 'Insert failed' };
@@ -1229,6 +1317,8 @@ export async function createPublicApplication(args: {
   }
 
   revalidatePath('/recruiting/candidates');
+  revalidatePath('/recruiting/positions');
+  revalidatePath(`/recruiting/positions/${position.id}/applicants`);
 
   return { ok: true, candidateId: inserted.id, applicationCode };
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Pencil, MapPin } from 'lucide-react';
+import { Pencil, MapPin, Users2 } from 'lucide-react';
 import { PositionStatusToggle, PositionDelete } from './position-row';
 import { CopyApplicationLinkButton } from './copy-link-button';
 
@@ -18,6 +18,7 @@ export type Position = {
   created_at:      string;
   created_by:      number | null;
   created_by_name?: string | null;
+  applicant_count?: number;
 };
 
 function formatDate(iso: string) {
@@ -74,6 +75,16 @@ export function PositionTableRow({ position }: { position: Position }) {
       </td>
       <td className="px-4 py-3.5 text-(--rs-neutral-grey-700) whitespace-nowrap">{employmentLabel(position.employment_type)}</td>
       <td className="px-4 py-3.5 text-(--rs-neutral-grey-700)">{position.openings ?? 1}</td>
+      <td className="px-4 py-3.5">
+        <Link
+          href={`/recruiting/positions/${position.id}/applicants`}
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 text-xs font-semibold text-(--rs-neutral-grey-700) transition-colors hover:border-(--rs-primary-200) hover:bg-(--rs-primary-50) hover:text-(--rs-primary-700) focus:outline-none focus:ring-3 focus:ring-(--rs-primary-100)"
+          aria-label={`View applicants for ${position.job_title}`}
+        >
+          <Users2 className="h-3.5 w-3.5" />
+          {position.applicant_count ?? 0}
+        </Link>
+      </td>
       <td className="px-4 py-3.5 text-(--rs-neutral-grey-700)">{position.created_by_name || '—'}</td>
       <td className="px-4 py-3.5 text-(--rs-neutral-grey-500) whitespace-nowrap">{formatDate(position.created_at)}</td>
       <td className="px-4 py-3.5">

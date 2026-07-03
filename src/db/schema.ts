@@ -154,6 +154,7 @@ export const candidates = pgTable('candidates', {
   email:          text('email'),
   phone:          text('phone'),
   position:       text('position'),
+  positionId:     integer('position_id'),
   source:         text('source'),
   status:         text('status').notNull().default('applied'),
   rating:         integer('rating'),

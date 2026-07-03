@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { unstable_cache } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { Card, CardContent } from '@/components/ui/card';
-import { Briefcase, AlertCircle } from 'lucide-react';
+import { Briefcase, AlertCircle, Users2 } from 'lucide-react';
 import { LeadToolHeader, StatCard } from '@/components/lead-tool-header';
 import { getSession } from '@/lib/session';
 import { hasToolAccess } from '@/lib/rbac';
@@ -11,6 +11,7 @@ import { PositionForm } from './position-form';
 import { type Position } from './position-table-row';
 import { PositionsTable } from './positions-table.client';
 import { ATS_POSITIONS_TAG } from '@/lib/cache-tags';
+import { countApplicantsByPosition, type PositionApplicantCandidate } from '@/lib/recruiting/position-applicants';
 
 function isTableMissing(msg: string | undefined) {
   if (!msg) return false;
@@ -19,6 +20,39 @@ function isTableMissing(msg: string | undefined) {
   // extend-positions-fields migration has been applied) — both are fixed by the
   // SQL files listed in the setup card below.
   return m.includes('does not exist') && (m.includes('relation') || m.includes('column'));
+}
+
+function isMissingPositionIdColumn(msg: string | undefined) {
+  if (!msg) return false;
+  const m = msg.toLowerCase();
+  return m.includes('position_id') && (m.includes('schema cache') || m.includes('column') || m.includes('does not exist'));
+}
+
+async function getCandidatePositionRefs(
+  supabase: ReturnType<typeof createAdminClient>,
+): Promise<PositionApplicantCandidate[]> {
+  const { data, error } = await supabase
+    .from('candidates')
+    .select('id, position, position_id')
+    .order('created_at', { ascending: false })
+    .limit(1000);
+
+  if (!error) return (data ?? []) as PositionApplicantCandidate[];
+
+  if (isMissingPositionIdColumn(error.message)) {
+    const fallback = await supabase
+      .from('candidates')
+      .select('id, position')
+      .order('created_at', { ascending: false })
+      .limit(1000);
+    if (!fallback.error) return (fallback.data ?? []) as PositionApplicantCandidate[];
+  }
+
+  if (error.message?.toLowerCase().includes('relation') && error.message.toLowerCase().includes('does not exist')) {
+    return [];
+  }
+
+  throw new Error(error.message);
 }
 
 const getCachedPositionRows = unstable_cache(
@@ -62,13 +96,17 @@ export default async function PositionsPage() {
       nameMap.set(Number(u.id), String(u.name));
     }
   }
+  const candidateRefs = await getCandidatePositionRefs(supabase);
+  const applicantCounts = countApplicantsByPosition(rawPositions, candidateRefs);
   const positions: Position[] = rawPositions.map(p => ({
     ...p,
     created_by_name: p.created_by != null ? nameMap.get(Number(p.created_by)) ?? null : null,
+    applicant_count: applicantCounts.get(p.id) ?? 0,
   }));
 
   const openCount   = positions.filter(p => p.is_open).length;
   const closedCount = positions.length - openCount;
+  const applicantCount = positions.reduce((sum, p) => sum + (p.applicant_count ?? 0), 0);
 
   return (
     <div className="space-y-6">
@@ -94,6 +132,7 @@ export default async function PositionsPage() {
             <ol className="list-decimal text-sm text-(--rs-neutral-grey-700) ml-5 space-y-1">
               <li><code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">docs/migrations/add-ats-history-and-positions.sql</code></li>
               <li><code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">docs/migrations/extend-positions-fields.sql</code></li>
+              <li><code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">docs/migrations/add-candidates-position-id.sql</code></li>
             </ol>
           </CardContent>
         </Card>
@@ -113,9 +152,10 @@ export default async function PositionsPage() {
 
       {!tableMissing && !unexpectedError && (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard icon={<Briefcase className="w-4 h-4" />} label="Open positions"   value={String(openCount)}   hint="actively hiring" />
             <StatCard icon={<Briefcase className="w-4 h-4" />} label="Closed positions" value={String(closedCount)} hint="filled or paused" />
+            <StatCard icon={<Users2 className="w-4 h-4" />}    label="Applicants"       value={String(applicantCount)} hint="linked to positions" />
             <StatCard icon={<Briefcase className="w-4 h-4" />} label="Total"            value={String(positions.length)} accent hint="all-time" />
           </div>
 
