@@ -53,7 +53,14 @@ export function describeAudit(action: string, details: Record<string, unknown> |
     case 'user.role_changed': return from && to
       ? `Changed a user's role (${String(from)} → ${String(to)})`
       : "Changed a user's role";
-    case 'user.deactivated':  return 'Deactivated a user';
+    case 'user.deactivated': {
+      const memberships = details?.removedProjectMemberships;
+      const assignments = details?.removedTaskAssignments;
+      if (typeof memberships === 'number' && typeof assignments === 'number' && (memberships > 0 || assignments > 0)) {
+        return `Deactivated a user (removed from ${memberships} project${memberships === 1 ? '' : 's'}, unassigned from ${assignments} task${assignments === 1 ? '' : 's'})`;
+      }
+      return 'Deactivated a user';
+    }
     case 'user.reactivated':  return 'Reactivated a user';
     case 'user.tool_access_changed': {
       const added = Array.isArray(details?.added) ? (details.added as unknown[]) : [];

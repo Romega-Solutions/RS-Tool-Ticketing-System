@@ -7,6 +7,7 @@ import { recordAudit, deriveUserPatchAction } from '@/lib/audit';
 import { enforceRateLimit, keyByUser } from '@/lib/rate-limit';
 import { isGateableToolKey, defaultToolAccess, normalizeRole } from '@/lib/rbac';
 import { USERS_LIST_TAG } from '@/lib/cache-tags';
+import { removeUserFromAllProjects } from '@/lib/tickets';
 
 export const runtime = 'nodejs';
 
@@ -468,6 +469,16 @@ export const PATCH = route(async (req: Request) => {
 
   if (!updated) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
+  // Deactivating a user ("Remove" in the Users tab) also strips their active
+  // project associations everywhere — every project_members row and every
+  // work_item_assignees row for them. History (comments, activity log, work
+  // items they created) is untouched; reactivating later does NOT restore
+  // these — re-adding a returning user to a project is a deliberate action.
+  let projectCleanup: { memberships: number; assignments: number } | null = null;
+  if (before && Number(before.is_active) === 1 && Number(updated.is_active) === 0) {
+    projectCleanup = await removeUserFromAllProjects(body.id);
+  }
+
   if (before) {
     // Audit a tool-access change on its own (with the added/removed diff).
     const beforeTools = readToolAccess(before.tool_access);
@@ -489,6 +500,10 @@ export const PATCH = route(async (req: Request) => {
         { role: String(before.role), is_active: Number(before.is_active) },
         { role: String(updated.role), is_active: Number(updated.is_active) },
       );
+      if (action === 'user.deactivated' && projectCleanup) {
+        details.removedProjectMemberships = projectCleanup.memberships;
+        details.removedTaskAssignments = projectCleanup.assignments;
+      }
       await recordAudit({ actorId: session.id, action, targetUserId: body.id, details });
     }
   }
