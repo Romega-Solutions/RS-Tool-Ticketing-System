@@ -270,8 +270,8 @@ function TimesheetDetailPanel({
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
           userId,
-          clockedInAt:  new Date(addIn).toISOString(),
-          clockedOutAt: addOut ? new Date(addOut).toISOString() : null,
+          clockedInAt:  new Date(`${addDay.date}T${addIn}`).toISOString(),
+          clockedOutAt: addOut ? new Date(`${addDay.date}T${addOut}`).toISOString() : null,
         }),
       });
       const data = await res.json() as { error?: string };
@@ -723,7 +723,7 @@ function TimesheetDetailPanel({
           <label className="block text-xs text-(--rs-neutral-grey-600) font-semibold">
             Clock-in
             <input
-              type="datetime-local"
+              type="time"
               value={addIn}
               onChange={e => setAddIn(e.target.value)}
               disabled={adminBusy}
@@ -733,7 +733,7 @@ function TimesheetDetailPanel({
           <label className="block text-xs text-(--rs-neutral-grey-600) font-semibold">
             Clock-out
             <input
-              type="datetime-local"
+              type="time"
               value={addOut}
               onChange={e => setAddOut(e.target.value)}
               disabled={adminBusy}
@@ -759,6 +759,9 @@ function TimesheetDetailPanel({
 export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
   const [activeTab, setActiveTab] = useState<'weekly' | 'monthly'>('weekly');
   const [weekRefreshKey, setWeekRefreshKey] = useState(0);
+  // Bumped only once a refetch triggered by weekRefreshKey actually lands, so the
+  // detail panel's remount key (below) can't fire before teamRecords has the fresh data.
+  const [teamDataVersion, setTeamDataVersion] = useState(0);
 
   // Weekly state
   const [weekOffset, setWeekOffset] = useState(0);
@@ -801,6 +804,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
         setTimesheetsByDay(d.timesheetsByDay ?? {});
         setOpenSessions(d.openSessions ?? {});
         setAllowanceByUser(d.allowanceByUser ?? {});
+        setTeamDataVersion(v => v + 1);
       })
       .catch(() => { if (!cancelled) setWeekError('Failed to load attendance data.'); })
       .finally(() => { if (!cancelled) setWeekLoading(false); });
@@ -1200,7 +1204,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                           </tr>
                           {isExpanded && (
                             <TimesheetDetailPanel
-                              key={`${user.id}-${weekStart}-${weekRefreshKey}`}
+                              key={`${user.id}-${weekStart}-${teamDataVersion}`}
                               userId={user.id}
                               weekStart={weekStart}
                               detailDays={detailDays}
