@@ -5,8 +5,9 @@ import { WEEKLY_CAP_SECONDS } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { AttendanceExportSheet } from '@/components/attendance-export-sheet';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { PersonAvatar } from '@/components/person-avatar';
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock, Search, X, Pencil, LogOut, Save, Trash2, ShieldCheck, Check, History } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock, Search, X, Pencil, LogOut, Save, Trash2, ShieldCheck, Check, History, Plus } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -188,6 +189,10 @@ function TimesheetDetailPanel({
   const [pendingAction, setPendingAction] = useState<
     { kind: 'delete'; id: number } | { kind: 'forceOut'; userId: number } | null
   >(null);
+  // Day (Present, no session yet) whose "Add" modal is open.
+  const [addDay,   setAddDay]   = useState<DetailDay | null>(null);
+  const [addIn,    setAddIn]    = useState('');
+  const [addOut,   setAddOut]   = useState('');
 
   const statusChanged = detailDays.some(d => (dayDraft[d.key] ?? null) !== (initialStatuses[d.key] ?? null));
   const notesChanged  = (notesDraft ?? '') !== (notes ?? '');
@@ -244,6 +249,38 @@ function TimesheetDetailPanel({
       onChanged();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Update failed');
+    } finally {
+      setAdminBusy(false);
+    }
+  }
+
+  function openAddModal(day: DetailDay) {
+    setAddIn('');
+    setAddOut('');
+    setAddDay(day);
+  }
+
+  async function submitAdd() {
+    if (!addDay) return;
+    if (!addIn) { alert('Clock-in time is required'); return; }
+    setAdminBusy(true);
+    try {
+      const res = await fetch('/api/admin/timesheets', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          userId,
+          clockedInAt:  new Date(addIn).toISOString(),
+          clockedOutAt: addOut ? new Date(addOut).toISOString() : null,
+        }),
+      });
+      const data = await res.json() as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Create failed');
+      setAddDay(null);
+      setReloadKey(k => k + 1);
+      onChanged();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Create failed');
     } finally {
       setAdminBusy(false);
     }
@@ -498,7 +535,7 @@ function TimesheetDetailPanel({
                 <Clock className="w-3 h-3 text-(--rs-neutral-grey-400)" />
                 <span className="text-xs font-semibold text-(--rs-neutral-grey-600) uppercase tracking-wider">Clock-in / Clock-out log</span>
               </div>
-              {entries.length === 0 ? (
+              {entries.length === 0 && !detailDays.some(d => d.status === 'present') ? (
                 <p className="text-xs text-(--rs-neutral-grey-400) italic">No clock-in sessions recorded this week.</p>
               ) : (
                 <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-7">
@@ -516,7 +553,24 @@ function TimesheetDetailPanel({
                           </p>
                         )}
                         {daySessions.length === 0 ? (
-                          <p className="text-xs text-(--rs-neutral-grey-300)">—</p>
+                          day.status === 'present' ? (
+                            <div className="bg-white border border-(--rs-neutral-grey-200) rounded px-2 py-1.5 space-y-0.5">
+                              <div className="text-xs text-(--rs-neutral-grey-400) font-medium">In: -</div>
+                              <div className="text-xs text-(--rs-neutral-grey-400) font-medium">Out: -</div>
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  onClick={() => openAddModal(day)}
+                                  disabled={adminBusy}
+                                  className="mt-1 inline-flex w-full items-center justify-center gap-1 rounded border border-dashed border-(--rs-primary-300) px-1.5 py-1 text-[10px] font-semibold text-(--rs-primary-600) hover:bg-(--rs-primary-50) disabled:opacity-50"
+                                >
+                                  <Plus className="w-3 h-3" /> Add
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-(--rs-neutral-grey-300)">—</p>
+                          )
                         ) : (
                           daySessions.map(s => {
                             const isEditing = editingId === s.id;
@@ -657,6 +711,45 @@ function TimesheetDetailPanel({
       confirmLabel={pendingAction?.kind === 'delete' ? 'Delete session' : 'Force clock-out'}
       onConfirm={runPendingAction}
     />
+    <Dialog open={addDay !== null} onOpenChange={open => { if (!open && !adminBusy) setAddDay(null); }}>
+      <DialogContent showCloseButton={!adminBusy} className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Add clock-in / clock-out</DialogTitle>
+          <DialogDescription>
+            {addDay ? `${addDay.label} ${new Date(addDay.date + 'T00:00:00').getDate()} is tagged Present with no recorded session. Enter the times below to backfill it.` : ''}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <label className="block text-xs text-(--rs-neutral-grey-600) font-semibold">
+            Clock-in
+            <input
+              type="datetime-local"
+              value={addIn}
+              onChange={e => setAddIn(e.target.value)}
+              disabled={adminBusy}
+              className="mt-1 block w-full rounded border border-(--rs-neutral-grey-200) px-2 py-1.5 text-xs"
+            />
+          </label>
+          <label className="block text-xs text-(--rs-neutral-grey-600) font-semibold">
+            Clock-out
+            <input
+              type="datetime-local"
+              value={addOut}
+              onChange={e => setAddOut(e.target.value)}
+              disabled={adminBusy}
+              className="mt-1 block w-full rounded border border-(--rs-neutral-grey-200) px-2 py-1.5 text-xs"
+            />
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => setAddDay(null)} disabled={adminBusy}>Cancel</Button>
+          <Button onClick={submitAdd} disabled={adminBusy || !addIn} className="gap-1.5">
+            {adminBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     </>
   );
 }
