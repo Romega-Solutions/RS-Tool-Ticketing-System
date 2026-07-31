@@ -160,7 +160,7 @@ function LoginContent() {
             Access is limited to emails listed in the Romega Org Chart.
           </p>
 
-          {process.env.NODE_ENV === 'development' && (
+          {(process.env.NODE_ENV === 'development' || process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN === 'true') && (
             <div className="mt-6 rounded-lg border border-dashed border-(--color-border) p-4">
               <p className="mb-3 text-xs font-medium text-(--rs-neutral-grey-500)">
                 Dev only — password sign-in (local Supabase)
