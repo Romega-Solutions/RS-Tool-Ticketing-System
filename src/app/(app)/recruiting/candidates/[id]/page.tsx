@@ -8,7 +8,7 @@ import {
   ArrowLeft, Mail, Phone, MapPin, Link2, Globe, Briefcase,
   GraduationCap, Award, Languages as LanguagesIcon, Tag, Calendar,
   Sparkles, FileText, AlertCircle, User2, History as HistoryIcon,
-  Hash, MailCheck, MailWarning, Download, Eye,
+  Hash, MailCheck, MailWarning, Download, Eye, ShieldCheck, Building2,
 } from 'lucide-react';
 import { CandidateStatus, CandidateRating, CandidateDelete } from '../candidate-row';
 import { TalentConsentPanel } from '../talent-consent-panel';
@@ -60,6 +60,9 @@ type HistoryRow = {
   created_at: string;
 };
 
+const VALID_PRE_EMPLOYMENT_TABS = ['background-check', 'documents'] as const;
+type PreEmploymentTab = typeof VALID_PRE_EMPLOYMENT_TABS[number];
+
 const SOURCE_LABEL: Record<string, string> = {
   referral: 'Referral', linkedin: 'LinkedIn', job_board: 'Job board', direct: 'Direct', manual: 'Manual',
 };
@@ -110,8 +113,10 @@ function abbreviateName(name: string | null | undefined): string {
 
 export default async function CandidateDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ preEmployment?: string | string[] | undefined }>;
 }) {
   const session = await getSession();
   if (!session || !hasToolAccess('recruiting', session.role, session.toolAccess)) {
@@ -135,6 +140,15 @@ export default async function CandidateDetailPage({
   if (!data) notFound();
 
   const c = data as Candidate;
+  const requestedPreEmploymentTab = (await searchParams).preEmployment;
+  const preEmploymentTabValue = Array.isArray(requestedPreEmploymentTab)
+    ? requestedPreEmploymentTab[0]
+    : requestedPreEmploymentTab;
+  const activePreEmploymentTab: PreEmploymentTab = VALID_PRE_EMPLOYMENT_TABS.includes(
+    preEmploymentTabValue as PreEmploymentTab,
+  )
+    ? preEmploymentTabValue as PreEmploymentTab
+    : 'background-check';
 
   // "Added by" = the human who manually created the record (created_by).
   // Public applicants have created_by = null — nobody added them, they applied
@@ -178,6 +192,7 @@ export default async function CandidateDetailPage({
   const hasParsedData =
     c.parsed_at || c.summary || (c.skills?.length ?? 0) > 0 ||
     (c.experience?.length ?? 0) > 0 || (c.education?.length ?? 0) > 0;
+  const showPreEmployment = c.status === 'offered' || c.status === 'hired';
 
   // If the most recent email-related event was a failure, surface a Resend
   // button. We look at email_sent / email_failed rows only and ignore
@@ -386,6 +401,14 @@ export default async function CandidateDetailPage({
               <p className="text-sm text-(--rs-neutral-grey-700) leading-relaxed whitespace-pre-wrap">{c.notes}</p>
             </Section>
           )}
+
+          {showPreEmployment && (
+            <>
+              <PreEmploymentTabBar id={c.id} active={activePreEmploymentTab} />
+              {activePreEmploymentTab === 'background-check' && <PreEmploymentBackgroundCheckTab />}
+              {activePreEmploymentTab === 'documents' && <PreEmploymentDocumentsTab />}
+            </>
+          )}
         </div>
 
         {/* Right rail */}
@@ -537,6 +560,91 @@ function Section({ title, icon, children }: { title: string; icon?: React.ReactN
         {children}
       </CardContent>
     </Card>
+  );
+}
+
+function PreEmploymentBackgroundCheckTab() {
+  return (
+    <div className="space-y-6">
+      <Section title="Character references · 0" icon={<Mail className="w-4 h-4" />}>
+        <PreEmploymentEmptyRow text="No references yet. Character reference requests and responses will be managed here." />
+      </Section>
+      <Section title="Employment verifications · 0" icon={<Building2 className="w-4 h-4" />}>
+        <PreEmploymentEmptyRow text="No verifications yet. Previous employment verification will be managed here." />
+      </Section>
+    </div>
+  );
+}
+
+function PreEmploymentDocumentsTab() {
+  return (
+    <Section title="Pre-Employment Documents" icon={<FileText className="w-4 h-4" />}>
+      <p className="text-xs leading-relaxed text-(--rs-neutral-grey-600)">
+        The document package will be managed here in a later phase.
+      </p>
+      <div className="mt-3 divide-y divide-(--rs-neutral-grey-200) rounded-lg border border-(--rs-neutral-grey-200) bg-white px-3">
+        <PreEmploymentDocument name="Statement of Work" />
+        <PreEmploymentDocument name="Job Description" />
+        <PreEmploymentDocument name="AI Policy" />
+      </div>
+    </Section>
+  );
+}
+
+function PreEmploymentEmptyRow({ text }: { text: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50)/40 px-4 py-6 text-center text-xs text-(--rs-neutral-grey-500)">
+      {text}
+    </div>
+  );
+}
+
+function PreEmploymentTabBar({ id, active }: { id: number; active: PreEmploymentTab }) {
+  const tabs: { id: PreEmploymentTab; label: string; icon: typeof Mail }[] = [
+    { id: 'background-check', label: 'Background Check', icon: ShieldCheck },
+    { id: 'documents',        label: 'Documents',        icon: FileText },
+  ];
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="inline-flex gap-1 rounded-xl border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) p-1">
+        {tabs.map(tab => {
+          const Icon = tab.icon;
+          const isActive = tab.id === active;
+          return (
+            <Link
+              key={tab.id}
+              href={`/recruiting/candidates/${id}?preEmployment=${tab.id}`}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
+                isActive
+                  ? 'bg-white text-(--rs-primary-700) shadow-sm border border-(--rs-neutral-grey-200)'
+                  : 'text-(--rs-neutral-grey-600) hover:text-(--rs-neutral-grey-900)'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {tab.label}
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PreEmploymentDocument({ name }: { name: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5 text-sm">
+      <span className="font-medium text-(--rs-neutral-grey-800)">{name}</span>
+      <PreEmploymentStatus />
+    </div>
+  );
+}
+
+function PreEmploymentStatus() {
+  return (
+    <span className="inline-flex shrink-0 rounded-full bg-(--rs-neutral-grey-200) px-2 py-0.5 text-[11px] font-semibold text-(--rs-neutral-grey-600)">
+      Not Started
+    </span>
   );
 }
 
