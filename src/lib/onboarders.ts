@@ -65,7 +65,7 @@ export async function createOnboarderFromCandidate(
       role_title:      roleTitle,
       team,
       onboarding_lead: DEFAULT_ONBOARDING_LEAD,
-      status:          'offer_signed',
+      status:          'pre_onboarding',
       created_by:      opts.actorUserId ?? null,
     })
     .select('id')
@@ -81,7 +81,7 @@ export async function createOnboarderFromCandidate(
     field:        'created',
     old_value:    null,
     new_value:    candidate.full_name,
-    summary:      `Created from ATS hire (candidate #${candidateId}) at stage 'offer_signed' — Lead: ${DEFAULT_ONBOARDING_LEAD}`,
+    summary:      `Created from ATS hire (candidate #${candidateId}) at stage 'pre_onboarding' — Lead: ${DEFAULT_ONBOARDING_LEAD}`,
   });
 
   return { ok: true, onboarderId: inserted.id, created: true };
