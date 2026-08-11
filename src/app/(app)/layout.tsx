@@ -9,6 +9,7 @@ import { getPhotoResolver } from "@/lib/orgchart";
 import { hasIncompleteHardCourse, isPathExemptFromHardEnforcement } from "@/lib/lms-enforcement";
 import { ClockWidget } from "@/components/clock-widget";
 import { LiveClock } from "@/components/live-clock";
+import { EnvBadge } from "@/components/env-badge";
 import { WhoIsInPanel } from "@/components/who-is-in-panel";
 import { NotificationBell } from "@/components/notification-bell.client";
 import { FloatingGuide } from "@/components/guide/floating-guide.client";
@@ -112,6 +113,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             </div>
 
             <div className="flex items-center gap-2 md:gap-3 shrink-0">
+              <EnvBadge />
               <div className="hidden rounded-2xl border border-(--rs-neutral-grey-200) bg-white/80 px-3 py-2 text-(--rs-neutral-grey-500) shadow-sm md:flex">
                 <LiveClock />
               </div>
