@@ -118,7 +118,7 @@ type HistoryRow = {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-const VALID_TABS = ['overview', 'bg-check', 'documents', 'day-one', 'notes'] as const;
+const VALID_TABS = ['overview', 'documents', 'day-one', 'notes'] as const;
 type Tab = typeof VALID_TABS[number];
 
 const DOC_KIND_LABEL: Record<string, string> = {
@@ -342,13 +342,6 @@ export default async function OnboarderDetailPage({
               onLastFailedTemplate={lastFailedTemplate}
             />
           )}
-          {tab === 'bg-check' && (
-            <BgCheckTab
-              onboarderId={id}
-              references={references}
-              verifications={verifications}
-            />
-          )}
           {tab === 'documents' && (
             <DocumentsTab onboarderId={id} documents={documentsSigned} />
           )}
@@ -372,7 +365,6 @@ export default async function OnboarderDetailPage({
 function TabBar({ id, active }: { id: number; active: Tab }) {
   const tabs: { id: Tab; label: string; icon: typeof Mail; badge?: string }[] = [
     { id: 'overview',  label: 'Overview',         icon: User2 },
-    { id: 'bg-check',  label: 'Background check', icon: ShieldCheck },
     { id: 'documents', label: 'Documents',        icon: FileText },
     { id: 'day-one',   label: 'Day-1 checklist',  icon: ListChecks },
     { id: 'notes',     label: 'Notes',            icon: StickyNote },
@@ -423,39 +415,6 @@ function OverviewTab({ o, onLastFailedTemplate }: { o: Onboarder; onLastFailedTe
           <p className="mt-1 text-xs text-(--rs-neutral-grey-600) leading-relaxed">
             {stageExplainer(o.status)}
           </p>
-        </div>
-
-        {/* SOW row */}
-        <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-white p-4">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-(--rs-neutral-grey-500)">Statement of Work</p>
-              <p className="mt-1 text-sm text-(--rs-neutral-grey-700)">
-                {o.sow_signed_at
-                  ? <>Signed <strong>{formatDate(o.sow_signed_at)}</strong></>
-                  : o.sow_sent_at
-                    ? <>Sent <strong>{formatDate(o.sow_sent_at)}</strong> — awaiting signature</>
-                    : <>Not yet sent. HRBP emails the SOW out-of-band, then marks it sent here.</>}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <MarkSowSentButton   id={o.id} alreadySent={!!o.sow_sent_at} />
-              <MarkSowSignedButton id={o.id} alreadySigned={!!o.sow_signed_at} />
-            </div>
-          </div>
-        </div>
-
-        {/* BG check email */}
-        <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-white p-4">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-(--rs-neutral-grey-500)">Background check email (SOP §3)</p>
-              <p className="mt-1 text-sm text-(--rs-neutral-grey-700)">
-                Asks for 3 character references + employment verification contacts.
-              </p>
-            </div>
-            <SendBgCheckButton id={o.id} />
-          </div>
         </div>
 
         {/* Welcome email */}
@@ -520,8 +479,8 @@ function OverviewTab({ o, onLastFailedTemplate }: { o: Onboarder; onLastFailedTe
 
 function stageExplainer(status: string): string {
   switch (status) {
-    case 'offer_signed':     return 'SOW out-of-band by HRBP. Mark it sent + signed here. When you advance to Background check, send the SOP §3 email.';
-    case 'background_check': return 'Collect 3 character references + employment verifications. Send the BG-check email and the per-row requests, then upload PDF responses.';
+    case 'offer_signed':     return 'Pre-employment requirements are managed from the candidate record in Recruitment.';
+    case 'background_check': return 'This legacy stage remains available for existing records; pre-employment is managed in Recruitment.';
     case 'pre_onboarding':   return 'Send the welcome email. New hire installs Teams, creates Romega Gmail, configures signature, submits the onboarding form + W-8 if contractor.';
     case 'day_one':          return 'Account provisioning, team intros, calendar handoff. Orientation call with the Onboarding Lead.';
     case 'thirty_day':       return 'First review with the lead — fit, blockers, training gaps. (30-day workflow ships post-MVP.)';
@@ -787,7 +746,6 @@ function QuickFacts({ o }: { o: Onboarder }) {
       <KvRow label="Onboarding Lead" value={o.onboarding_lead ?? <Dim />} />
       <KvRow label="HRBP"       value={o.hrbp ?? <Dim />} />
       <KvRow label="Start date" value={o.start_date ? formatDate(o.start_date) : <Dim />} />
-      <KvRow label="SOW signed" value={o.sow_signed_at ? formatDate(o.sow_signed_at) : <Dim />} />
       <KvRow label="W-8"        value={o.w8_uploaded_at ? formatDate(o.w8_uploaded_at) : <Dim />} />
       <KvRow label="Last email" value={
         o.last_email_template

@@ -202,6 +202,161 @@ export const candidates = pgTable('candidates', {
   index('candidates_status_idx').on(t.status),
 ]);
 
+// Generic request + raw-submission store for candidate-facing pre-employment
+// forms. Each request carries a hashed, expiring, single-use capability token;
+// future forms use a new formKey instead of adding columns to candidates.
+export const candidatePreEmploymentRequests = pgTable('candidate_pre_employment_requests', {
+  id:                   serial('id').primaryKey(),
+  candidateId:          integer('candidate_id').notNull().references(() => candidates.id, { onDelete: 'cascade' }),
+  formKey:              text('form_key').notNull(),
+  tokenHash:            text('token_hash').notNull().unique(),
+  createdBy:            integer('created_by').references(() => users.id, { onDelete: 'set null' }),
+  sentAt:               text('sent_at').notNull(),
+  expiresAt:            text('expires_at').notNull(),
+  submittedAt:          text('submitted_at'),
+  invalidatedAt:        text('invalidated_at'),
+  provider:             text('provider'),
+  providerSubmissionId: text('provider_submission_id'),
+  createdAt:            text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  index('candidate_pre_employment_requests_candidate_form_idx').on(t.candidateId, t.formKey, t.createdAt),
+]);
+
+export const candidatePreEmploymentSubmissions = pgTable('candidate_pre_employment_submissions', {
+  id:                   serial('id').primaryKey(),
+  requestId:            integer('request_id').notNull().references(() => candidatePreEmploymentRequests.id, { onDelete: 'cascade' }),
+  candidateId:          integer('candidate_id').notNull().references(() => candidates.id, { onDelete: 'cascade' }),
+  formKey:              text('form_key').notNull(),
+  provider:             text('provider').notNull(),
+  providerSubmissionId: text('provider_submission_id').notNull(),
+  submittedAt:          text('submitted_at').notNull(),
+  payload:              jsonb('payload').notNull(),
+  receivedAt:           text('received_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  unique('candidate_pre_employment_submissions_provider_id_unique').on(t.provider, t.providerSubmissionId),
+  index('candidate_pre_employment_submissions_candidate_idx').on(t.candidateId, t.formKey, t.submittedAt),
+]);
+
+// Recruitment-owned operational records derived from a background-check form.
+// Legacy onboarder_references remain untouched for historical onboarding rows.
+export const candidateReferences = pgTable('candidate_references', {
+  id:               serial('id').primaryKey(),
+  candidateId:      integer('candidate_id').notNull().references(() => candidates.id, { onDelete: 'cascade' }),
+  submissionId:     integer('submission_id').notNull().references(() => candidatePreEmploymentSubmissions.id, { onDelete: 'cascade' }),
+  referenceNumber:  integer('reference_number').notNull(),
+  refereeName:      text('referee_name').notNull(),
+  refereeEmail:     text('referee_email').notNull(),
+  refereePhone:     text('referee_phone'),
+  refereeCompany:   text('referee_company'),
+  refereeJobTitle:  text('referee_job_title'),
+  relationship:     text('relationship'),
+  bestTimeToCall:   text('best_time_to_call'),
+  requestSentAt:    text('request_sent_at'),
+  respondedAt:      text('responded_at'),
+  outcome:          text('outcome'),
+  createdAt:        text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  unique('candidate_references_submission_number_unique').on(t.submissionId, t.referenceNumber),
+  index('candidate_references_candidate_idx').on(t.candidateId, t.createdAt),
+]);
+
+// Referees receive their own capability links. Their answers must never reuse
+// the candidate-facing Background Check token.
+export const candidateReferenceFormRequests = pgTable('candidate_reference_form_requests', {
+  id:                   serial('id').primaryKey(),
+  referenceId:          integer('reference_id').notNull().references(() => candidateReferences.id, { onDelete: 'cascade' }),
+  tokenHash:            text('token_hash').notNull().unique(),
+  sentAt:               text('sent_at').notNull(),
+  expiresAt:            text('expires_at').notNull(),
+  submittedAt:          text('submitted_at'),
+  invalidatedAt:        text('invalidated_at'),
+  provider:             text('provider'),
+  providerSubmissionId: text('provider_submission_id'),
+  createdAt:            text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  index('candidate_reference_form_requests_reference_idx').on(t.referenceId, t.createdAt),
+]);
+
+export const candidateReferenceFormSubmissions = pgTable('candidate_reference_form_submissions', {
+  id:                   serial('id').primaryKey(),
+  requestId:            integer('request_id').notNull().references(() => candidateReferenceFormRequests.id, { onDelete: 'cascade' }),
+  referenceId:          integer('reference_id').notNull().references(() => candidateReferences.id, { onDelete: 'cascade' }),
+  provider:             text('provider').notNull(),
+  providerSubmissionId: text('provider_submission_id').notNull(),
+  submittedAt:          text('submitted_at').notNull(),
+  payload:              jsonb('payload').notNull(),
+  receivedAt:           text('received_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  unique('candidate_reference_form_submissions_provider_id_unique').on(t.provider, t.providerSubmissionId),
+]);
+
+// Previous-employer contacts and their separate, one-time verification forms.
+export const candidateEmploymentVerifications = pgTable('candidate_employment_verifications', {
+  id:                 serial('id').primaryKey(),
+  candidateId:        integer('candidate_id').notNull().references(() => candidates.id, { onDelete: 'cascade' }),
+  submissionId:       integer('submission_id').notNull().references(() => candidatePreEmploymentSubmissions.id, { onDelete: 'cascade' }),
+  verificationNumber: integer('verification_number').notNull(),
+  company:            text('company').notNull(),
+  hrContactName:      text('hr_contact_name'),
+  hrEmail:            text('hr_email').notNull(),
+  hrPhone:            text('hr_phone'),
+  bestTimeToCall:     text('best_time_to_call'),
+  requestSentAt:      text('request_sent_at'),
+  respondedAt:        text('responded_at'),
+  outcome:            text('outcome'),
+  createdAt:          text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  unique('candidate_employment_verifications_submission_number_unique').on(t.submissionId, t.verificationNumber),
+  index('candidate_employment_verifications_candidate_idx').on(t.candidateId, t.createdAt),
+]);
+
+export const candidateEmploymentVerificationFormRequests = pgTable('candidate_employment_verification_form_requests', {
+  id:                   serial('id').primaryKey(),
+  verificationId:       integer('verification_id').notNull().references(() => candidateEmploymentVerifications.id, { onDelete: 'cascade' }),
+  tokenHash:            text('token_hash').notNull().unique(),
+  sentAt:               text('sent_at').notNull(),
+  expiresAt:            text('expires_at').notNull(),
+  submittedAt:          text('submitted_at'),
+  invalidatedAt:        text('invalidated_at'),
+  provider:             text('provider'),
+  providerSubmissionId: text('provider_submission_id'),
+  createdAt:            text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  index('candidate_employment_verification_requests_idx').on(t.verificationId, t.createdAt),
+]);
+
+export const candidateEmploymentVerificationFormSubmissions = pgTable('candidate_employment_verification_form_submissions', {
+  id:                   serial('id').primaryKey(),
+  requestId:            integer('request_id').notNull().references(() => candidateEmploymentVerificationFormRequests.id, { onDelete: 'cascade' }),
+  verificationId:       integer('verification_id').notNull().references(() => candidateEmploymentVerifications.id, { onDelete: 'cascade' }),
+  provider:             text('provider').notNull(),
+  providerSubmissionId: text('provider_submission_id').notNull(),
+  submittedAt:          text('submitted_at').notNull(),
+  payload:              jsonb('payload').notNull(),
+  receivedAt:           text('received_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  unique('candidate_employment_verification_form_submissions_provider_id_unique').on(t.provider, t.providerSubmissionId),
+]);
+
+// Four-document pre-employment package. The files live in the private
+// candidate-pre-employment-docs bucket; this table stores their metadata.
+export const candidatePreEmploymentDocuments = pgTable('candidate_pre_employment_documents', {
+  id:          serial('id').primaryKey(),
+  candidateId: integer('candidate_id').notNull().references(() => candidates.id, { onDelete: 'cascade' }),
+  kind:        text('kind').notNull(), // sow | job_description | ai_policy | nda
+  fileName:    text('file_name').notNull(),
+  storagePath: text('storage_path').notNull(),
+  signedUrl:   text('signed_url').notNull(),
+  mimeType:    text('mime_type').notNull(),
+  sizeBytes:   integer('size_bytes').notNull(),
+  uploadedBy:  integer('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
+  uploadedAt:  text('uploaded_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  sentAt:      text('sent_at'),
+  signedAt:    text('signed_at'),
+}, (t) => [
+  unique('candidate_pre_employment_documents_candidate_kind_unique').on(t.candidateId, t.kind),
+]);
+
 export const leads = pgTable('leads', {
   id:         serial('id').primaryKey(),
   name:       text('name').notNull(),
