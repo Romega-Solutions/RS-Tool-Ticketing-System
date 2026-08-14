@@ -22,6 +22,11 @@ type Row = {
   consent_method: string | null;
 };
 
+type PositionOptionRow = {
+  id: number;
+  job_title: string;
+};
+
 const FILTERS = ['all', 'published', 'agreed', 'requested', 'none'] as const;
 type FilterKey = typeof FILTERS[number];
 const FILTER_LABEL: Record<FilterKey, string> = {
@@ -61,6 +66,15 @@ export default async function TalentPoolPage({ searchParams }: PageProps) {
     .order('is_public_talent', { ascending: false })
     .order('updated_at', { ascending: false })
     .limit(300);
+  const { data: positionData } = await supabase
+    .from('positions')
+    .select('id, job_title')
+    .eq('is_open', true)
+    .order('job_title', { ascending: true })
+    .limit(200);
+  const positions = ((positionData ?? []) as PositionOptionRow[])
+    .filter(position => Number.isInteger(position.id) && position.job_title.trim())
+    .map(position => ({ id: Number(position.id), jobTitle: position.job_title }));
 
   const errorMsg = error?.message;
   const tableMissing = isTableMissing(errorMsg) || (errorMsg?.toLowerCase().includes('consent_status') ?? false);
@@ -89,7 +103,7 @@ export default async function TalentPoolPage({ searchParams }: PageProps) {
         eyebrow="Recruiting tool"
         title="Talent Pool"
         description="Manage who appears on the public talent showcase at romega-solutions.com/talent. Publishing requires recorded candidate consent (GDPR) — send a consent email or mark agreed if you hold written proof, then publish. Public cards are anonymized to first name + last initial."
-        action={<CandidateForm />}
+        action={<CandidateForm positions={positions} />}
       />
 
       <AtsTabs />
