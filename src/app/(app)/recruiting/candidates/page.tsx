@@ -29,6 +29,11 @@ type CandidateRowData = {
   created_at:   string;
 };
 
+type PositionOptionRow = {
+  id: number;
+  job_title: string;
+};
+
 const SOURCE_LABEL: Record<string, string> = {
   referral: 'Referral', linkedin: 'LinkedIn', job_board: 'Job board', direct: 'Direct', manual: 'Manual',
 };
@@ -94,6 +99,18 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
     .order('created_at', { ascending: false })
     .limit(200);
 
+  // Manual candidates must be attached to a real, currently open position.
+  // The server action validates the chosen ID again before saving.
+  const { data: positionData } = await supabase
+    .from('positions')
+    .select('id, job_title')
+    .eq('is_open', true)
+    .order('job_title', { ascending: true })
+    .limit(200);
+  const positions = ((positionData ?? []) as PositionOptionRow[])
+    .filter(position => Number.isInteger(position.id) && position.job_title.trim())
+    .map(position => ({ id: Number(position.id), jobTitle: position.job_title }));
+
   const errorMsg = error?.message;
   const tableMissing = isTableMissing(errorMsg);
   const unexpectedError = error && !tableMissing ? errorMsg : null;
@@ -134,7 +151,7 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
                 action={deleteAllCandidates}
               />
               <ResumeUploadButton mode="create" variant="outline" />
-              <CandidateForm />
+              <CandidateForm positions={positions} />
             </div>
           ) : null
         }

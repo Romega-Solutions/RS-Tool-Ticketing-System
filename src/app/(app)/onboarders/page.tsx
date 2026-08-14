@@ -1,78 +1,98 @@
-import Link from 'next/link';
-import { redirect } from 'next/navigation';
+import Link from "next/link";
+import { redirect } from "next/navigation";
 import {
-  GraduationCap, ShieldCheck, CalendarCheck, Workflow, AlertCircle,
-  ArrowRight, UserPlus2, Briefcase, Mail, Clock, Settings2,
-} from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
-import { LeadToolHeader, StatCard } from '@/components/lead-tool-header';
-import { createAdminClient } from '@/lib/supabase/admin';
-import { getSession } from '@/lib/session';
-import { hasToolAccess } from '@/lib/rbac';
-import { APP_DEPARTMENTS } from '@/lib/orgchart';
+  GraduationCap,
+  ShieldCheck,
+  CalendarCheck,
+  Workflow,
+  AlertCircle,
+  ArrowRight,
+  UserPlus2,
+  Briefcase,
+  Mail,
+  Clock,
+  Settings2,
+} from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { LeadToolHeader, StatCard } from "@/components/lead-tool-header";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getSession } from "@/lib/session";
+import { hasToolAccess } from "@/lib/rbac";
+import { APP_DEPARTMENTS } from "@/lib/orgchart";
 import {
   ALLOWED_STATUSES,
   ALLOWED_TYPES,
   type OnboarderStatus,
   type OnboarderType,
-} from './constants';
-import { STATUS_LABEL, STATUS_COLOR } from './onboarder-row';
-import { CreateOnboarderForm } from './onboarder-forms';
-import { OnboarderFilterBar } from './onboarder-filter-bar';
-import { OnboardingHelpButton } from './onboarding-help';
+} from "./constants";
+import { STATUS_LABEL, STATUS_COLOR } from "./onboarder-row";
+import { CreateOnboarderForm } from "./onboarder-forms";
+import { OnboarderFilterBar } from "./onboarder-filter-bar";
+import { OnboardingHelpButton } from "./onboarding-help";
 
 // ─── Stage groupings (3 happy lanes + 1 terminal lane) ──────────────────────
 
-const LANES: { id: string; title: string; hint: string; statuses: OnboarderStatus[] }[] = [
+const LANES: {
+  id: string;
+  title: string;
+  hint: string;
+  statuses: OnboarderStatus[];
+}[] = [
   {
-    id: 'lane-prep',
-    title: 'Pre-employment',
-    hint:  'SOW → background check → pre-onboarding',
-    statuses: ['offer_signed', 'background_check', 'pre_onboarding'],
+    id: "lane-prep",
+    title: "Pre-employment",
+    hint: "Pre-onboarding",
+    statuses: ["pre_onboarding"],
   },
   {
-    id: 'lane-active',
-    title: 'Active onboarding',
-    hint:  'Day 1 → 30-day → 90-day',
-    statuses: ['day_one', 'thirty_day', 'ninety_day'],
+    id: "lane-active",
+    title: "Active onboarding",
+    hint: "Day 1 → 30-day → 90-day",
+    statuses: ["day_one", "thirty_day", "ninety_day"],
   },
   {
-    id: 'lane-final',
-    title: 'Resolved',
-    hint:  'Regularized + terminal-fail states',
-    statuses: ['regularized', 'failed_probation', 'withdrew'],
+    id: "lane-final",
+    title: "Resolved",
+    hint: "Regularized + terminal-fail states",
+    statuses: ["regularized", "failed_probation", "withdrew"],
   },
 ];
 
 type Row = {
-  id:                number;
-  full_name:         string;
-  personal_email:    string;
-  onboarder_type:    string;
-  role_title:        string | null;
-  team:              string | null;
+  id: number;
+  full_name: string;
+  personal_email: string;
+  onboarder_type: string;
+  role_title: string | null;
+  team: string | null;
   direct_supervisor: string | null;
-  status:            string;
-  start_date:        string | null;
-  sow_signed_at:     string | null;
-  created_at:        string;
+  status: string;
+  start_date: string | null;
+  sow_signed_at: string | null;
+  created_at: string;
 };
 
 const TYPE_LABEL: Record<OnboarderType, string> = {
-  contractor: 'Contractor',
-  intern:     'Intern',
+  contractor: "Contractor",
+  intern: "Intern",
 };
 
 function isTableMissing(msg: string | undefined) {
   if (!msg) return false;
   const m = msg.toLowerCase();
-  return m.includes('relation') && m.includes('does not exist');
+  return m.includes("relation") && m.includes("does not exist");
 }
 
 function formatDateShort(iso: string | null) {
   if (!iso) return null;
-  try { return new Date(iso).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }); }
-  catch { return iso; }
+  try {
+    return new Date(iso).toLocaleDateString("en-PH", {
+      month: "short",
+      day: "numeric",
+    });
+  } catch {
+    return iso;
+  }
 }
 
 function startOfWeek(d: Date): Date {
@@ -89,20 +109,29 @@ type PageProps = {
 
 export default async function OnboardingPage({ searchParams }: PageProps) {
   const session = await getSession();
-  if (!session || !hasToolAccess('onboarding', session.role, session.toolAccess)) {
-    redirect('/dashboard');
+  if (
+    !session ||
+    !hasToolAccess("onboarding", session.role, session.toolAccess)
+  ) {
+    redirect("/dashboard");
   }
 
-  const { q = '', status = 'all', type = 'all' } = await searchParams;
+  const { q = "", status = "all", type = "all" } = await searchParams;
   const query = q.trim().toLowerCase();
-  const statusFilter = (ALLOWED_STATUSES as readonly string[]).includes(status) ? status : 'all';
-  const typeFilter   = (ALLOWED_TYPES    as readonly string[]).includes(type)   ? type   : 'all';
+  const statusFilter = (ALLOWED_STATUSES as readonly string[]).includes(status)
+    ? status
+    : "all";
+  const typeFilter = (ALLOWED_TYPES as readonly string[]).includes(type)
+    ? type
+    : "all";
 
   const supabase = createAdminClient();
   const { data, error } = await supabase
-    .from('onboarders')
-    .select('id, full_name, personal_email, onboarder_type, role_title, team, direct_supervisor, status, start_date, sow_signed_at, created_at')
-    .order('created_at', { ascending: false })
+    .from("onboarders")
+    .select(
+      "id, full_name, personal_email, onboarder_type, role_title, team, direct_supervisor, status, start_date, sow_signed_at, created_at",
+    )
+    .order("created_at", { ascending: false })
     .limit(300);
 
   const errorMsg = error?.message;
@@ -110,38 +139,47 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
   const unexpectedError = error && !tableMissing ? errorMsg : null;
 
   const rows: Row[] = (data as Row[] | null) ?? [];
-  const filtered = rows.filter(r => {
-    const matchesQ = !query || [
-      r.full_name, r.personal_email,
-      r.role_title ?? '', r.team ?? '', r.direct_supervisor ?? '',
-    ].some(v => v.toLowerCase().includes(query));
-    const matchesStatus = statusFilter === 'all' || r.status === statusFilter;
-    const matchesType   = typeFilter   === 'all' || r.onboarder_type === typeFilter;
+  const filtered = rows.filter((r) => {
+    const matchesQ =
+      !query ||
+      [
+        r.full_name,
+        r.personal_email,
+        r.role_title ?? "",
+        r.team ?? "",
+        r.direct_supervisor ?? "",
+      ].some((v) => v.toLowerCase().includes(query));
+    const matchesStatus = statusFilter === "all" || r.status === statusFilter;
+    const matchesType = typeFilter === "all" || r.onboarder_type === typeFilter;
     return matchesQ && matchesStatus && matchesType;
   });
 
   // Stat counts
-  const TERMINAL = new Set(['regularized', 'failed_probation', 'withdrew']);
-  const activeCount = rows.filter(r => !TERMINAL.has(r.status)).length;
-  const bgCount     = rows.filter(r => r.status === 'background_check').length;
+  const TERMINAL = new Set(["regularized", "failed_probation", "withdrew"]);
+  const activeCount = rows.filter((r) => !TERMINAL.has(r.status)).length;
+  const bgCount = rows.filter((r) => r.status === "background_check").length;
 
   const monday = startOfWeek(new Date());
-  const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6); sunday.setHours(23,59,59,999);
-  const day1Count = rows.filter(r => {
-    if (r.status !== 'day_one' || !r.start_date) return false;
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+  sunday.setHours(23, 59, 59, 999);
+  const day1Count = rows.filter((r) => {
+    if (r.status !== "day_one" || !r.start_date) return false;
     const d = new Date(r.start_date);
     return d >= monday && d <= sunday;
   }).length;
 
   const workflowEnvKeys = [
-    'N8N_BG_CHECK_INITIATE_URL',
-    'N8N_REFERENCE_REQUEST_URL',
-    'N8N_EMPLOYMENT_VERIFICATION_URL',
-    'N8N_ONBOARDING_WELCOME_URL',
-    'N8N_GMAIL_SIGNATURE_NUDGE_URL',
-    'N8N_GROUP_CHAT_ANNOUNCE_URL',
+    "N8N_BG_CHECK_INITIATE_URL",
+    "N8N_REFERENCE_REQUEST_URL",
+    "N8N_EMPLOYMENT_VERIFICATION_URL",
+    "N8N_ONBOARDING_WELCOME_URL",
+    "N8N_GMAIL_SIGNATURE_NUDGE_URL",
+    "N8N_GROUP_CHAT_ANNOUNCE_URL",
   ];
-  const configuredCount = workflowEnvKeys.filter(k => process.env[k]?.trim()).length;
+  const configuredCount = workflowEnvKeys.filter((k) =>
+    process.env[k]?.trim(),
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -171,9 +209,13 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
           <CardContent className="p-6 space-y-2">
             <div className="flex items-center gap-2 text-red-700">
               <AlertCircle className="w-4 h-4" />
-              <h2 className="font-serif text-base font-bold">Couldn&apos;t load onboarders</h2>
+              <h2 className="font-serif text-base font-bold">
+                Couldn&apos;t load onboarders
+              </h2>
             </div>
-            <p className="text-sm text-(--rs-neutral-grey-600)">{unexpectedError}</p>
+            <p className="text-sm text-(--rs-neutral-grey-600)">
+              {unexpectedError}
+            </p>
           </CardContent>
         </Card>
       )}
@@ -181,10 +223,31 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
       {!tableMissing && !unexpectedError && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard icon={<GraduationCap className="w-4 h-4" />} label="Active onboarders" value={String(activeCount)} hint="not yet resolved" />
-            <StatCard icon={<ShieldCheck   className="w-4 h-4" />} label="Awaiting BG check" value={String(bgCount)}     hint="background_check stage" />
-            <StatCard icon={<CalendarCheck className="w-4 h-4" />} label="Day-1 this week"   value={String(day1Count)}   hint="starting Mon–Sun" />
-            <StatCard icon={<Workflow      className="w-4 h-4" />} label="Workflows configured" value={`${configuredCount} / ${workflowEnvKeys.length}`} hint="n8n MVP webhooks" accent />
+            <StatCard
+              icon={<GraduationCap className="w-4 h-4" />}
+              label="Active onboarders"
+              value={String(activeCount)}
+              hint="not yet resolved"
+            />
+            <StatCard
+              icon={<ShieldCheck className="w-4 h-4" />}
+              label="Awaiting BG check"
+              value={String(bgCount)}
+              hint="background_check stage"
+            />
+            <StatCard
+              icon={<CalendarCheck className="w-4 h-4" />}
+              label="Day-1 this week"
+              value={String(day1Count)}
+              hint="starting Mon–Sun"
+            />
+            <StatCard
+              icon={<Workflow className="w-4 h-4" />}
+              label="Workflows configured"
+              value={`${configuredCount} / ${workflowEnvKeys.length}`}
+              hint="n8n MVP webhooks"
+              accent
+            />
           </div>
 
           {/* Filter bar */}
@@ -224,14 +287,21 @@ function Kanban({ rows }: { rows: Row[] }) {
   }
   return (
     <div className="grid gap-5 lg:grid-cols-3">
-      {LANES.map(lane => {
-        const laneRows = lane.statuses.flatMap(s => byStatus.get(s) ?? []);
+      {LANES.map((lane) => {
+        const laneRows = lane.statuses.flatMap((s) => byStatus.get(s) ?? []);
         return (
-          <div key={lane.id} className="rounded-2xl border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50)/40 p-4">
+          <div
+            key={lane.id}
+            className="rounded-2xl border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50)/40 p-4"
+          >
             <div className="mb-3 flex items-baseline justify-between">
               <div>
-                <h3 className="font-serif text-sm font-bold text-(--rs-neutral-grey-900)">{lane.title}</h3>
-                <p className="text-[11px] text-(--rs-neutral-grey-500)">{lane.hint}</p>
+                <h3 className="font-serif text-sm font-bold text-(--rs-neutral-grey-900)">
+                  {lane.title}
+                </h3>
+                <p className="text-[11px] text-(--rs-neutral-grey-500)">
+                  {lane.hint}
+                </p>
               </div>
               <span className="rounded-full bg-white border border-(--rs-neutral-grey-200) px-2 py-0.5 text-[11px] font-semibold text-(--rs-neutral-grey-700)">
                 {laneRows.length}
@@ -239,7 +309,7 @@ function Kanban({ rows }: { rows: Row[] }) {
             </div>
 
             <div className="space-y-3">
-              {lane.statuses.map(s => (
+              {lane.statuses.map((s) => (
                 <StageColumn key={s} status={s} rows={byStatus.get(s) ?? []} />
               ))}
             </div>
@@ -250,15 +320,25 @@ function Kanban({ rows }: { rows: Row[] }) {
   );
 }
 
-function StageColumn({ status, rows }: { status: OnboarderStatus; rows: Row[] }) {
+function StageColumn({
+  status,
+  rows,
+}: {
+  status: OnboarderStatus;
+  rows: Row[];
+}) {
   const label = STATUS_LABEL[status];
   return (
     <div>
       <div className="mb-2 flex items-center gap-2">
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${STATUS_COLOR[status]}`}>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${STATUS_COLOR[status]}`}
+        >
           {label}
         </span>
-        <span className="text-[10px] text-(--rs-neutral-grey-400)">{rows.length}</span>
+        <span className="text-[10px] text-(--rs-neutral-grey-400)">
+          {rows.length}
+        </span>
       </div>
       {rows.length === 0 ? (
         <p className="rounded-lg border border-dashed border-(--rs-neutral-grey-200) bg-white/40 px-3 py-3 text-[11px] text-(--rs-neutral-grey-400)">
@@ -266,7 +346,9 @@ function StageColumn({ status, rows }: { status: OnboarderStatus; rows: Row[] })
         </p>
       ) : (
         <ul className="space-y-2">
-          {rows.map(r => <Card_ key={r.id} row={r} />)}
+          {rows.map((r) => (
+            <Card_ key={r.id} row={r} />
+          ))}
         </ul>
       )}
     </div>
@@ -274,7 +356,8 @@ function StageColumn({ status, rows }: { status: OnboarderStatus; rows: Row[] })
 }
 
 function Card_({ row }: { row: Row }) {
-  const typeLabel = TYPE_LABEL[row.onboarder_type as OnboarderType] ?? row.onboarder_type;
+  const typeLabel =
+    TYPE_LABEL[row.onboarder_type as OnboarderType] ?? row.onboarder_type;
   return (
     <li>
       <Link
@@ -289,7 +372,9 @@ function Card_({ row }: { row: Row }) {
             {row.role_title && (
               <p className="mt-0.5 flex items-center gap-1 text-[11px] text-(--rs-neutral-grey-600)">
                 <Briefcase className="w-3 h-3 shrink-0" /> {row.role_title}
-                {row.team && <span className="text-(--rs-neutral-grey-300)">·</span>}
+                {row.team && (
+                  <span className="text-(--rs-neutral-grey-300)">·</span>
+                )}
                 {row.team && <span className="truncate">{row.team}</span>}
               </p>
             )}
@@ -325,9 +410,12 @@ function EmptyState() {
       <div className="mx-auto w-12 h-12 rounded-full bg-(--rs-primary-50) flex items-center justify-center mb-3">
         <UserPlus2 className="w-6 h-6 text-(--rs-primary-500)" />
       </div>
-      <p className="text-sm font-semibold text-(--rs-neutral-grey-900)">No onboarders yet</p>
+      <p className="text-sm font-semibold text-(--rs-neutral-grey-900)">
+        No onboarders yet
+      </p>
       <p className="text-sm text-(--rs-neutral-grey-500) mt-1 max-w-md mx-auto">
-        Click <strong>New onboarder</strong> above to start a record. The HRBP keeps the SOW out-of-band — the app picks up from offer-signed.
+        Click <strong>New onboarder</strong> above to start a record. The HRBP
+        keeps the SOW out-of-band — the app picks up from offer-signed.
       </p>
     </div>
   );
@@ -342,16 +430,33 @@ function SetupRequiredCard() {
             <AlertCircle className="w-5 h-5" />
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="font-serif text-lg font-bold text-(--rs-neutral-grey-900)">Setup required</h2>
+            <h2 className="font-serif text-lg font-bold text-(--rs-neutral-grey-900)">
+              Setup required
+            </h2>
             <p className="mt-1 text-sm text-(--rs-neutral-grey-600)">
-              The <code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">onboarders</code> table
-              hasn&apos;t been created yet. Run this in the Supabase SQL Editor:
+              The{" "}
+              <code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">
+                onboarders
+              </code>{" "}
+              table hasn&apos;t been created yet. Run this in the Supabase SQL
+              Editor:
             </p>
             <ol className="mt-3 list-decimal text-sm text-(--rs-neutral-grey-700) ml-5 space-y-1.5 leading-relaxed">
-              <li><code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">docs/migrations/add-onboarders-tables.sql</code></li>
+              <li>
+                <code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">
+                  docs/migrations/add-onboarders-tables.sql
+                </code>
+              </li>
             </ol>
             <p className="mt-3 text-sm text-(--rs-neutral-grey-600)">
-              See <Link href="/onboarders/setup" className="text-(--rs-primary-700) hover:underline">Setup &amp; workflows</Link> for the full MVP setup checklist.
+              See{" "}
+              <Link
+                href="/onboarders/setup"
+                className="text-(--rs-primary-700) hover:underline"
+              >
+                Setup &amp; workflows
+              </Link>{" "}
+              for the full MVP setup checklist.
             </p>
           </div>
         </div>

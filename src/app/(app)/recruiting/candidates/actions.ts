@@ -664,20 +664,35 @@ export async function createCandidate(formData: FormData) {
   const fullNameRaw = String(formData.get('fullName')    ?? '').trim();
   const emailRaw    = String(formData.get('email')       ?? '').trim() || null;
   const phoneRaw    = String(formData.get('phone')       ?? '').trim() || null;
-  const position    = String(formData.get('position')    ?? '').trim() || null;
+  const positionIdRaw = String(formData.get('positionId') ?? '').trim();
   const source      = String(formData.get('source')      ?? '').trim() || null;
   const linkedinUrl = String(formData.get('linkedinUrl') ?? '').trim() || null;
   const notes       = String(formData.get('notes')       ?? '').trim() || null;
 
   if (!fullNameRaw) throw new Error('Full name is required');
+  const positionId = Number(positionIdRaw);
+  if (!Number.isInteger(positionId) || positionId <= 0) {
+    throw new Error('Select an open position');
+  }
 
   const fullName = toProperName(fullNameRaw);
   const phone    = phoneRaw ? formatPhoneNumber(phoneRaw) : null;
   const email    = emailRaw;
 
   const supabase = createAdminClient();
+  // Do not trust a position title submitted by the browser. Resolve the ID
+  // server-side so the candidate remains linked to the actual ATS position.
+  const { data: selectedPosition, error: positionError } = await supabase
+    .from('positions')
+    .select('id, job_title, is_open')
+    .eq('id', positionId)
+    .maybeSingle();
+  if (positionError) throw new Error(`Failed to load selected position: ${positionError.message}`);
+  if (!selectedPosition || !selectedPosition.is_open || !selectedPosition.job_title?.trim()) {
+    throw new Error('Select an open position');
+  }
+  const position = selectedPosition.job_title.trim();
   const applicationCode = await mintApplicationCode(supabase);
-  const positionId = await findPositionIdByTitle(supabase, position);
 
   const insertPayload = {
     full_name:        fullName,
