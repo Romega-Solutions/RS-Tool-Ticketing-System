@@ -211,6 +211,7 @@ export type OnboardingTemplate =
   | 'bg-check-initiate'
   | 'reference-request'
   | 'employment-verification'
+  | 'pre-employment-documents-send'
   | 'welcome'
   // Post-MVP — left in the type so action layer doesn't need to be
   // re-edited when the workflows ship:
@@ -239,6 +240,7 @@ const ONBOARDING_TEMPLATE_ENV: Record<OnboardingTemplate, string> = {
   'bg-check-initiate':       'N8N_BG_CHECK_INITIATE_URL',
   'reference-request':       'N8N_REFERENCE_REQUEST_URL',
   'employment-verification': 'N8N_EMPLOYMENT_VERIFICATION_URL',
+  'pre-employment-documents-send': 'N8N_PRE_EMPLOYMENT_DOCUMENTS_SEND_URL',
   'welcome':                 'N8N_ONBOARDING_WELCOME_URL',
   // Post-MVP envs — declared so the helper stays exhaustive; resolution
   // falls back to null and the caller records `email_failed` in history.

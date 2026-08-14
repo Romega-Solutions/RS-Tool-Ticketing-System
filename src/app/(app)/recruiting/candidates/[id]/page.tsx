@@ -14,6 +14,9 @@ import { CandidateStatus, CandidateRating, CandidateDelete } from '../candidate-
 import { TalentConsentPanel } from '../talent-consent-panel';
 import { ResumeUploadCard, UploadResumeButton } from '../resume-upload';
 import { CandidateEditForm } from '../candidate-edit-form';
+import { SendCandidateEmploymentVerificationEmailsButton, SendCandidateReferenceEmailsButton, SendPreEmploymentBgCheckButton } from '../pre-employment-actions';
+import { EmploymentVerificationResponseModal, ReferenceResponseModal } from '../reference-response-modal';
+import { MarkCandidateSowSignedButton, PreEmploymentDocumentUpload, SendCandidateDocumentPackageButton } from '../pre-employment-document-upload';
 import { ResendEmailButton } from './resend-email-button';
 import { formatPhoneNumber } from '@/lib/format';
 
@@ -60,7 +63,78 @@ type HistoryRow = {
   created_at: string;
 };
 
-const VALID_PRE_EMPLOYMENT_TABS = ['background-check', 'documents'] as const;
+type PreEmploymentRequestRow = {
+  id:             number;
+  sent_at:        string;
+  expires_at:     string;
+  submitted_at:   string | null;
+  invalidated_at: string | null;
+};
+
+type PreEmploymentSubmissionRow = {
+  id:           number;
+  submitted_at: string;
+  payload:      unknown;
+};
+
+type CharacterReference = {
+  id?: number;
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  jobTitle: string;
+  relationship: string;
+  bestTimeToCall: string;
+  requestSentAt?: string | null;
+  respondedAt?: string | null;
+  responsePayload?: unknown;
+};
+
+type CandidateReferenceRow = {
+  id:                 number;
+  reference_number:   number;
+  referee_name:       string;
+  referee_email:      string;
+  referee_phone:      string | null;
+  referee_company:    string | null;
+  referee_job_title:  string | null;
+  relationship:       string | null;
+  best_time_to_call:  string | null;
+  request_sent_at:    string | null;
+  responded_at:       string | null;
+};
+
+type CandidateReferenceSubmissionRow = {
+  reference_id: number;
+  submitted_at: string;
+  payload: unknown;
+};
+
+type EmploymentVerification = {
+  id?: number;
+  company: string;
+  contactName: string;
+  email: string;
+  phone: string;
+  bestTimeToCall: string;
+  requestSentAt?: string | null;
+  respondedAt?: string | null;
+  responsePayload?: unknown;
+};
+
+type CandidateEmploymentVerificationRow = {
+  id: number; company: string; hr_contact_name: string | null; hr_email: string;
+  hr_phone: string | null; best_time_to_call: string | null;
+  request_sent_at: string | null; responded_at: string | null;
+};
+
+type CandidateEmploymentVerificationSubmissionRow = {
+  verification_id: number; submitted_at: string; payload: unknown;
+};
+type CandidatePreEmploymentDocumentRow = { kind: 'sow' | 'job_description' | 'ai_policy' | 'nda'; file_name: string; signed_url: string; uploaded_at: string; sent_at: string | null; signed_at: string | null; };
+
+const VALID_PRE_EMPLOYMENT_TABS = ['information', 'background-check', 'documents'] as const;
 type PreEmploymentTab = typeof VALID_PRE_EMPLOYMENT_TABS[number];
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -111,6 +185,38 @@ function abbreviateName(name: string | null | undefined): string {
   return `${parts[0]} ${last[0].toUpperCase()}`;
 }
 
+function payloadText(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  return typeof value === 'string' ? value.trim() : value == null ? '' : String(value).trim();
+}
+
+function backgroundCheckEntries(payload: unknown): {
+  references: CharacterReference[];
+  verifications: EmploymentVerification[];
+} {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { references: [], verifications: [] };
+  }
+  const data = payload as Record<string, unknown>;
+  const references = [1, 2, 3].map(index => ({
+    name: payloadText(data, `reference_${index}_name`),
+    email: payloadText(data, `reference_${index}_email`),
+    phone: payloadText(data, `reference_${index}_phone`),
+    company: payloadText(data, `reference_${index}_company`),
+    jobTitle: payloadText(data, `reference_${index}_jobTitle`),
+    relationship: payloadText(data, `reference_${index}_relationship`),
+    bestTimeToCall: payloadText(data, `reference_${index}_bestTimetoCall`),
+  })).filter(reference => reference.name || reference.email || reference.phone);
+  const verifications = [1, 2, 3].map(index => ({
+    company: payloadText(data, `employer_${index}_company`),
+    contactName: payloadText(data, `employer_${index}_hr_contact_name`),
+    email: payloadText(data, `employer_${index}_hr_email`),
+    phone: payloadText(data, `employer_${index}_phone`),
+    bestTimeToCall: payloadText(data, `employer_${index}_bestTimetoCall`),
+  })).filter(verification => verification.company || verification.contactName || verification.email || verification.phone);
+  return { references, verifications };
+}
+
 export default async function CandidateDetailPage({
   params,
   searchParams,
@@ -140,6 +246,7 @@ export default async function CandidateDetailPage({
   if (!data) notFound();
 
   const c = data as Candidate;
+  const showPreEmployment = c.status === 'offered' || c.status === 'hired';
   const requestedPreEmploymentTab = (await searchParams).preEmployment;
   const preEmploymentTabValue = Array.isArray(requestedPreEmploymentTab)
     ? requestedPreEmploymentTab[0]
@@ -189,10 +296,99 @@ export default async function CandidateDetailPage({
     history = histData as HistoryRow[];
   }
 
+  let backgroundCheckRequest: PreEmploymentRequestRow | null = null;
+  let backgroundCheckSubmission: PreEmploymentSubmissionRow | null = null;
+  let candidateReferences: CandidateReferenceRow[] = [];
+  let candidateReferenceSubmissions: CandidateReferenceSubmissionRow[] = [];
+  let candidateEmploymentVerifications: CandidateEmploymentVerificationRow[] = [];
+  let candidateEmploymentVerificationSubmissions: CandidateEmploymentVerificationSubmissionRow[] = [];
+  let candidateDocuments: CandidatePreEmploymentDocumentRow[] = [];
+  if (showPreEmployment) {
+    const [requestResult, submissionResult] = await Promise.all([
+      supabase
+        .from('candidate_pre_employment_requests')
+        .select('id, sent_at, expires_at, submitted_at, invalidated_at')
+        .eq('candidate_id', id)
+        .eq('form_key', 'background_check')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('candidate_pre_employment_submissions')
+        .select('id, submitted_at, payload')
+        .eq('candidate_id', id)
+        .eq('form_key', 'background_check')
+        .order('submitted_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+    // The pre-employment migration may not have been applied yet. Preserve the
+    // candidate profile and its original placeholder state in that situation.
+    if (!requestResult.error && requestResult.data) {
+      backgroundCheckRequest = requestResult.data as PreEmploymentRequestRow;
+    }
+    if (!submissionResult.error && submissionResult.data) {
+      backgroundCheckSubmission = submissionResult.data as PreEmploymentSubmissionRow;
+    }
+    // References are recruitment-owned after the candidate submits the
+    // background-check form. Do not couple this query to only the latest form
+    // submission: a saved referee response must remain visible on the profile.
+    const { data: referencesData, error: referencesError } = await supabase
+      .from('candidate_references')
+      .select('id, reference_number, referee_name, referee_email, referee_phone, referee_company, referee_job_title, relationship, best_time_to_call, request_sent_at, responded_at')
+      .eq('candidate_id', id)
+      .order('reference_number', { ascending: true });
+    if (!referencesError && referencesData) {
+      candidateReferences = referencesData as CandidateReferenceRow[];
+    }
+    if (candidateReferences.length > 0) {
+      const { data: referenceSubmissionData, error: referenceSubmissionsError } = await supabase
+        .from('candidate_reference_form_submissions')
+        .select('reference_id, submitted_at, payload')
+        .in('reference_id', candidateReferences.map(reference => reference.id))
+        .order('submitted_at', { ascending: false });
+      if (!referenceSubmissionsError && referenceSubmissionData) {
+        candidateReferenceSubmissions = referenceSubmissionData as CandidateReferenceSubmissionRow[];
+      }
+    }
+    const { data: employmentData, error: employmentError } = await supabase
+      .from('candidate_employment_verifications')
+      .select('id, company, hr_contact_name, hr_email, hr_phone, best_time_to_call, request_sent_at, responded_at')
+      .eq('candidate_id', id)
+      .order('verification_number', { ascending: true });
+    if (!employmentError && employmentData) {
+      candidateEmploymentVerifications = employmentData as CandidateEmploymentVerificationRow[];
+    }
+    if (candidateEmploymentVerifications.length > 0) {
+      const { data: employmentSubmissionData, error: employmentSubmissionsError } = await supabase
+        .from('candidate_employment_verification_form_submissions')
+        .select('verification_id, submitted_at, payload')
+        .in('verification_id', candidateEmploymentVerifications.map(verification => verification.id))
+        .order('submitted_at', { ascending: false });
+      if (!employmentSubmissionsError && employmentSubmissionData) {
+        candidateEmploymentVerificationSubmissions = employmentSubmissionData as CandidateEmploymentVerificationSubmissionRow[];
+      }
+    }
+    const { data: documentsData, error: documentsError } = await supabase
+      .from('candidate_pre_employment_documents').select('kind, file_name, signed_url, uploaded_at, sent_at, signed_at').eq('candidate_id', id);
+    if (!documentsError && documentsData) {
+      candidateDocuments = documentsData as CandidatePreEmploymentDocumentRow[];
+    } else if (documentsError?.message.toLowerCase().includes('signed_at')) {
+      // Keep existing documents visible if the initial documents migration was
+      // applied but its later signed_at follow-up has not been run yet.
+      const { data: legacyDocuments, error: legacyDocumentsError } = await supabase
+        .from('candidate_pre_employment_documents').select('kind, file_name, signed_url, uploaded_at, sent_at').eq('candidate_id', id);
+      if (!legacyDocumentsError && legacyDocuments) {
+        candidateDocuments = (legacyDocuments as Array<Omit<CandidatePreEmploymentDocumentRow, 'signed_at'>>)
+          .map(document => ({ ...document, signed_at: null }));
+      }
+    }
+  }
+
   const hasParsedData =
     c.parsed_at || c.summary || (c.skills?.length ?? 0) > 0 ||
     (c.experience?.length ?? 0) > 0 || (c.education?.length ?? 0) > 0;
-  const showPreEmployment = c.status === 'offered' || c.status === 'hired';
 
   // If the most recent email-related event was a failure, surface a Resend
   // button. We look at email_sent / email_failed rows only and ignore
@@ -307,13 +503,13 @@ export default async function CandidateDetailPage({
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          {c.summary && (
+          {!showPreEmployment && c.summary && (
             <Section title="Summary">
               <p className="text-sm text-(--rs-neutral-grey-700) leading-relaxed whitespace-pre-wrap">{c.summary}</p>
             </Section>
           )}
 
-          {(c.skills?.length ?? 0) > 0 && (
+          {!showPreEmployment && (c.skills?.length ?? 0) > 0 && (
             <Section title={`Skills · ${c.skills!.length}`}>
               <div className="flex flex-wrap gap-1.5">
                 {c.skills!.map((s, i) => (
@@ -325,7 +521,7 @@ export default async function CandidateDetailPage({
             </Section>
           )}
 
-          {(c.experience?.length ?? 0) > 0 && (
+          {!showPreEmployment && (c.experience?.length ?? 0) > 0 && (
             <Section title={`Experience · ${c.experience!.length}`} icon={<Briefcase className="w-4 h-4" />}>
               <ol className="relative space-y-5 border-l border-(--rs-neutral-grey-200) pl-5">
                 {c.experience!.map((e, i) => (
@@ -350,7 +546,7 @@ export default async function CandidateDetailPage({
             </Section>
           )}
 
-          {(c.education?.length ?? 0) > 0 && (
+          {!showPreEmployment && (c.education?.length ?? 0) > 0 && (
             <Section title={`Education · ${c.education!.length}`} icon={<GraduationCap className="w-4 h-4" />}>
               <ul className="space-y-3">
                 {c.education!.map((e, i) => (
@@ -373,7 +569,7 @@ export default async function CandidateDetailPage({
             </Section>
           )}
 
-          {((c.certifications?.length ?? 0) > 0 || (c.languages?.length ?? 0) > 0) && (
+          {!showPreEmployment && ((c.certifications?.length ?? 0) > 0 || (c.languages?.length ?? 0) > 0) && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {(c.certifications?.length ?? 0) > 0 && (
                 <Section title="Certifications" icon={<Award className="w-4 h-4" />}>
@@ -396,7 +592,7 @@ export default async function CandidateDetailPage({
             </div>
           )}
 
-          {c.notes && (
+          {!showPreEmployment && c.notes && (
             <Section title="Internal notes" icon={<FileText className="w-4 h-4" />}>
               <p className="text-sm text-(--rs-neutral-grey-700) leading-relaxed whitespace-pre-wrap">{c.notes}</p>
             </Section>
@@ -405,8 +601,20 @@ export default async function CandidateDetailPage({
           {showPreEmployment && (
             <>
               <PreEmploymentTabBar id={c.id} active={activePreEmploymentTab} />
-              {activePreEmploymentTab === 'background-check' && <PreEmploymentBackgroundCheckTab />}
-              {activePreEmploymentTab === 'documents' && <PreEmploymentDocumentsTab />}
+              {activePreEmploymentTab === 'information' && <PreEmploymentCandidateInformationTab candidate={c} />}
+              {activePreEmploymentTab === 'background-check' && (
+                <PreEmploymentBackgroundCheckTab
+                  candidateId={c.id}
+                  canSend={c.status === 'offered'}
+                  request={backgroundCheckRequest}
+                  submission={backgroundCheckSubmission}
+                  candidateReferences={candidateReferences}
+                  candidateReferenceSubmissions={candidateReferenceSubmissions}
+                  candidateEmploymentVerifications={candidateEmploymentVerifications}
+                  candidateEmploymentVerificationSubmissions={candidateEmploymentVerificationSubmissions}
+                />
+              )}
+              {activePreEmploymentTab === 'documents' && <PreEmploymentDocumentsTab candidateId={c.id} canUpload={c.status === 'offered'} documents={candidateDocuments} />}
             </>
           )}
         </div>
@@ -549,43 +757,282 @@ export default async function CandidateDetailPage({
   );
 }
 
-function Section({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
+function Section({
+  title, icon, action, children,
+}: {
+  title: string;
+  icon?: React.ReactNode;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <Card>
       <CardContent className="p-5">
-        <h2 className="font-serif text-base font-bold text-(--rs-neutral-grey-900) flex items-center gap-2 mb-3">
-          {icon && <span className="text-(--rs-primary-600)">{icon}</span>}
-          {title}
-        </h2>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 font-serif text-base font-bold text-(--rs-neutral-grey-900)">
+            {icon && <span className="text-(--rs-primary-600)">{icon}</span>}
+            {title}
+          </h2>
+          {action}
+        </div>
         {children}
       </CardContent>
     </Card>
   );
 }
 
-function PreEmploymentBackgroundCheckTab() {
+function PreEmploymentBackgroundCheckTab({
+  candidateId, canSend, request, submission, candidateReferences, candidateReferenceSubmissions,
+  candidateEmploymentVerifications, candidateEmploymentVerificationSubmissions,
+}: {
+  candidateId: number;
+  canSend: boolean;
+  request: PreEmploymentRequestRow | null;
+  submission: PreEmploymentSubmissionRow | null;
+  candidateReferences: CandidateReferenceRow[];
+  candidateReferenceSubmissions: CandidateReferenceSubmissionRow[];
+  candidateEmploymentVerifications: CandidateEmploymentVerificationRow[];
+  candidateEmploymentVerificationSubmissions: CandidateEmploymentVerificationSubmissionRow[];
+}) {
+  const { references: payloadReferences, verifications: payloadVerifications } = backgroundCheckEntries(submission?.payload);
+  const submissionsByReferenceId = new Map<number, CandidateReferenceSubmissionRow>();
+  for (const referenceSubmission of candidateReferenceSubmissions) {
+    if (!submissionsByReferenceId.has(referenceSubmission.reference_id)) {
+      submissionsByReferenceId.set(referenceSubmission.reference_id, referenceSubmission);
+    }
+  }
+  const references: CharacterReference[] = candidateReferences.length > 0
+    ? candidateReferences.map(reference => ({
+        id: reference.id,
+        name: reference.referee_name,
+        email: reference.referee_email,
+        phone: reference.referee_phone ?? '',
+        company: reference.referee_company ?? '',
+        jobTitle: reference.referee_job_title ?? '',
+        relationship: reference.relationship ?? '',
+        bestTimeToCall: reference.best_time_to_call ?? '',
+        requestSentAt: reference.request_sent_at,
+        respondedAt: reference.responded_at,
+        responsePayload: submissionsByReferenceId.get(reference.id)?.payload,
+      }))
+    : payloadReferences;
+  const employmentSubmissionsByVerificationId = new Map<number, CandidateEmploymentVerificationSubmissionRow>();
+  for (const employmentSubmission of candidateEmploymentVerificationSubmissions) {
+    if (!employmentSubmissionsByVerificationId.has(employmentSubmission.verification_id)) {
+      employmentSubmissionsByVerificationId.set(employmentSubmission.verification_id, employmentSubmission);
+    }
+  }
+  const verifications: EmploymentVerification[] = candidateEmploymentVerifications.length > 0
+    ? candidateEmploymentVerifications.map(verification => ({
+        id: verification.id, company: verification.company, contactName: verification.hr_contact_name ?? '',
+        email: verification.hr_email, phone: verification.hr_phone ?? '', bestTimeToCall: verification.best_time_to_call ?? '',
+        requestSentAt: verification.request_sent_at, respondedAt: verification.responded_at,
+        responsePayload: employmentSubmissionsByVerificationId.get(verification.id)?.payload,
+      }))
+    : payloadVerifications;
+  const submitted = !!submission;
+  const allThreeReferencesReady = candidateReferences.length === 3 && candidateReferences.every(reference =>
+    !!reference.referee_name.trim() && !!reference.referee_email.trim(),
+  );
+  const unsentReferenceCount = candidateReferences.filter(reference => !reference.request_sent_at).length;
+  const unsentEmploymentVerificationCount = candidateEmploymentVerifications.filter(verification => !verification.request_sent_at).length;
+
   return (
     <div className="space-y-6">
-      <Section title="Character references · 0" icon={<Mail className="w-4 h-4" />}>
-        <PreEmploymentEmptyRow text="No references yet. Character reference requests and responses will be managed here." />
+      <BackgroundCheckRequestState request={request} submission={submission} />
+
+      <Section
+        title={`Character references · ${references.length}`}
+        icon={<Mail className="w-4 h-4" />}
+        action={canSend && !submitted
+          ? <SendPreEmploymentBgCheckButton candidateId={candidateId} />
+          : canSend && allThreeReferencesReady && unsentReferenceCount > 0
+            ? <SendCandidateReferenceEmailsButton candidateId={candidateId} remainingCount={unsentReferenceCount} />
+            : undefined}
+      >
+        {references.length === 0
+          ? <PreEmploymentEmptyRow text={submitted
+            ? 'The submitted form did not include any character references.'
+            : 'No references yet. Send the background-check email to request them from the candidate.'} />
+          : <div className="space-y-3">{references.map((reference, index) => (
+            <ReferenceSubmissionCard key={`${reference.email}-${index}`} reference={reference} index={index} />
+          ))}</div>}
       </Section>
-      <Section title="Employment verifications · 0" icon={<Building2 className="w-4 h-4" />}>
-        <PreEmploymentEmptyRow text="No verifications yet. Previous employment verification will be managed here." />
+
+      <Section
+        title={`Employment verifications · ${verifications.length}`}
+        icon={<Building2 className="w-4 h-4" />}
+        action={canSend && submitted && unsentEmploymentVerificationCount > 0
+          ? <SendCandidateEmploymentVerificationEmailsButton candidateId={candidateId} remainingCount={unsentEmploymentVerificationCount} />
+          : undefined}
+      >
+        {verifications.length === 0
+          ? <PreEmploymentEmptyRow text={submitted
+            ? 'The submitted form did not include any employment-verification contacts.'
+            : 'No employment-verification contacts yet. They will appear after the candidate submits the form.'} />
+          : <div className="space-y-3">{verifications.map((verification, index) => (
+            <EmploymentVerificationCard key={`${verification.email}-${index}`} verification={verification} index={index} />
+          ))}</div>}
       </Section>
     </div>
   );
 }
 
-function PreEmploymentDocumentsTab() {
+function PreEmploymentCandidateInformationTab({ candidate }: { candidate: Candidate }) {
+  const hasResumeInformation = Boolean(
+    candidate.summary ||
+    (candidate.skills?.length ?? 0) > 0 ||
+    (candidate.experience?.length ?? 0) > 0 ||
+    (candidate.education?.length ?? 0) > 0,
+  );
+
   return (
-    <Section title="Pre-Employment Documents" icon={<FileText className="w-4 h-4" />}>
+    <Section title="Resume Information" icon={<FileText className="w-4 h-4" />}>
+      {!hasResumeInformation ? (
+        <PreEmploymentEmptyRow text="No resume information yet. Upload and parse a resume to show the candidate's summary, skills, experience, and education here." />
+      ) : (
+        <div className="space-y-5">
+          {candidate.summary && <p className="whitespace-pre-wrap text-sm leading-relaxed text-(--rs-neutral-grey-700)">{candidate.summary}</p>}
+
+          {(candidate.skills?.length ?? 0) > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-(--rs-neutral-grey-700)">Skills</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {candidate.skills!.map((skill, index) => (
+                  <span key={index} className="rounded-md bg-(--rs-primary-50) px-2.5 py-1 text-xs font-medium text-(--rs-primary-800)">{skill}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(candidate.experience?.length ?? 0) > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-(--rs-neutral-grey-700)">Experience</p>
+              <div className="mt-2 space-y-3">
+                {candidate.experience!.map((experience, index) => (
+                  <div key={index} className="rounded-lg border border-(--rs-neutral-grey-200) bg-white p-3">
+                    <p className="text-sm font-semibold text-(--rs-neutral-grey-900)">
+                      {experience.title || 'Role'} {experience.company && <span className="font-normal text-(--rs-neutral-grey-600)">@ {experience.company}</span>}
+                    </p>
+                    {formatDateRange(experience.start_date, experience.end_date) && <p className="mt-0.5 text-xs text-(--rs-neutral-grey-500)">{formatDateRange(experience.start_date, experience.end_date)}</p>}
+                    {experience.description && <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-(--rs-neutral-grey-700)">{experience.description}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(candidate.education?.length ?? 0) > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-(--rs-neutral-grey-700)">Education</p>
+              <div className="mt-2 space-y-3">
+                {candidate.education!.map((education, index) => (
+                  <div key={index} className="rounded-lg border border-(--rs-neutral-grey-200) bg-white p-3">
+                    <p className="text-sm font-semibold text-(--rs-neutral-grey-900)">{education.institution || 'Institution'}</p>
+                    <p className="mt-0.5 text-xs text-(--rs-neutral-grey-600)">{[education.degree, education.field].filter(Boolean).join(' · ') || '—'}</p>
+                    {education.graduation_year && <p className="mt-1 text-xs text-(--rs-neutral-grey-500)">Graduated {education.graduation_year}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+function BackgroundCheckRequestState({
+  request, submission,
+}: {
+  request: PreEmploymentRequestRow | null;
+  submission: PreEmploymentSubmissionRow | null;
+}) {
+  if (submission) {
+    return (
+      <div className="rounded-xl border border-green-200 bg-green-50/60 px-4 py-3 text-sm text-green-900">
+        <p className="font-semibold">Background-check form submitted</p>
+        <p className="mt-0.5 text-xs text-green-800">Received {formatDate(submission.submitted_at)}. The submitted contacts are shown below.</p>
+      </div>
+    );
+  }
+  if (request && !request.invalidated_at) {
+    return (
+      <div className="rounded-xl border border-(--rs-accent-200) bg-(--rs-accent-50)/60 px-4 py-3 text-sm text-(--rs-accent-900)">
+        <p className="font-semibold">Awaiting candidate response</p>
+        <p className="mt-0.5 text-xs text-(--rs-accent-800)">Email sent {formatDate(request.sent_at)}. The secure form link expires {formatDate(request.expires_at)}.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-dashed border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50)/40 px-4 py-3 text-sm text-(--rs-neutral-grey-700)">
+      <p className="font-semibold">Not started</p>
+      <p className="mt-0.5 text-xs text-(--rs-neutral-grey-500)">Send the background-check email to give the candidate a secure form link.</p>
+    </div>
+  );
+}
+
+function ReferenceSubmissionCard({ reference, index }: { reference: CharacterReference; index: number }) {
+  const details = [reference.jobTitle, reference.company].filter(Boolean).join(' · ');
+  const contact = [reference.email, reference.phone && formatPhoneNumber(reference.phone)].filter(Boolean).join(' · ');
+  return (
+    <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-white p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-(--rs-neutral-grey-900)">Reference {index + 1}: {reference.name || 'Unnamed reference'}</p>
+          {details && <p className="mt-0.5 text-xs text-(--rs-neutral-grey-600)">{details}</p>}
+        </div>
+        {reference.relationship && <span className="rounded-full bg-(--rs-primary-50) px-2 py-0.5 text-[10px] font-semibold text-(--rs-primary-700)">{reference.relationship}</span>}
+      </div>
+      {contact && <p className="mt-2 text-xs text-(--rs-neutral-grey-700)">{contact}</p>}
+      {reference.bestTimeToCall && <p className="mt-1 text-[11px] text-(--rs-neutral-grey-500)">Best time to call: {reference.bestTimeToCall}</p>}
+      {reference.requestSentAt && <p className="mt-1 text-[11px] font-medium text-green-700">Reference request sent {formatDate(reference.requestSentAt)}</p>}
+      {reference.respondedAt && <p className="mt-1 text-[11px] font-medium text-green-700">Reference form submitted {formatDate(reference.respondedAt)}</p>}
+      {reference.responsePayload != null && <ReferenceResponseModal refereeName={reference.name} payload={reference.responsePayload} />}
+    </div>
+  );
+}
+
+function EmploymentVerificationCard({ verification, index }: { verification: EmploymentVerification; index: number }) {
+  const contact = [verification.email, verification.phone && formatPhoneNumber(verification.phone)].filter(Boolean).join(' · ');
+  return (
+    <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-white p-3">
+      <p className="text-sm font-semibold text-(--rs-neutral-grey-900)">Employer {index + 1}: {verification.company || 'Unnamed employer'}</p>
+      {verification.contactName && <p className="mt-0.5 text-xs text-(--rs-neutral-grey-600)">HR contact: {verification.contactName}</p>}
+      {contact && <p className="mt-2 text-xs text-(--rs-neutral-grey-700)">{contact}</p>}
+      {verification.bestTimeToCall && <p className="mt-1 text-[11px] text-(--rs-neutral-grey-500)">Best time to call: {verification.bestTimeToCall}</p>}
+      {verification.requestSentAt && <p className="mt-1 text-[11px] font-medium text-green-700">Employment-verification request sent {formatDate(verification.requestSentAt)}</p>}
+      {verification.respondedAt && <p className="mt-1 text-[11px] font-medium text-green-700">Employment-verification form submitted {formatDate(verification.respondedAt)}</p>}
+      {verification.responsePayload != null && <EmploymentVerificationResponseModal company={verification.company} payload={verification.responsePayload} />}
+    </div>
+  );
+}
+
+function PreEmploymentDocumentsTab({ candidateId, canUpload, documents }: { candidateId: number; canUpload: boolean; documents: CandidatePreEmploymentDocumentRow[] }) {
+  const byKind = new Map(documents.map(document => [document.kind, document]));
+  return (
+    <Section
+      title="Pre-Employment Documents"
+      icon={<FileText className="w-4 h-4" />}
+      action={documents.length === 4 && canUpload
+        ? <SendCandidateDocumentPackageButton candidateId={candidateId} alreadySent={documents.every(document => !!document.sent_at)} />
+        : undefined}
+    >
       <p className="text-xs leading-relaxed text-(--rs-neutral-grey-600)">
-        The document package will be managed here in a later phase.
+        Upload approved PDFs here. Documents remain internal until a signing workflow is chosen.
       </p>
       <div className="mt-3 divide-y divide-(--rs-neutral-grey-200) rounded-lg border border-(--rs-neutral-grey-200) bg-white px-3">
-        <PreEmploymentDocument name="Statement of Work" />
-        <PreEmploymentDocument name="Job Description" />
-        <PreEmploymentDocument name="AI Policy" />
+        <PreEmploymentDocument
+          name="Statement of Work"
+          document={byKind.get('sow')}
+          action={<div className="flex items-center gap-2">
+            {canUpload && byKind.get('sow')?.sent_at && !byKind.get('sow')?.signed_at && <MarkCandidateSowSignedButton candidateId={candidateId} />}
+            <PreEmploymentDocumentUpload candidateId={candidateId} kind="sow" canUpload={canUpload} />
+          </div>}
+        />
+        <PreEmploymentDocument name="Job Description" document={byKind.get('job_description')} action={<PreEmploymentDocumentUpload candidateId={candidateId} kind="job_description" canUpload={canUpload} />} />
+        <PreEmploymentDocument name="AI Policy" document={byKind.get('ai_policy')} action={<PreEmploymentDocumentUpload candidateId={candidateId} kind="ai_policy" canUpload={canUpload} />} />
+        <PreEmploymentDocument name="NDA" document={byKind.get('nda')} action={<PreEmploymentDocumentUpload candidateId={candidateId} kind="nda" canUpload={canUpload} />} />
       </div>
     </Section>
   );
@@ -601,6 +1048,7 @@ function PreEmploymentEmptyRow({ text }: { text: string }) {
 
 function PreEmploymentTabBar({ id, active }: { id: number; active: PreEmploymentTab }) {
   const tabs: { id: PreEmploymentTab; label: string; icon: typeof Mail }[] = [
+    { id: 'information',      label: 'Candidate Info',   icon: User2 },
     { id: 'background-check', label: 'Background Check', icon: ShieldCheck },
     { id: 'documents',        label: 'Documents',        icon: FileText },
   ];
@@ -631,11 +1079,11 @@ function PreEmploymentTabBar({ id, active }: { id: number; active: PreEmployment
   );
 }
 
-function PreEmploymentDocument({ name }: { name: string }) {
+function PreEmploymentDocument({ name, document, action }: { name: string; document?: CandidatePreEmploymentDocumentRow; action?: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3 py-2.5 text-sm">
-      <span className="font-medium text-(--rs-neutral-grey-800)">{name}</span>
-      <PreEmploymentStatus />
+      <div><span className="font-medium text-(--rs-neutral-grey-800)">{name}</span>{document && <a href={document.signed_url} target="_blank" rel="noreferrer" className="ml-2 text-[11px] font-semibold text-(--rs-primary-700) hover:underline">View uploaded document</a>}{document?.sent_at && <p className="mt-0.5 text-[10px] font-medium text-green-700">Sent {formatDate(document.sent_at)}</p>}{document?.signed_at && <p className="mt-0.5 text-[10px] font-medium text-green-700">Signed {formatDate(document.signed_at)}</p>}</div>
+      {action ?? <PreEmploymentStatus />}
     </div>
   );
 }

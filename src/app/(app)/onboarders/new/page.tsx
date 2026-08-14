@@ -30,7 +30,7 @@ export default async function NewOnboarderPage() {
       <LeadToolHeader
         eyebrow="Internal onboarding"
         title="Start a new onboarding record"
-        description="Creates the record at stage Offer signed. The HRBP still sends the SOW out-of-band — mark it sent on the detail page once done."
+        description="Creates an onboarding record for a new hire. Pre-employment requirements are managed from Recruitment before onboarding begins."
       />
 
       <Card>
@@ -87,7 +87,7 @@ export default async function NewOnboarderPage() {
             <div className="rounded-lg border border-(--rs-accent-100) bg-(--rs-accent-50)/40 p-4 flex items-start gap-3">
               <GraduationCap className="w-4 h-4 mt-0.5 text-(--rs-accent-700) shrink-0" />
               <p className="text-xs text-(--rs-neutral-grey-700) leading-relaxed">
-                After creating: you&apos;ll be taken to the detail page where you can mark the SOW sent/signed, send the background-check + welcome emails, and upload documents.
+                After creating: you&apos;ll be taken to the detail page to send onboarding emails and upload onboarding documents.
               </p>
             </div>
 
