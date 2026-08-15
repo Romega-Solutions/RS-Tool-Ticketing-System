@@ -36,6 +36,7 @@ import {
   addEmploymentVerification,
   uploadDocument,
 } from './actions';
+import type { OnboardingLeadOption } from '@/lib/onboarding-lead';
 
 const DOC_KINDS = [
   { value: 'sow',                     label: 'SOW (Statement of Work)' },
@@ -54,7 +55,7 @@ const DOC_KINDS = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 type FieldErrors = Partial<Record<
-  'fullName' | 'personalEmail' | 'onboarderType' | 'team' | 'startDate', string
+  'fullName' | 'personalEmail' | 'onboarderType' | 'team' | 'onboardingLeadId' | 'startDate', string
 >>;
 
 function validateCreate(fd: FormData): FieldErrors {
@@ -63,6 +64,7 @@ function validateCreate(fd: FormData): FieldErrors {
   const email = String(fd.get('personalEmail') ?? '').trim();
   const type  = String(fd.get('onboarderType') ?? '');
   const team  = String(fd.get('team') ?? '').trim();
+  const lead  = String(fd.get('onboardingLeadId') ?? '').trim();
   const start = String(fd.get('startDate') ?? '').trim();
 
   if (!name || name.length < 2) {
@@ -79,13 +81,16 @@ function validateCreate(fd: FormData): FieldErrors {
   if (!team) {
     errors.team = 'Department is required';
   }
+  if (!lead) {
+    errors.onboardingLeadId = 'Select an onboarding lead';
+  }
   if (start && !/^\d{4}-\d{2}-\d{2}$/.test(start)) {
     errors.startDate = 'Use the date picker (YYYY-MM-DD)';
   }
   return errors;
 }
 
-export function CreateOnboarderForm({ departments }: { departments: string[] }) {
+export function CreateOnboarderForm({ departments, leads }: { departments: string[]; leads: OnboardingLeadOption[] }) {
   const [open, setOpen]      = useState(false);
   const [isPending, start]   = useTransition();
   const [error, setError]    = useState<string | null>(null);
@@ -149,6 +154,23 @@ export function CreateOnboarderForm({ departments }: { departments: string[] }) 
             <Field id="roleTitle" label="Role title" placeholder="Frontend Engineer" />
 
             <div className="space-y-1.5">
+              <Label htmlFor="onboardingLeadId" className="text-(--rs-neutral-grey-700) font-medium">Onboarding lead *</Label>
+              <SelectShell error={!!fieldErrors.onboardingLeadId}>
+                <select
+                  id="onboardingLeadId"
+                  name="onboardingLeadId"
+                  required
+                  defaultValue=""
+                  className={`appearance-none flex h-11 w-full rounded-xl border bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer ${fieldErrors.onboardingLeadId ? 'border-red-300 focus:border-red-400' : 'border-(--rs-neutral-grey-200) focus:border-(--rs-primary-300)'}`}
+                >
+                  <option value="" disabled style={OPTION_STYLE}>{leads.length ? '— Select onboarding lead —' : 'No eligible users'}</option>
+                  {leads.map(lead => <option key={lead.id} value={lead.id} style={OPTION_STYLE}>{lead.name}</option>)}
+                </select>
+              </SelectShell>
+              {fieldErrors.onboardingLeadId && <FieldError text={fieldErrors.onboardingLeadId} />}
+            </div>
+
+            <div className="space-y-1.5">
               <Label htmlFor="team" className="text-(--rs-neutral-grey-700) font-medium">Department *</Label>
               <SelectShell error={!!fieldErrors.team}>
                 <select
@@ -167,7 +189,20 @@ export function CreateOnboarderForm({ departments }: { departments: string[] }) 
               {fieldErrors.team && <FieldError text={fieldErrors.team} />}
             </div>
 
-            <Field id="directSupervisor" label="Direct supervisor" placeholder="Mark Tan" />
+            <div className="space-y-1.5">
+              <Label htmlFor="directSupervisorId" className="text-(--rs-neutral-grey-700) font-medium">Direct supervisor</Label>
+              <SelectShell>
+                <select
+                  id="directSupervisorId"
+                  name="directSupervisorId"
+                  defaultValue=""
+                  className="appearance-none flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer"
+                >
+                  <option value="" style={OPTION_STYLE}>No direct supervisor yet</option>
+                  {leads.map(lead => <option key={lead.id} value={lead.id} style={OPTION_STYLE}>{lead.name}</option>)}
+                </select>
+              </SelectShell>
+            </div>
             <Field id="startDate"        label="Start date"        type="date" error={fieldErrors.startDate} />
           </div>
 

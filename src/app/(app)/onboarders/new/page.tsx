@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { ArrowLeft, GraduationCap, UserPlus2, AlertCircle, ChevronDown } from 'lucide-react';
+import { ArrowLeft, GraduationCap, UserPlus2, ChevronDown } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { LeadToolHeader } from '@/components/lead-tool-header';
 import { Button } from '@/components/ui/button';
@@ -10,12 +10,14 @@ import { getSession } from '@/lib/session';
 import { hasToolAccess } from '@/lib/rbac';
 import { APP_DEPARTMENTS } from '@/lib/orgchart';
 import { createOnboarder } from '../actions';
+import { listOnboardingLeadOptions } from '@/lib/onboarding-lead';
 
 export default async function NewOnboarderPage() {
   const session = await getSession();
   if (!session || !hasToolAccess('onboarding', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
+  const onboardingLeads = await listOnboardingLeadOptions();
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -59,6 +61,27 @@ export default async function NewOnboarderPage() {
               <Field id="roleTitle"         label="Role title"          placeholder="Frontend Engineer" />
 
               <div className="space-y-1.5">
+                <Label htmlFor="onboardingLeadId" className="text-(--rs-neutral-grey-700) font-medium">Onboarding lead *</Label>
+                <div className="relative">
+                  <select
+                    id="onboardingLeadId"
+                    name="onboardingLeadId"
+                    required
+                    defaultValue=""
+                    className="appearance-none flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer"
+                  >
+                    <option value="" disabled style={{ backgroundColor: '#fff', color: '#0f172a' }}>
+                      {onboardingLeads.length ? '— Select onboarding lead —' : 'No eligible users'}
+                    </option>
+                    {onboardingLeads.map(lead => (
+                      <option key={lead.id} value={lead.id} style={{ backgroundColor: '#fff', color: '#0f172a' }}>{lead.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-(--rs-neutral-grey-400)" />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
                 <Label htmlFor="team" className="text-(--rs-neutral-grey-700) font-medium">Department *</Label>
                 <div className="relative">
                   <select
@@ -80,7 +103,23 @@ export default async function NewOnboarderPage() {
                 </p>
               </div>
 
-              <Field id="directSupervisor"  label="Direct supervisor"   placeholder="Mark Tan" />
+              <div className="space-y-1.5">
+                <Label htmlFor="directSupervisorId" className="text-(--rs-neutral-grey-700) font-medium">Direct supervisor</Label>
+                <div className="relative">
+                  <select
+                    id="directSupervisorId"
+                    name="directSupervisorId"
+                    defaultValue=""
+                    className="appearance-none flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer"
+                  >
+                    <option value="" style={{ backgroundColor: '#fff', color: '#0f172a' }}>No direct supervisor yet</option>
+                    {onboardingLeads.map(lead => (
+                      <option key={lead.id} value={lead.id} style={{ backgroundColor: '#fff', color: '#0f172a' }}>{lead.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-(--rs-neutral-grey-400)" />
+                </div>
+              </div>
               <Field id="startDate"         label="Start date"          type="date" />
             </div>
 
@@ -90,9 +129,6 @@ export default async function NewOnboarderPage() {
                 After creating: you&apos;ll be taken to the detail page to send onboarding emails and upload onboarding documents.
               </p>
             </div>
-
-            <NoticeIfNoLeadEnv />
-
             <div className="flex items-center justify-end gap-3">
               <Link
                 href="/onboarders"
@@ -140,14 +176,3 @@ function Field({
   );
 }
 
-function NoticeIfNoLeadEnv() {
-  if (process.env.DEFAULT_ONBOARDING_LEAD_USER_ID?.trim()) return null;
-  return (
-    <div className="rounded-lg border border-(--rs-accent-100) bg-(--rs-accent-50)/40 p-3 flex items-start gap-2 text-xs text-(--rs-neutral-grey-700)">
-      <AlertCircle className="w-3.5 h-3.5 mt-0.5 text-(--rs-accent-700) shrink-0" />
-      <p>
-        <strong>DEFAULT_ONBOARDING_LEAD_USER_ID</strong> is not set. The created record won&apos;t auto-populate the Onboarding Lead field — fill it on the detail page or set the env var in <code className="rounded bg-(--rs-neutral-grey-100) px-1 py-0.5">.env.local</code>.
-      </p>
-    </div>
-  );
-}

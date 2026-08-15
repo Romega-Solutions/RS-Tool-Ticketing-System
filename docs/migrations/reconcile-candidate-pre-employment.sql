@@ -8,6 +8,90 @@
 -- The older add-candidate-pre-employment-*.sql files are retained as history;
 -- do not run their full chain for a new environment after using this file.
 
+-- Also reconcile the Recruitment -> Onboarding handoff's internal lead link.
+-- It is conditional because this file can still be used in an environment
+-- where the optional Onboarding module has not yet been installed.
+DO $$
+DECLARE
+  status_constraint_name TEXT;
+BEGIN
+  IF to_regclass('public.onboarders') IS NOT NULL THEN
+    ALTER TABLE onboarders
+      ADD COLUMN IF NOT EXISTS onboarding_lead_id INTEGER
+      REFERENCES users(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS direct_supervisor_id INTEGER
+      REFERENCES users(id) ON DELETE SET NULL;
+
+    CREATE INDEX IF NOT EXISTS onboarders_onboarding_lead_id_idx
+      ON onboarders(onboarding_lead_id);
+    CREATE INDEX IF NOT EXISTS onboarders_direct_supervisor_id_idx
+      ON onboarders(direct_supervisor_id);
+
+    -- Backfill only unambiguous historical lead names; never guess a user.
+    UPDATE onboarders AS onboarder
+    SET onboarding_lead_id = matched_user.id
+    FROM users AS matched_user
+    WHERE onboarder.onboarding_lead_id IS NULL
+      AND onboarder.onboarding_lead IS NOT NULL
+      AND LOWER(BTRIM(onboarder.onboarding_lead)) = LOWER(BTRIM(matched_user.name))
+      AND (
+        SELECT COUNT(*)
+        FROM users AS possible_user
+        WHERE LOWER(BTRIM(possible_user.name)) = LOWER(BTRIM(onboarder.onboarding_lead))
+      ) = 1;
+
+    -- Apply the same safe, unambiguous backfill for existing supervisor names.
+    UPDATE onboarders AS onboarder
+    SET direct_supervisor_id = matched_user.id
+    FROM users AS matched_user
+    WHERE onboarder.direct_supervisor_id IS NULL
+      AND onboarder.direct_supervisor IS NOT NULL
+      AND LOWER(BTRIM(onboarder.direct_supervisor)) = LOWER(BTRIM(matched_user.name))
+      AND (
+        SELECT COUNT(*)
+        FROM users AS possible_user
+        WHERE LOWER(BTRIM(possible_user.name)) = LOWER(BTRIM(onboarder.direct_supervisor))
+      ) = 1;
+
+    -- These stages now belong to Recruitment. Preserve existing rows by moving
+    -- them to the first onboarding stage before the allowed-status check is
+    -- tightened.
+    UPDATE onboarders
+    SET status = 'pre_onboarding'
+    WHERE status IN ('offer_signed', 'background_check');
+
+    ALTER TABLE onboarders
+      ALTER COLUMN status SET DEFAULT 'pre_onboarding';
+
+    -- Constraint names differ between older environments, so remove only CHECK
+    -- constraints on the status column, then install the canonical one.
+    FOR status_constraint_name IN
+      SELECT constraint_row.conname
+      FROM pg_constraint AS constraint_row
+      WHERE constraint_row.conrelid = 'public.onboarders'::regclass
+        AND constraint_row.contype = 'c'
+        AND EXISTS (
+          SELECT 1
+          FROM unnest(constraint_row.conkey) AS status_key(attnum)
+          JOIN pg_attribute AS attribute_row
+            ON attribute_row.attrelid = constraint_row.conrelid
+           AND attribute_row.attnum = status_key.attnum
+          WHERE attribute_row.attname = 'status'
+        )
+    LOOP
+      EXECUTE format('ALTER TABLE public.onboarders DROP CONSTRAINT IF EXISTS %I', status_constraint_name);
+    END LOOP;
+
+    ALTER TABLE onboarders
+      ADD CONSTRAINT onboarders_status_check
+      CHECK (status IN (
+        'pre_onboarding', 'day_one', 'thirty_day', 'ninety_day',
+        'regularized', 'failed_probation', 'withdrew'
+      ));
+  END IF;
+END;
+$$;
+
 -- Candidate-facing Background Check capability links and raw submissions.
 CREATE TABLE IF NOT EXISTS candidate_pre_employment_requests (
   id SERIAL PRIMARY KEY,

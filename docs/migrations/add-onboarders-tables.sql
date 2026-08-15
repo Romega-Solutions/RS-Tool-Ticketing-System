@@ -33,13 +33,15 @@ CREATE TABLE IF NOT EXISTS onboarders (
   role_title        TEXT,
   team              TEXT,
   direct_supervisor TEXT,
+  direct_supervisor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   chief_of_staff    TEXT,
   onboarding_lead   TEXT,
+  onboarding_lead_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   hrbp              TEXT,
 
-  status            TEXT NOT NULL DEFAULT 'offer_signed'
+  status            TEXT NOT NULL DEFAULT 'pre_onboarding'
                     CHECK (status IN (
-                      'offer_signed','background_check','pre_onboarding','day_one',
+                      'pre_onboarding','day_one',
                       'thirty_day','ninety_day','regularized',
                       'failed_probation','withdrew'
                     )),
@@ -78,6 +80,8 @@ CREATE INDEX IF NOT EXISTS onboarders_status_idx       ON onboarders(status);
 CREATE INDEX IF NOT EXISTS onboarders_start_date_idx   ON onboarders(start_date);
 CREATE INDEX IF NOT EXISTS onboarders_candidate_id_idx ON onboarders(candidate_id);
 CREATE INDEX IF NOT EXISTS onboarders_user_id_idx      ON onboarders(user_id);
+CREATE INDEX IF NOT EXISTS onboarders_onboarding_lead_id_idx ON onboarders(onboarding_lead_id);
+CREATE INDEX IF NOT EXISTS onboarders_direct_supervisor_id_idx ON onboarders(direct_supervisor_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 2. onboarder_references — character references (3+ per onboarder per SOP §3)

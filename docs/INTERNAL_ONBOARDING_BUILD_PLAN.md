@@ -594,7 +594,7 @@ Phases 1–3 are the minimum to retire the Google Sheet tracker. Phases 4–7 re
 
 ## 13. Open Questions
 
-- **Who is the "Onboarding Lead" by default?** Hard-coded env var (`DEFAULT_ONBOARDING_LEAD_USER_ID`), or computed per onboarder by team? The SOP doesn't say.
+- **Who can be an "Onboarding Lead" or Direct Supervisor?** The app allows active Lead, Admin, and Founder users to be selected per onboarder. Decide later whether per-team suggestions are needed.
 - **Group-chat announcement** — does the SOP want this auto-posted to a Teams channel via webhook, or just generated text the Lead pastes manually? Teams API access is not assumed in v1; assume *text generation only* until confirmed.
 - **W-8 sample file** — the SOP says HR attaches "a blank W-8 form and a sample filled form" to the welcome email. Store both in a public Supabase Storage bucket and link from the email template, or attach via n8n's Gmail node? Attaching is more reliable; storing as links breaks if the bucket is private.
 - **SOW signature** — recorded as a single checkbox in v1 (`sow_signed_at = NOW()` when the Lead clicks). When HR moves to a real e-signature provider (DocuSign, Google Workspace), webhook back into this app to set the timestamp automatically.
