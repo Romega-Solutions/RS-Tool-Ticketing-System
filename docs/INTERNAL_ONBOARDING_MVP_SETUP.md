@@ -32,13 +32,10 @@ Do these once before any code lands.
 
 **0.1 Verify Supabase access.** Confirm you can hit Supabase via the SQL Editor for this project and that `candidates`, `users`, `orgchart_teams`, and `candidate_history` tables already exist (they do — see `docs/migrations/add-candidates-table.sql`, `add-ats-history-and-positions.sql`).
 
-**0.2 Pick the default Onboarding Lead.** Decide who that is for now (likely the current HR Onboarding Lead). Get their `users.id` from Supabase. We'll hard-code it as an env var:
-
-```bash
-DEFAULT_ONBOARDING_LEAD_USER_ID=<id>
-```
-
-Add to `.env.local` and to Vercel (preview + production).
+**0.2 Confirm who can be an Onboarding Lead.** Active internal users with the
+**Onboarding** tool can be selected in the app. Assign the lead when creating a
+manual onboarding record, or from the Quick Facts panel after a Recruitment
+handoff.
 
 **0.3 Decide the sender Gmail.** All MVP emails go from one Gmail account. Confirm with HR which one:
 - `onboarding@romega-solutions.com` (preferred — workspace account)
@@ -288,7 +285,7 @@ Ship the two existing-scaffold env keys (`N8N_30DAY_CHECKIN_URL`, `N8N_90DAY_REV
 
 Only attempt these once everything above is in production and stable. None of these block the MVP — they're either policy questions (HR + CoS need to decide) or scope choices that are easier to make once we have real usage data.
 
-1. **Default Onboarding Lead resolution.** MVP hard-codes `DEFAULT_ONBOARDING_LEAD_USER_ID` env var. Replace with a per-team lookup or a `users.is_onboarding_lead` flag once HR confirms whether there's one Lead or one per team.
+1. **Onboarding Lead assignment.** Each record stores the selected internal user. Recruitment handoffs deliberately begin unassigned until HR selects the owner.
 
 2. **Group-chat announcement delivery.** Today `group-chat-announce` returns text the Lead pastes manually. Decide whether to invest in Teams API integration or accept the paste-step as permanent.
 

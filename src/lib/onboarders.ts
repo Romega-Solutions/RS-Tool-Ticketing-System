@@ -8,7 +8,6 @@
 // helper returns the existing id and does NOT insert a duplicate.
 
 import { createAdminClient } from '@/lib/supabase/admin';
-import { DEFAULT_ONBOARDING_LEAD } from '@/app/(app)/onboarders/constants';
 
 export type CreateOnboarderFromCandidateResult =
   | { ok: true;  onboarderId: number; created: boolean }
@@ -64,7 +63,8 @@ export async function createOnboarderFromCandidate(
       onboarder_type:  'contractor', // Lead can flip to intern on detail page
       role_title:      roleTitle,
       team,
-      onboarding_lead: DEFAULT_ONBOARDING_LEAD,
+      onboarding_lead: null,
+      onboarding_lead_id: null,
       status:          'pre_onboarding',
       created_by:      opts.actorUserId ?? null,
     })
@@ -81,7 +81,7 @@ export async function createOnboarderFromCandidate(
     field:        'created',
     old_value:    null,
     new_value:    candidate.full_name,
-    summary:      `Created from ATS hire (candidate #${candidateId}) at stage 'pre_onboarding' — Lead: ${DEFAULT_ONBOARDING_LEAD}`,
+    summary:      `Created from ATS hire (candidate #${candidateId}) at stage 'pre_onboarding' — Lead: unassigned`,
   });
 
   return { ok: true, onboarderId: inserted.id, created: true };

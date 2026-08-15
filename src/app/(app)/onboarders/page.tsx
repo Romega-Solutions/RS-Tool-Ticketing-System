@@ -29,6 +29,7 @@ import { STATUS_LABEL, STATUS_COLOR } from "./onboarder-row";
 import { CreateOnboarderForm } from "./onboarder-forms";
 import { OnboarderFilterBar } from "./onboarder-filter-bar";
 import { OnboardingHelpButton } from "./onboarding-help";
+import { listOnboardingLeadOptions } from '@/lib/onboarding-lead';
 
 // ─── Stage groupings (3 happy lanes + 1 terminal lane) ──────────────────────
 
@@ -126,6 +127,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
     : "all";
 
   const supabase = createAdminClient();
+  const onboardingLeads = await listOnboardingLeadOptions();
   const { data, error } = await supabase
     .from("onboarders")
     .select(
@@ -157,7 +159,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
   // Stat counts
   const TERMINAL = new Set(["regularized", "failed_probation", "withdrew"]);
   const activeCount = rows.filter((r) => !TERMINAL.has(r.status)).length;
-  const bgCount = rows.filter((r) => r.status === "background_check").length;
+  const preOnboardingCount = rows.filter((r) => r.status === "pre_onboarding").length;
 
   const monday = startOfWeek(new Date());
   const sunday = new Date(monday);
@@ -186,7 +188,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
       <LeadToolHeader
         eyebrow="People ops"
         title="Internal Onboarding"
-        description="Move new Romega hires from offer-signed to regularized — SOW, background checks, gov IDs, welcome emails, Day-1 setup, 30/90-day reviews. Separate from the ATS (which tracks candidates being placed at clients)."
+        description="Move new Romega hires from pre-onboarding to regularized — welcome emails, Day-1 setup, and 30/90-day reviews. Recruitment owns pre-employment requirements."
         action={
           !tableMissing && !unexpectedError ? (
             <div className="flex flex-wrap items-start justify-end gap-2">
@@ -197,7 +199,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
               >
                 <Settings2 className="w-4 h-4" /> Setup & workflows
               </Link>
-              <CreateOnboarderForm departments={[...APP_DEPARTMENTS]} />
+              <CreateOnboarderForm departments={[...APP_DEPARTMENTS]} leads={onboardingLeads} />
             </div>
           ) : null
         }
@@ -231,9 +233,9 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
             />
             <StatCard
               icon={<ShieldCheck className="w-4 h-4" />}
-              label="Awaiting BG check"
-              value={String(bgCount)}
-              hint="background_check stage"
+              label="Pre-onboarding"
+              value={String(preOnboardingCount)}
+              hint="ready for onboarding"
             />
             <StatCard
               icon={<CalendarCheck className="w-4 h-4" />}

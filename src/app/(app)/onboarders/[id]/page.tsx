@@ -36,6 +36,9 @@ import {
 } from '../onboarder-actions';
 import type { OnboarderStatus } from '../constants';
 import { formatPhoneNumber } from '@/lib/format';
+import { listOnboardingLeadOptions, type OnboardingLeadOption } from '@/lib/onboarding-lead';
+import { OnboardingLeadSelect } from '../onboarding-lead-select';
+import { DirectSupervisorSelect } from '../direct-supervisor-select';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -49,8 +52,10 @@ type Onboarder = {
   role_title:        string | null;
   team:              string | null;
   direct_supervisor: string | null;
+  direct_supervisor_id: number | null;
   chief_of_staff:    string | null;
   onboarding_lead:   string | null;
+  onboarding_lead_id: number | null;
   hrbp:              string | null;
   status:            string;
   sow_sent_at:       string | null;
@@ -206,6 +211,7 @@ export default async function OnboarderDetailPage({
   }
   if (!data) notFound();
   const o = data as Onboarder;
+  const onboardingLeadOptions = await listOnboardingLeadOptions();
 
   // Onboarders are pre-employment, so most won't be on the org chart yet — this
   // resolves to a photo only once they've been added there; otherwise the
@@ -213,7 +219,7 @@ export default async function OnboarderDetailPage({
   const photoUrl = (await getPhotoResolver())({ name: o.full_name, email: o.personal_email });
 
   // Children fetched in parallel
-  const [refsRes, versRes, docsRes, histRes, creatorRes] = await Promise.all([
+  const [refsRes, versRes, docsRes, histRes, creatorRes, leadRes, supervisorRes] = await Promise.all([
     supabase.from('onboarder_references')
       .select('id, referee_name, referee_role, referee_company, email, mobile, best_time, request_sent_at, responded_at, outcome')
       .eq('onboarder_id', id)
@@ -234,6 +240,12 @@ export default async function OnboarderDetailPage({
     o.created_by
       ? supabase.from('users').select('name').eq('id', o.created_by).maybeSingle()
       : Promise.resolve({ data: null }),
+    o.onboarding_lead_id
+      ? supabase.from('users').select('name').eq('id', o.onboarding_lead_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    o.direct_supervisor_id
+      ? supabase.from('users').select('name').eq('id', o.direct_supervisor_id).maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const references:    ReferenceRow[]    = (refsRes.data as ReferenceRow[] | null) ?? [];
@@ -241,6 +253,8 @@ export default async function OnboarderDetailPage({
   const documents:     DocumentRow[]     = (docsRes.data as DocumentRow[] | null) ?? [];
   const history:       HistoryRow[]      = (histRes.data as HistoryRow[]      | null) ?? [];
   const createdByName  = (creatorRes?.data as { name?: string } | null)?.name ?? null;
+  const onboardingLeadName = (leadRes?.data as { name?: string } | null)?.name ?? o.onboarding_lead;
+  const directSupervisorName = (supervisorRes?.data as { name?: string } | null)?.name ?? o.direct_supervisor;
 
   // Sign every document URL once on the server
   const documentsSigned = await Promise.all(documents.map(async d => {
@@ -351,7 +365,12 @@ export default async function OnboarderDetailPage({
 
         {/* Right rail */}
         <aside className="space-y-5">
-          <QuickFacts o={o} />
+          <QuickFacts
+            o={o}
+            onboardingLeadName={onboardingLeadName}
+            directSupervisorName={directSupervisorName}
+            onboardingLeadOptions={onboardingLeadOptions}
+          />
           <ActionsRail o={o} lastFailedTemplate={lastFailedTemplate} />
           <HistoryRail history={history} />
         </aside>
@@ -479,8 +498,6 @@ function OverviewTab({ o, onLastFailedTemplate }: { o: Onboarder; onLastFailedTe
 
 function stageExplainer(status: string): string {
   switch (status) {
-    case 'offer_signed':     return 'Pre-employment requirements are managed from the candidate record in Recruitment.';
-    case 'background_check': return 'This legacy stage remains available for existing records; pre-employment is managed in Recruitment.';
     case 'pre_onboarding':   return 'Send the welcome email. New hire installs Teams, creates Romega Gmail, configures signature, submits the onboarding form + W-8 if contractor.';
     case 'day_one':          return 'Account provisioning, team intros, calendar handoff. Orientation call with the Onboarding Lead.';
     case 'thirty_day':       return 'First review with the lead — fit, blockers, training gaps. (30-day workflow ships post-MVP.)';
@@ -730,7 +747,17 @@ function NotesTab({ o }: { o: Onboarder }) {
 
 // ─── Right rail ─────────────────────────────────────────────────────────────
 
-function QuickFacts({ o }: { o: Onboarder }) {
+function QuickFacts({
+  o,
+  onboardingLeadName,
+  directSupervisorName,
+  onboardingLeadOptions,
+}: {
+  o: Onboarder;
+  onboardingLeadName: string | null;
+  directSupervisorName: string | null;
+  onboardingLeadOptions: OnboardingLeadOption[];
+}) {
   return (
     <div className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-4 space-y-2.5">
       <h3 className="text-[10px] font-bold uppercase tracking-widest text-(--rs-neutral-grey-500)">Quick facts</h3>
@@ -742,8 +769,22 @@ function QuickFacts({ o }: { o: Onboarder }) {
       <KvRow label="Type"       value={o.onboarder_type === 'intern' ? 'Intern' : 'Contractor'} />
       <KvRow label="Role"       value={o.role_title ?? <Dim />} />
       <KvRow label="Team"       value={o.team ?? <Dim />} />
-      <KvRow label="Supervisor" value={o.direct_supervisor ?? <Dim />} />
-      <KvRow label="Onboarding Lead" value={o.onboarding_lead ?? <Dim />} />
+      <KvRow label="Supervisor" value={
+        <DirectSupervisorSelect
+          onboarderId={o.id}
+          currentSupervisorId={o.direct_supervisor_id}
+          currentSupervisorName={directSupervisorName}
+          options={onboardingLeadOptions}
+        />
+      } />
+      <KvRow label="Onboarding Lead" value={
+        <OnboardingLeadSelect
+          onboarderId={o.id}
+          currentLeadId={o.onboarding_lead_id}
+          currentLeadName={onboardingLeadName}
+          options={onboardingLeadOptions}
+        />
+      } />
       <KvRow label="HRBP"       value={o.hrbp ?? <Dim />} />
       <KvRow label="Start date" value={o.start_date ? formatDate(o.start_date) : <Dim />} />
       <KvRow label="W-8"        value={o.w8_uploaded_at ? formatDate(o.w8_uploaded_at) : <Dim />} />

@@ -20,10 +20,10 @@ import {
 import {
   ALLOWED_STATUSES,
   ALLOWED_TYPES,
-  DEFAULT_ONBOARDING_LEAD,
   type OnboarderStatus,
   type OnboarderType,
 } from './constants';
+import { resolveOnboardingLead } from '@/lib/onboarding-lead';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal type guards
@@ -137,7 +137,8 @@ export async function createOnboarder(formData: FormData): Promise<void> {
   const typeRaw       = String(formData.get('onboarderType')    ?? 'contractor');
   const roleTitle     = String(formData.get('roleTitle')        ?? '').trim() || null;
   const teamRaw       = String(formData.get('team')             ?? '').trim();
-  const directSup     = String(formData.get('directSupervisor') ?? '').trim() || null;
+  const directSupervisorIdRaw = String(formData.get('directSupervisorId') ?? '').trim();
+  const onboardingLeadIdRaw = String(formData.get('onboardingLeadId') ?? '').trim();
   const startDateRaw  = String(formData.get('startDate')        ?? '').trim() || null;
 
   // ── Guardrails ─────────────────────────────────────────────────────────
@@ -156,6 +157,14 @@ export async function createOnboarder(formData: FormData): Promise<void> {
   if (!teamRaw) {
     throw new Error('Department is required');
   }
+  const onboardingLeadId = Number(onboardingLeadIdRaw);
+  if (!Number.isInteger(onboardingLeadId) || onboardingLeadId <= 0) {
+    throw new Error('Select an onboarding lead');
+  }
+  const directSupervisorId = directSupervisorIdRaw ? Number(directSupervisorIdRaw) : null;
+  if (directSupervisorIdRaw && (!Number.isInteger(directSupervisorId) || (directSupervisorId ?? 0) <= 0)) {
+    throw new Error('Select a valid direct supervisor');
+  }
   if (!(APP_DEPARTMENTS as readonly string[]).includes(teamRaw)) {
     throw new Error(`Department '${teamRaw}' is not on the org chart. Pick from the dropdown.`);
   }
@@ -169,6 +178,9 @@ export async function createOnboarder(formData: FormData): Promise<void> {
   const startDate = startDateRaw && /^\d{4}-\d{2}-\d{2}$/.test(startDateRaw) ? startDateRaw : null;
 
   const supabase = createAdminClient();
+  const onboardingLead = await resolveOnboardingLead(onboardingLeadId);
+  const directSupervisor = await resolveOnboardingLead(directSupervisorId);
+  if (!onboardingLead) throw new Error('Select an onboarding lead');
   const { data: inserted, error } = await supabase
     .from('onboarders')
     .insert({
@@ -178,10 +190,12 @@ export async function createOnboarder(formData: FormData): Promise<void> {
       onboarder_type:    typeRaw,
       role_title:        roleTitle,
       team,
-      direct_supervisor: directSup,
-      onboarding_lead:   DEFAULT_ONBOARDING_LEAD,
+      direct_supervisor: directSupervisor?.name ?? null,
+      direct_supervisor_id: directSupervisor?.id ?? null,
+      onboarding_lead:   onboardingLead.name,
+      onboarding_lead_id: onboardingLead.id,
       start_date:        startDate,
-      status:            'offer_signed',
+      status:            'pre_onboarding',
       created_by:        session.id,
     })
     .select('id')
@@ -194,7 +208,7 @@ export async function createOnboarder(formData: FormData): Promise<void> {
     field:    'created',
     oldValue: null,
     newValue: fullName,
-    summary:  `Created onboarder '${fullName}' (${typeRaw}) at stage 'offer_signed' — Lead: ${DEFAULT_ONBOARDING_LEAD}`,
+    summary:  `Created onboarder '${fullName}' (${typeRaw}) at stage 'pre_onboarding' — Lead: ${onboardingLead.name}`,
   }]);
 
   revalidatePath('/onboarders');
@@ -210,6 +224,94 @@ export async function deleteOnboarder(id: number): Promise<void> {
   if (error) throw new Error(`Failed to delete onboarder: ${error.message}`);
 
   revalidatePath('/onboarders');
+}
+
+export async function assignOnboardingLead(
+  onboarderId: number,
+  leadUserId: number | null,
+): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(onboarderId) || onboarderId <= 0) throw new Error('Invalid onboarder id');
+
+  const supabase = createAdminClient();
+  const { data: before, error: beforeError } = await supabase
+    .from('onboarders')
+    .select('onboarding_lead, onboarding_lead_id')
+    .eq('id', onboarderId)
+    .maybeSingle();
+  if (beforeError) throw new Error(`Failed to load onboarding record: ${beforeError.message}`);
+  if (!before) throw new Error('Onboarder not found');
+
+  const lead = await resolveOnboardingLead(leadUserId);
+  const { error } = await supabase
+    .from('onboarders')
+    .update({
+      onboarding_lead_id: lead?.id ?? null,
+      onboarding_lead: lead?.name ?? null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', onboarderId);
+  if (error) throw new Error(`Failed to assign onboarding lead: ${error.message}`);
+
+  const oldName = before.onboarding_lead ?? null;
+  const newName = lead?.name ?? null;
+  if (oldName !== newName) {
+    await writeHistory(supabase, onboarderId, session, [{
+      field: 'onboarding_lead',
+      oldValue: oldName,
+      newValue: newName,
+      summary: newName
+        ? `Onboarding Lead assigned to '${newName}'`
+        : 'Onboarding Lead assignment cleared',
+    }]);
+  }
+
+  revalidatePath('/onboarders');
+  revalidatePath(`/onboarders/${onboarderId}`);
+}
+
+export async function assignDirectSupervisor(
+  onboarderId: number,
+  supervisorUserId: number | null,
+): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(onboarderId) || onboarderId <= 0) throw new Error('Invalid onboarder id');
+
+  const supabase = createAdminClient();
+  const { data: before, error: beforeError } = await supabase
+    .from('onboarders')
+    .select('direct_supervisor, direct_supervisor_id')
+    .eq('id', onboarderId)
+    .maybeSingle();
+  if (beforeError) throw new Error(`Failed to load onboarding record: ${beforeError.message}`);
+  if (!before) throw new Error('Onboarder not found');
+
+  const supervisor = await resolveOnboardingLead(supervisorUserId);
+  const { error } = await supabase
+    .from('onboarders')
+    .update({
+      direct_supervisor_id: supervisor?.id ?? null,
+      direct_supervisor: supervisor?.name ?? null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', onboarderId);
+  if (error) throw new Error(`Failed to assign direct supervisor: ${error.message}`);
+
+  const oldName = before.direct_supervisor ?? null;
+  const newName = supervisor?.name ?? null;
+  if (oldName !== newName) {
+    await writeHistory(supabase, onboarderId, session, [{
+      field: 'direct_supervisor',
+      oldValue: oldName,
+      newValue: newName,
+      summary: newName
+        ? `Direct Supervisor assigned to '${newName}'`
+        : 'Direct Supervisor assignment cleared',
+    }]);
+  }
+
+  revalidatePath('/onboarders');
+  revalidatePath(`/onboarders/${onboarderId}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -897,7 +999,7 @@ export async function triggerTestWorkflow(args: {
   recipientEmail: string;
   onboarderType?: 'contractor' | 'intern';
 }): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
-  await requireSession();
+  const session = await requireSession();
 
   const template = args.template as OnboardingTemplate;
   if (!TEST_ELIGIBLE_TEMPLATES.includes(template)) {
@@ -918,7 +1020,7 @@ export async function triggerTestWorkflow(args: {
     team:              'Engineering',
     direct_supervisor: 'Mark Tan',
     chief_of_staff:    'Chief of Staff',
-    onboarding_lead:   DEFAULT_ONBOARDING_LEAD,
+    onboarding_lead:   session.name,
   };
 
   let context: Record<string, unknown> = sharedContext;

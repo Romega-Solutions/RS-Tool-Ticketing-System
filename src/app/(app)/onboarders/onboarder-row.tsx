@@ -6,8 +6,6 @@ import { ALLOWED_STATUSES, type OnboarderStatus } from './constants';
 import { updateOnboarderStatus, deleteOnboarder } from './actions';
 
 export const STATUS_LABEL: Record<OnboarderStatus, string> = {
-  offer_signed:      'Offer signed',
-  background_check:  'Background check',
   pre_onboarding:    'Pre-onboarding',
   day_one:           'Day 1',
   thirty_day:        '30-day check-in',
@@ -18,8 +16,6 @@ export const STATUS_LABEL: Record<OnboarderStatus, string> = {
 };
 
 export const STATUS_COLOR: Record<OnboarderStatus, string> = {
-  offer_signed:     'bg-slate-100 text-slate-700',
-  background_check: 'bg-amber-100 text-amber-800',
   pre_onboarding:   'bg-blue-100 text-blue-700',
   day_one:          'bg-(--rs-primary-100) text-(--rs-primary-800)',
   thirty_day:       'bg-(--rs-primary-100) text-(--rs-primary-800)',
