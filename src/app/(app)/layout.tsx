@@ -16,6 +16,7 @@ import { FloatingGuide } from "@/components/guide/floating-guide.client";
 import { NavProgress } from "@/components/nav-progress.client";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
+import ViewTab from "@/components/view-tab";
 
 const MEDITATION_NOTES = [
   "Pause for one full breath before your next task. A calmer start usually creates a clearer outcome.",
@@ -40,9 +41,12 @@ async function getDailyQuote(seed: number) {
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const session = await getSession();
+  
+  const isView = session?.isImpersonating
 
   if (!session) {
     if (!hasSupabaseConfig()) redirect('/login');
+
 
     // Disambiguate: stale cookie vs. missing DB row vs. deactivated account.
     const supabase = await createClient();
@@ -63,6 +67,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       // Supabase auth OK but no public.users row — recovery via onboarding.
       redirect('/onboarding');
     }
+
     // Row exists but is_active=0 → deactivated. Clear cookies on /login.
     redirect('/login?stale=1&reason=inactive');
   }
@@ -88,6 +93,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       redirect(`/learning/${block.courseId}`);
     }
   }
+  
 
   const firstName = session.name.trim().split(" ")[0] ?? "User";
   const quoteSeed = new Date().getDate() + (session.id ?? 0);
@@ -95,13 +101,17 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const myPhotoUrl = (await getPhotoResolver())({ name: session.name, email: session.email });
 
   return (
-    <div className="flex h-screen bg-(--rs-primary-50) overflow-hidden text-(--rs-neutral-grey-900)">
-      <NavProgress />
-      <AppSidebar role={session.role} userName={session.name} team={session.team} toolAccess={session.toolAccess} photoUrl={myPhotoUrl} />
-      <main className="flex-1 flex flex-col h-full overflow-hidden w-full">
-        <header className="shrink-0 border-b border-[rgba(15,23,42,0.08)] bg-white px-4 py-3 shadow-[0_1px_3px_rgba(15,23,42,0.06)] md:px-8">
-          <div className="flex items-center justify-between gap-4">
-            <MobileNav role={session.role} toolAccess={session.toolAccess} />
+    <div className="flex flex-col">
+      {isView && (
+          <ViewTab userName={session.name} />
+      )}
+      <div className="flex h-screen bg-(--rs-primary-50) overflow-hidden text-(--rs-neutral-grey-900)">
+          <NavProgress />
+        <AppSidebar role={session.role} userName={session.name} team={session.team} toolAccess={session.toolAccess} photoUrl={myPhotoUrl} />
+        <main className="flex-1 flex flex-col h-full overflow-hidden w-full">
+          <header className="shrink-0 border-b border-[rgba(15,23,42,0.08)] bg-white px-4 py-3 shadow-[0_1px_3px_rgba(15,23,42,0.06)] md:px-8">
+            <div className="flex items-center justify-between gap-4">
+              <MobileNav role={session.role} toolAccess={session.toolAccess} />
 
             <div className="min-w-0 flex-1">
               <h2 className="font-serif text-base font-bold text-(--rs-neutral-grey-900) md:text-lg leading-tight">
@@ -117,23 +127,28 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               <div className="hidden rounded-2xl border border-(--rs-neutral-grey-200) bg-white/80 px-3 py-2 text-(--rs-neutral-grey-500) shadow-sm md:flex">
                 <LiveClock />
               </div>
-              <div className="flex items-center gap-1 rounded-2xl border border-(--rs-neutral-grey-200) bg-white/92 px-2 py-2 shadow-sm">
-                <NotificationBell />
-                <WhoIsInPanel currentUserId={session.id} isAdmin={session.role === 'admin'} />
-                <ClockWidget variant="topbar" />
+
+                <div className="hidden rounded-2xl border border-(--rs-neutral-grey-200) bg-white/80 px-3 py-2 text-(--rs-neutral-grey-500) shadow-sm md:flex">
+                  <LiveClock />
+                </div>
+                <div className="flex items-center gap-1 rounded-2xl border border-(--rs-neutral-grey-200) bg-white/92 px-2 py-2 shadow-sm">
+                  <NotificationBell />
+                  <WhoIsInPanel currentUserId={session.id} isAdmin={session.role === 'admin'} />
+                  <ClockWidget variant="topbar" />
+                </div>
               </div>
             </div>
+          </header>
+          <div className="flex-1 overflow-y-auto p-4 md:p-8">
+            {/* Full-width content: fills large monitors (no centered max-width cap).
+                Individual pages keep their own max-w-* for forms/prose readability. */}
+            <div className="w-full">
+              {children}
+            </div>
           </div>
-        </header>
-        <div className="flex-1 overflow-y-auto p-4 md:p-8">
-          {/* Full-width content: fills large monitors (no centered max-width cap).
-              Individual pages keep their own max-w-* for forms/prose readability. */}
-          <div className="w-full">
-            {children}
-          </div>
-        </div>
-      </main>
-      <FloatingGuide isAdmin={canAccessAdmin(session.role)} />
+        </main>
+        <FloatingGuide isAdmin={canAccessAdmin(session.role)} />
+      </div>
     </div>
   );
 }
