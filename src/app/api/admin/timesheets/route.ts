@@ -1,10 +1,17 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { computeOvertime } from '@/lib/utils';
+import { weekStartMonday } from '@/lib/overtime-policy';
 import { weeklySecondsForUser, baseWeeklySecondsForUser } from '@/lib/overtime-server';
 import { route, requireAdmin, requireTool } from '@/lib/api';
 
 export const runtime = 'nodejs';
+
+// Sunday-first to match Date#getDay() (0 = Sunday … 6 = Saturday).
+const STATUS_COLUMNS = [
+  'sunday_status', 'monday_status', 'tuesday_status', 'wednesday_status',
+  'thursday_status', 'friday_status', 'saturday_status',
+] as const;
 
 function getMondayOfWeek(dateStr: string): string | null {
   const d = new Date(dateStr + 'T00:00:00');
@@ -111,6 +118,92 @@ export const GET = route(async (req: Request) => {
   }));
 
   return NextResponse.json({ userId, weekStart, timesheets });
+});
+
+// POST /api/admin/timesheets — admin-only backfill of a session for a day that
+// has no clock-in/out yet. Reserved for the "tagged Present but couldn't clock
+// in" case (e.g. the weekly 15h cap blocked the user) — the day must already be
+// tagged 'present' in `attendance`, otherwise this is rejected.
+//
+// Body: { userId: number, clockedInAt: ISO, clockedOutAt?: ISO | null }
+export const POST = route(async (req: Request) => {
+  const session = await requireAdmin();
+
+  let body: { userId?: number; clockedInAt?: string; clockedOutAt?: string | null };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  const userId = Number(body.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+  }
+
+  if (!body.clockedInAt) {
+    return NextResponse.json({ error: 'clockedInAt is required' }, { status: 400 });
+  }
+  const inDate = new Date(body.clockedInAt);
+  if (isNaN(inDate.getTime())) {
+    return NextResponse.json({ error: 'clockedInAt is not a valid date' }, { status: 400 });
+  }
+
+  let outDate: Date | null = null;
+  if (body.clockedOutAt) {
+    outDate = new Date(body.clockedOutAt);
+    if (isNaN(outDate.getTime())) {
+      return NextResponse.json({ error: 'clockedOutAt is not a valid date' }, { status: 400 });
+    }
+    if (outDate.getTime() <= inDate.getTime()) {
+      return NextResponse.json({ error: 'clockedOutAt must be after clockedInAt' }, { status: 400 });
+    }
+  }
+
+  const date = toLocalISO(inDate);
+  const weekStart = weekStartMonday(inDate);
+  const statusColumn = STATUS_COLUMNS[inDate.getDay()];
+
+  const admin = createAdminClient();
+
+  const { data: attendanceRow } = await admin
+    .from('attendance')
+    .select(statusColumn)
+    .eq('user_id', userId)
+    .eq('week_start', weekStart)
+    .maybeSingle<Record<string, string | null>>();
+
+  if ((attendanceRow?.[statusColumn] ?? null) !== 'present') {
+    return NextResponse.json({ error: 'Day must be tagged Present before adding a session' }, { status: 400 });
+  }
+
+  const insert: Record<string, string | number | null> = {
+    user_id: userId,
+    clocked_in_at: inDate.toISOString(),
+    clocked_out_at: outDate ? outDate.toISOString() : null,
+    date,
+    edited_by: session.id,
+    edited_at: new Date().toISOString(),
+  };
+
+  if (outDate) {
+    const durationSeconds = Math.round((outDate.getTime() - inDate.getTime()) / 1000);
+    const [weekSecondsBefore, baseSeconds] = await Promise.all([
+      weeklySecondsForUser(admin, userId, inDate),
+      baseWeeklySecondsForUser(admin, userId),
+    ]);
+    const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds, baseSeconds);
+    insert.duration_seconds = durationSeconds;
+    insert.is_overtime = isOvertime ? 1 : 0;
+    insert.overtime_seconds = isOvertime ? overtimeSeconds : null;
+  }
+
+  const { error } = await admin.from('timesheets').insert(insert);
+  if (error) {
+    return NextResponse.json({ error: `Create failed: ${error.message}` }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
 });
 
 // PATCH /api/admin/timesheets — admin-only edit of a specific session's
