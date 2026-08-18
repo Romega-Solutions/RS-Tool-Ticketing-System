@@ -11,7 +11,7 @@ export default function ViewTab({userName}:{userName:string}){
         redirect("/admin/users", "replace")
     }
     return(
-        <div className="flex bg-amber-300 w-full p-1"  style={{ background: 'var(--rs-primary-500)' }}>
+        <div className="flex w-full p-1"  style={{ background: 'var(--rs-primary-500)' }}>
             <div className="flex items-center text-center w-full">
                 <span className="w-full text-white">You are in Viewing Mode: {userName}</span>
             </div>
