@@ -1243,7 +1243,6 @@ export async function createPublicApplication(args: {
     jobTitle: null,
     isOnboarding: false,
     toolAccess: [],
-    approvedHours:0
   };
 
   try {
