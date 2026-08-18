@@ -5,7 +5,6 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { UsersAdminTabs } from '@/components/users-admin-tabs';
 
 export default async function AdminUsersPage() {
-  
   const session = await getSession();
   if (!session || !canAccessAdmin(session.role)) redirect('/dashboard');
 
