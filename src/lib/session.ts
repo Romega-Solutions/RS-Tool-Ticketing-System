@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { normalizeRole, isGateableToolKey, type AppRole } from '@/lib/rbac';
 
 export type SessionUser = {
-  isImpersonating:boolean;
+  isImpersonating?:boolean;
   id: number;
   email: string;
   name: string;
@@ -81,21 +81,39 @@ export const getSession = cache(async (): Promise<SessionUser | null> => {
 
     if (!dbUser || !dbUser.is_active) return null;
 
-    return {
-      isImpersonating:Boolean(claims.effective_user),
-      id: dbUser.id,
-      email: dbUser.email,
-      name: dbUser.name,
-      username: dbUser.username,
-      role: normalizeRole(dbUser.role),
-      team: dbUser.team ?? null,
-      jobTitle: dbUser.job_title ?? null,
-      isOnboarding: Boolean(dbUser.is_onboarding),
-      toolAccess: Array.isArray(dbUser.tool_access)
-        ? (dbUser.tool_access as unknown[]).filter(isGateableToolKey)
-        : [],
-      approvedHours:dbUser.approved_hours_per_week
-    };
+    if (dbUser.role === "admin"){
+      return {
+        isImpersonating:Boolean(claims.effective_user),
+        id: dbUser.id,
+        email: dbUser.email,
+        name: dbUser.name,
+        username: dbUser.username,
+        role: normalizeRole(dbUser.role),
+        team: dbUser.team ?? null,
+        jobTitle: dbUser.job_title ?? null,
+        isOnboarding: Boolean(dbUser.is_onboarding),
+        toolAccess: Array.isArray(dbUser.tool_access)
+          ? (dbUser.tool_access as unknown[]).filter(isGateableToolKey)
+          : [],
+        approvedHours:dbUser.approved_hours_per_week
+      };
+    }else{
+      return {
+        id: dbUser.id,
+        email: dbUser.email,
+        name: dbUser.name,
+        username: dbUser.username,
+        role: normalizeRole(dbUser.role),
+        team: dbUser.team ?? null,
+        jobTitle: dbUser.job_title ?? null,
+        isOnboarding: Boolean(dbUser.is_onboarding),
+        toolAccess: Array.isArray(dbUser.tool_access)
+          ? (dbUser.tool_access as unknown[]).filter(isGateableToolKey)
+          : [],
+        approvedHours:dbUser.approved_hours_per_week
+      };
+    }
+  
   } catch {
     return null;
   }
