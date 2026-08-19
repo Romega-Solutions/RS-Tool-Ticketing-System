@@ -4,10 +4,6 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { normalizeRole, isGateableToolKey, type AppRole } from '@/lib/rbac';
 
 export type SessionUser = {
-<<<<<<< HEAD
-=======
-  isImpersonating:boolean;
->>>>>>> parent of 5bf057f (fixed build errors and only admin can impersonate)
   id: number;
   email: string;
   name: string;
