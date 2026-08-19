@@ -9,6 +9,7 @@ import { SendSetupEmailDialog, type SetupEmailTarget } from '@/components/send-s
 import { createClient } from '@/lib/supabase/client';
 import { roleDisplayLabel } from '@/lib/rbac';
 import { formatPhtRange, pacificRange } from '@/lib/schedule';
+import { changeView } from '@/app/actions/view-actions';
 
 export type UserRow = {
   id: number;
@@ -439,6 +440,12 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
     }
   };
 
+  const handleImpersonate = async(targetUserId:number) =>{
+    await changeView(targetUserId)
+  }
+
+  
+
   // Name + Actions are always shown; colSpan for the empty row counts them too.
   const totalColSpan = visibleCols.size + 2;
 
@@ -665,11 +672,21 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
 
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {currentUserId !== user.id &&(
+                        <Button size="sm" variant="ghost"
+                          className="h-7 px-2.5 text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-900)"
+                          onClick={() => handleImpersonate(user.id)}>
+                          <Eye className="w-3.5 h-3.5 mr-1" />
+                          View
+                        </Button>
+                        )}
+                        
                         <Button size="sm" variant="ghost"
                           className="h-7 px-2.5 text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-900)"
                           onClick={() => openProfile(user)}>
                           <Pencil className="w-3.5 h-3.5 mr-1" />Edit
                         </Button>
+                        
                         {user.isActive && (
                           <Button size="icon" variant="ghost"
                             className="w-7 h-7 text-(--rs-neutral-grey-400) hover:text-(--rs-primary-700) hover:bg-(--rs-primary-50)"
@@ -875,8 +892,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                   <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2.5 rounded-lg text-sm">{error}</div>
                 )}
 
-                {isSelf ? (
-                  <>
+                {/* {isSelf ? ( */}
+                  {/* <>
                     <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-(--rs-neutral-grey-400) mb-1">Role</p>
@@ -904,8 +921,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                         {saving ? 'Saving…' : 'Save'}
                       </Button>
                     </DialogFooter>
-                  </>
-                ) : (
+                  </> */}
+                {/* ) : ( */}
                   <>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
                       <Field label="Role">
@@ -987,7 +1004,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                       </Button>
                     </DialogFooter>
                   </>
-                )}
+                {/* // )} */}
               </>
             );
           })()}
