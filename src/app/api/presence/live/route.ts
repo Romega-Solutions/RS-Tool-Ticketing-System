@@ -1,43 +1,16 @@
-import { subscribeToLive, unsubscribeFromLive, getAllOnline } from '@/lib/presence';
+import { NextResponse } from 'next/server';
+import { getAllOnline } from '@/lib/presence';
 import { hydrateOpenPresenceFromDB } from '@/lib/presence-hydration';
 import { route, requireSession } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
+// Polled by clients every few minutes (see who-is-in-panel.tsx / live/page.tsx).
+// Was previously an SSE stream held open for the life of the tab — that kept a
+// Vercel function instance (and its provisioned memory) alive for hours per
+// connected user, which dominated the project's Fluid Compute bill.
 export const GET = route(async () => {
-  const session = await requireSession();
-
-  const enc = new TextEncoder();
-  let streamCtrl: ReadableStreamDefaultController | null = null;
-
-  const stream = new ReadableStream({
-    async start(ctrl) {
-      streamCtrl = ctrl;
-      subscribeToLive(session.id, ctrl);
-
-      // Seed in-memory store from DB so users with open sessions survive server restarts
-      await hydrateOpenPresenceFromDB();
-
-      const snapshot = getAllOnline();
-      try {
-        ctrl.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'snapshot', online: snapshot })}\n\n`));
-      } catch { /* client already gone */ }
-    },
-    cancel() {
-      if (streamCtrl) {
-        unsubscribeFromLive(session.id, streamCtrl);
-      } else {
-        unsubscribeFromLive(session.id);
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type':      'text/event-stream',
-      'Cache-Control':     'no-cache, no-transform',
-      'Connection':        'keep-alive',
-      'X-Accel-Buffering': 'no',
-    },
-  });
+  await requireSession();
+  await hydrateOpenPresenceFromDB();
+  return NextResponse.json({ online: getAllOnline() });
 });

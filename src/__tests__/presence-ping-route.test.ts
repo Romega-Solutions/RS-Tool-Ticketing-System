@@ -13,24 +13,12 @@ const sender: SessionUser = {
   toolAccess: [],
 };
 
-const decoder = new TextDecoder();
-
 function jsonReq(body: unknown) {
   return new Request('http://localhost/api/presence/ping', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-}
-
-function makeController() {
-  const chunks: string[] = [];
-  const ctrl = {
-    enqueue(chunk: Uint8Array) {
-      chunks.push(decoder.decode(chunk));
-    },
-  } as unknown as ReadableStreamDefaultController;
-  return { ctrl, chunks };
 }
 
 function mockSession(session: SessionUser | null) {
@@ -89,14 +77,12 @@ describe('POST /api/presence/ping', () => {
     vi.restoreAllMocks();
   });
 
-  it('hydrates open clock-in sessions before rejecting a live ping as not clocked in', async () => {
+  it('hydrates open clock-in sessions from the DB before allowing a ping to a not-yet-seen user', async () => {
     mockSession(sender);
     mockPresenceHydration();
 
     const presence = await import('@/lib/presence');
     presence.__resetPresenceForTests();
-    const targetStream = makeController();
-    presence.subscribeToLive(2, targetStream.ctrl);
 
     const { POST } = await import('@/app/api/presence/ping/route');
     const res = await POST(jsonReq({ toUserId: 2, message: 'Are you online?' }));
@@ -122,9 +108,5 @@ describe('POST /api/presence/ping', () => {
         },
       },
     });
-    expect(targetStream.chunks).toHaveLength(1);
-    expect(targetStream.chunks[0]).toContain('"type":"user_ping"');
-    expect(targetStream.chunks[0]).toContain('"message":"Are you online?"');
-    expect(targetStream.chunks[0]).toContain('"deadlineAt"');
   });
 });

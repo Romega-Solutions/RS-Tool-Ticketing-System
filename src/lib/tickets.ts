@@ -729,26 +729,6 @@ export async function removeProjectMember(projectId: string, userId: number): Pr
   if (error) throw new PlaneApiError(502, `project-members/${projectId}/${userId}`);
 }
 
-// Strip a deactivated user's active project associations everywhere at once —
-// their membership on every project, plus their assignment on every work item.
-// Historical data (comments, activity log, work items they created) is left
-// alone; this only clears "currently on this project / currently assigned".
-export async function removeUserFromAllProjects(
-  userId: number,
-): Promise<{ memberships: number; assignments: number }> {
-  const sb = createAdminClient();
-
-  const { error: memErr, count: memberships } = await sb.from('project_members')
-    .delete({ count: 'exact' }).eq('user_id', userId);
-  if (memErr) throw new PlaneApiError(502, `project-members/user/${userId}`);
-
-  const { error: asgErr, count: assignments } = await sb.from('work_item_assignees')
-    .delete({ count: 'exact' }).eq('user_id', userId);
-  if (asgErr) throw new PlaneApiError(502, `work-item-assignees/user/${userId}`);
-
-  return { memberships: memberships ?? 0, assignments: assignments ?? 0 };
-}
-
 // ── Activity log ────────────────────────────────────────────────────────
 
 export interface WorkItemActivityEntry {
