@@ -19,38 +19,32 @@ type PresenceUser = {
   photoUrl?:   string | null;
 };
 
-type SSEEvent =
-  | { type: 'snapshot'; online: PresenceUser[] }
-  | { type: 'clock_in';  user: PresenceUser }
-  | { type: 'clock_out'; userId: number }
-  | {
-      type: 'user_ping';
-      id: string;
-      from: {
-        userId: number;
-        name: string;
-        role: string;
-        team: string | null;
-        photoUrl?: string | null;
-      };
-      toUserId: number;
-      message: string;
-      createdAt: string;
-      deadlineAt: string;
-    }
-  | {
-      type: 'user_ping_reply';
-      id: string;
-      pingId: string;
-      fromUserId: number;
-      toUserId: number;
-      responderName: string;
-      replyMessage: string;
-      acknowledgedAt: string;
-    };
+type IncomingPing = {
+  type: 'user_ping';
+  id: string;
+  from: {
+    userId: number;
+    name: string;
+    role: string;
+    team: string | null;
+    photoUrl?: string | null;
+  };
+  toUserId: number;
+  message: string;
+  createdAt: string;
+  deadlineAt: string;
+};
 
-type IncomingPing = Extract<SSEEvent, { type: 'user_ping' }>;
-type IncomingPingReply = Extract<SSEEvent, { type: 'user_ping_reply' }>;
+type IncomingPingReply = {
+  type: 'user_ping_reply';
+  id: string;
+  pingId: string;
+  fromUserId: number;
+  toUserId: number;
+  responderName: string;
+  replyMessage: string;
+  acknowledgedAt: string;
+};
 
 type PresencePingStatus = 'pending' | 'acknowledged' | 'missed';
 
@@ -58,6 +52,7 @@ type PresencePingRecord = IncomingPing & {
   senderId: number;
   targetUserId: number;
   status: PresencePingStatus;
+  replyMessage: string | null;
   acknowledgedAt: string | null;
   missedAt: string | null;
 };
@@ -389,13 +384,79 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
     received: [],
   });
   const [acknowledgingPingId, setAcknowledgingPingId] = useState<string | null>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const onlineRef = useRef<PresenceUser[]>([]);
+  const seenPingIdsRef = useRef<Set<string>>(new Set());
+  const seenReplyIdsRef = useRef<Set<string>>(new Set());
+  const firstPingLoadRef = useRef(true);
+
+  useEffect(() => {
+    onlineRef.current = online;
+  }, [online]);
+
+  const loadOnline = useCallback(async () => {
+    try {
+      const res = await fetch('/api/presence/live');
+      if (!res.ok) { setConnected(false); return; }
+      const data = (await res.json()) as { online: PresenceUser[] };
+      setOnline(data.online);
+      setConnected(true);
+    } catch {
+      setConnected(false);
+    }
+  }, []);
 
   const loadPingSnapshot = useCallback(async () => {
     try {
       const res = await fetch('/api/presence/ping');
       if (!res.ok) return;
-      setPingSnapshot((await res.json()) as PresencePingSnapshot);
+      const snapshot = (await res.json()) as PresencePingSnapshot;
+      setPingSnapshot(snapshot);
+
+      // Notification toasts used to arrive over a pushed SSE event; now derive
+      // "new since last poll" by diffing against what we've already surfaced,
+      // skipping the very first load so existing pending pings don't all fire at once.
+      const pendingReceived = snapshot.received.filter(p => p.status === 'pending');
+      const newPings = pendingReceived.filter(p => !seenPingIdsRef.current.has(p.id));
+      pendingReceived.forEach(p => seenPingIdsRef.current.add(p.id));
+
+      const acknowledgedSent = snapshot.sent.filter(p => p.status === 'acknowledged');
+      const newReplies = acknowledgedSent.filter(p => !seenReplyIdsRef.current.has(p.id));
+      acknowledgedSent.forEach(p => seenReplyIdsRef.current.add(p.id));
+
+      if (firstPingLoadRef.current) {
+        firstPingLoadRef.current = false;
+        return;
+      }
+
+      if (newPings.length > 0) {
+        setIncomingPings(prev => [...newPings, ...prev.filter(p => !newPings.some(np => np.id === p.id))].slice(0, 3));
+        playRomegaNotificationSound(4);
+        newPings.forEach(p => {
+          window.setTimeout(() => {
+            setIncomingPings(prev => prev.filter(x => x.id !== p.id));
+          }, 9000);
+        });
+      }
+
+      if (newReplies.length > 0) {
+        const replies: IncomingPingReply[] = newReplies.map(r => ({
+          type: 'user_ping_reply',
+          id: `${r.id}-reply`,
+          pingId: r.id,
+          fromUserId: r.targetUserId,
+          toUserId: r.senderId,
+          responderName: onlineRef.current.find(u => u.userId === r.targetUserId)?.name ?? 'They',
+          replyMessage: r.replyMessage ?? '',
+          acknowledgedAt: r.acknowledgedAt ?? new Date().toISOString(),
+        }));
+        setIncomingReplies(prev => [...replies, ...prev.filter(p => !replies.some(nr => nr.pingId === p.pingId))].slice(0, 3));
+        playRomegaNotificationSound(2);
+        replies.forEach(r => {
+          window.setTimeout(() => {
+            setIncomingReplies(prev => prev.filter(x => x.pingId !== r.pingId));
+          }, 9000);
+        });
+      }
     } catch {
       // Presence ping status is an enhancement; keep the live panel usable.
     }
@@ -416,7 +477,8 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
       });
       const data = await res.json() as { error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Force clock-out failed');
-      // SSE will drop them from `online` via the clock_out event.
+      // Drop them locally now — the next poll will reconcile within 5 minutes anyway.
+      setOnline(prev => prev.filter(u => u.userId !== user.userId));
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Force clock-out failed');
     } finally {
@@ -482,8 +544,19 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
     }
   }
 
-  // Single SSE connection for both the badge count and the panel list
+  // Polling replaces what used to be a single held-open SSE connection — that
+  // kept a Vercel function instance (and its billed provisioned memory) alive
+  // for as long as the tab stayed open. The online list is low-urgency, so it
+  // polls every 5 minutes; ping status polls every 60s (unchanged) and derives
+  // "new" toast notifications by diffing against what's already been seen.
   useEffect(() => {
+    const initialOnlineTimeout = window.setTimeout(() => {
+      void loadOnline();
+    }, 0);
+    const onlineInterval = window.setInterval(() => {
+      void loadOnline();
+    }, 5 * 60_000);
+
     const initialPingStatusTimeout = window.setTimeout(() => {
       void loadPingSnapshot();
     }, 0);
@@ -491,50 +564,13 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
       void loadPingSnapshot();
     }, 60_000);
 
-    const es = new EventSource('/api/presence/live');
-    esRef.current = es;
-
-    es.onopen  = () => setConnected(true);
-    es.onerror = () => setConnected(false);
-
-    es.onmessage = (e) => {
-      const event = JSON.parse(e.data as string) as SSEEvent;
-      if (event.type === 'snapshot') {
-        setOnline(event.online);
-        setConnected(true);
-      } else if (event.type === 'clock_in') {
-        setOnline(prev => {
-          const exists = prev.some(u => u.userId === event.user.userId);
-          return exists
-            ? prev.map(u => u.userId === event.user.userId ? event.user : u)
-            : [...prev, event.user];
-        });
-      } else if (event.type === 'clock_out') {
-        setOnline(prev => prev.filter(u => u.userId !== event.userId));
-      } else if (event.type === 'user_ping') {
-        setIncomingPings(prev => [event, ...prev.filter(p => p.id !== event.id)].slice(0, 3));
-        void loadPingSnapshot();
-        playRomegaNotificationSound(4);
-        window.setTimeout(() => {
-          setIncomingPings(prev => prev.filter(p => p.id !== event.id));
-        }, 9000);
-      } else if (event.type === 'user_ping_reply') {
-        setIncomingReplies(prev => [event, ...prev.filter(p => p.id !== event.id)].slice(0, 3));
-        void loadPingSnapshot();
-        playRomegaNotificationSound(2);
-        window.setTimeout(() => {
-          setIncomingReplies(prev => prev.filter(p => p.id !== event.id));
-        }, 9000);
-      }
-    };
-
     return () => {
+      window.clearTimeout(initialOnlineTimeout);
+      window.clearInterval(onlineInterval);
       window.clearTimeout(initialPingStatusTimeout);
       window.clearInterval(pingStatusInterval);
-      es.close();
-      esRef.current = null;
     };
-  }, [loadPingSnapshot]);
+  }, [loadOnline, loadPingSnapshot]);
 
   // Close on Escape key
   useEffect(() => {

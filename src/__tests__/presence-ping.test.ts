@@ -7,12 +7,9 @@ import {
   PRESENCE_PING_RESPONSE_WINDOW_MS,
   sendPresencePingReply,
   sendPresencePing,
-  subscribeToLive,
   type PresenceUser,
 } from '@/lib/presence';
 import { normalizePingMessage } from '@/lib/presence-ping';
-
-const encoder = new TextDecoder();
 
 function makeUser(overrides: Partial<PresenceUser> & { userId: number }): PresenceUser {
   return {
@@ -22,16 +19,6 @@ function makeUser(overrides: Partial<PresenceUser> & { userId: number }): Presen
     clockedInAt: '2026-06-10T01:00:00.000Z',
     ...overrides,
   };
-}
-
-function makeController() {
-  const chunks: string[] = [];
-  const ctrl = {
-    enqueue(chunk: Uint8Array) {
-      chunks.push(encoder.decode(chunk));
-    },
-  } as unknown as ReadableStreamDefaultController;
-  return { ctrl, chunks };
 }
 
 describe('normalizePingMessage', () => {
@@ -49,15 +36,10 @@ describe('sendPresencePing', () => {
     __resetPresenceForTests();
   });
 
-  it('delivers a ping event only to the target live subscriber', () => {
+  it('delivers a ping to a user who is clocked in, regardless of live connection state', () => {
     const target = makeUser({ userId: 2, name: 'Receiver' });
     clockIn(target);
 
-    const targetStream = makeController();
-    const otherStream = makeController();
-    subscribeToLive(2, targetStream.ctrl);
-    subscribeToLive(3, otherStream.ctrl);
-
     const result = sendPresencePing({
       from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
       toUserId: 2,
@@ -66,36 +48,14 @@ describe('sendPresencePing', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(targetStream.chunks).toHaveLength(1);
-    expect(otherStream.chunks).toHaveLength(0);
-    expect(targetStream.chunks[0]).toContain('"type":"user_ping"');
-    expect(targetStream.chunks[0]).toContain('"message":"Can you check this?"');
-    expect(targetStream.chunks[0]).toContain('"name":"Sender"');
-  });
-
-  it('delivers a ping event to every live tab for the target user', () => {
-    clockIn(makeUser({ userId: 2, name: 'Receiver' }));
-
-    const firstTab = makeController();
-    const secondTab = makeController();
-    subscribeToLive(2, firstTab.ctrl);
-    subscribeToLive(2, secondTab.ctrl);
-
-    const result = sendPresencePing({
-      from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
-      toUserId: 2,
-      message: 'Can you check this?',
-      createdAt: '2026-06-10T02:00:00.000Z',
-    });
-
-    expect(result.ok).toBe(true);
-    expect(firstTab.chunks).toHaveLength(1);
-    expect(secondTab.chunks).toHaveLength(1);
+    if (!result.ok) return;
+    expect(result.event.type).toBe('user_ping');
+    expect(result.event.message).toBe('Can you check this?');
+    expect(result.event.from.name).toBe('Sender');
   });
 
   it('tracks a delivered ping as a one-hour response task for sender and receiver', () => {
     clockIn(makeUser({ userId: 2, name: 'Receiver' }));
-    subscribeToLive(2, makeController().ctrl);
 
     const result = sendPresencePing({
       from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
@@ -125,7 +85,6 @@ describe('sendPresencePing', () => {
 
   it('acknowledges a ping before the one-hour response window expires', () => {
     clockIn(makeUser({ userId: 2, name: 'Receiver' }));
-    subscribeToLive(2, makeController().ctrl);
 
     const sent = sendPresencePing({
       from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
@@ -151,11 +110,8 @@ describe('sendPresencePing', () => {
     });
   });
 
-  it('notifies the sender when the receiver replies to a ping', () => {
+  it('builds a reply event once the receiver acknowledges a ping', () => {
     clockIn(makeUser({ userId: 2, name: 'Receiver' }));
-    subscribeToLive(2, makeController().ctrl);
-    const senderStream = makeController();
-    subscribeToLive(1, senderStream.ctrl);
 
     const sent = sendPresencePing({
       from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
@@ -175,20 +131,19 @@ describe('sendPresencePing', () => {
     expect(ack.ok).toBe(true);
     if (!ack.ok) return;
 
-    sendPresencePingReply({
+    const reply = sendPresencePingReply({
       record: ack.record,
       responderName: 'Receiver',
     });
 
-    expect(senderStream.chunks).toHaveLength(1);
-    expect(senderStream.chunks[0]).toContain('"type":"user_ping_reply"');
-    expect(senderStream.chunks[0]).toContain('"replyMessage":"I\'m here"');
-    expect(senderStream.chunks[0]).toContain('"responderName":"Receiver"');
+    expect(reply.type).toBe('user_ping_reply');
+    expect(reply.toUserId).toBe(1);
+    expect(reply.replyMessage).toBe("I'm here");
+    expect(reply.responderName).toBe('Receiver');
   });
 
   it('marks an unanswered ping missed after the one-hour response window expires', () => {
     clockIn(makeUser({ userId: 2, name: 'Receiver' }));
-    subscribeToLive(2, makeController().ctrl);
 
     const sent = sendPresencePing({
       from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
@@ -211,9 +166,7 @@ describe('sendPresencePing', () => {
     });
   });
 
-  it('rejects a ping when the target is not live connected', () => {
-    clockIn(makeUser({ userId: 2, name: 'Receiver' }));
-
+  it('rejects a ping when the target is not clocked in', () => {
     const result = sendPresencePing({
       from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
       toUserId: 2,
@@ -223,7 +176,7 @@ describe('sendPresencePing', () => {
 
     expect(result).toEqual({
       ok: false,
-      reason: 'not_connected',
+      reason: 'not_online',
     });
   });
 });

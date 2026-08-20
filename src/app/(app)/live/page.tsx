@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Radio, Loader2 } from 'lucide-react';
 import { isOvertime } from '@/lib/utils';
 import { roleDisplayLabel } from '@/lib/rbac';
@@ -17,11 +17,6 @@ type PresenceUser = {
   weekSecondsBefore?: number;
   photoUrl?:   string | null;
 };
-
-type SSEEvent =
-  | { type: 'snapshot'; online: PresenceUser[] }
-  | { type: 'clock_in';  user: PresenceUser }
-  | { type: 'clock_out'; userId: number };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -130,35 +125,33 @@ export default function LivePage() {
   const [online, setOnline]     = useState<PresenceUser[]>([]);
   const [connected, setConnected] = useState(false);
   const [booted, setBooted]     = useState(false);
-  const esRef = useRef<EventSource | null>(null);
 
+  // Polling replaces what used to be a held-open SSE connection — that kept a
+  // Vercel function instance (and its billed provisioned memory) alive for as
+  // long as this page stayed open. 5 minutes is plenty for a "who's in" board.
   useEffect(() => {
-    const es = new EventSource('/api/presence/live');
-    esRef.current = es;
+    let cancelled = false;
 
-    es.onopen = () => setConnected(true);
-    es.onerror = () => setConnected(false);
-
-    es.onmessage = (e) => {
-      const event = JSON.parse(e.data as string) as SSEEvent;
-
-      if (event.type === 'snapshot') {
-        setOnline(event.online);
+    async function load() {
+      try {
+        const res = await fetch('/api/presence/live');
+        if (!res.ok) {
+          if (!cancelled) setConnected(false);
+          return;
+        }
+        const data = (await res.json()) as { online: PresenceUser[] };
+        if (cancelled) return;
+        setOnline(data.online);
         setConnected(true);
         setBooted(true);
-      } else if (event.type === 'clock_in') {
-        setOnline(prev => {
-          const exists = prev.some(u => u.userId === event.user.userId);
-          return exists
-            ? prev.map(u => u.userId === event.user.userId ? event.user : u)
-            : [...prev, event.user];
-        });
-      } else if (event.type === 'clock_out') {
-        setOnline(prev => prev.filter(u => u.userId !== event.userId));
+      } catch {
+        if (!cancelled) setConnected(false);
       }
-    };
+    }
 
-    return () => { es.close(); esRef.current = null; };
+    void load();
+    const id = window.setInterval(() => { void load(); }, 5 * 60_000);
+    return () => { cancelled = true; window.clearInterval(id); };
   }, []);
 
   // Sort: clocked in earliest first
