@@ -13,13 +13,6 @@ export type PresenceUser = {
   photoUrl?:   string | null; // org chart photo, resolved at clock-in / hydration
 };
 
-type Subscriber = {
-  ctrl:   ReadableStreamDefaultController;
-  userId: number;
-  role:   AppRole;
-  team:   string | null;
-};
-
 export type PresencePingActor = {
   userId:   number;
   name:     string;
@@ -79,13 +72,10 @@ export type PresencePingSnapshot = {
 
 // ── In-memory store ────────────────────────────────────────────────────────────
 // Resets on server restart — acceptable for a small internal tool.
+// Polled by clients (not pushed over a held-open connection) — see /api/presence/live.
 
 const online:    Map<number, PresenceUser>                          = new Map();
-const subs:      Map<number, Subscriber>                            = new Map();
-// Live subscribers see ALL clock events regardless of role/team.
-const liveSubs:  Map<number, Set<ReadableStreamDefaultController>>  = new Map();
 const presencePings: Map<string, PresencePingRecord>                 = new Map();
-const enc = new TextEncoder();
 let pingSequence = 0;
 
 export const PRESENCE_PING_RESPONSE_WINDOW_MS = 60 * 60 * 1000;
@@ -105,64 +95,17 @@ function canSee(
   return false;
 }
 
-// ── SSE helpers ────────────────────────────────────────────────────────────────
-
-function sendEvent(ctrl: ReadableStreamDefaultController, payload: unknown) {
-  try {
-    ctrl.enqueue(enc.encode(`data: ${JSON.stringify(payload)}\n\n`));
-  } catch {
-    // controller closed — will be cleaned up on next broadcast
-  }
-}
-
-type PresenceEvent =
-  | { type: 'clock_in';  user: PresenceUser }
-  | { type: 'clock_out'; userId: number };
-
 type PingResult =
   | { ok: true; event: PresencePingEvent; record: PresencePingRecord }
-  | { ok: false; reason: 'self' | 'not_online' | 'not_connected' };
-
-function broadcast(event: PresenceEvent) {
-  for (const [, sub] of subs) {
-    const target: PresenceUser | undefined =
-      event.type === 'clock_in'
-        ? event.user
-        : online.get(event.userId) ?? { userId: event.userId, name: '', role: 'ic', team: null, clockedInAt: '' };
-
-    if (!canSee(sub.role, sub.team, sub.userId, target)) continue;
-    sendEvent(sub.ctrl, event);
-  }
-}
-
-function broadcastToLive(event: PresenceEvent) {
-  for (const [, ctrls] of liveSubs) {
-    for (const ctrl of ctrls) {
-      sendEvent(ctrl, event);
-    }
-  }
-}
-
-function sendToLiveUser(userId: number, event: unknown) {
-  const ctrls = liveSubs.get(userId);
-  if (!ctrls?.size) return;
-  for (const ctrl of ctrls) {
-    sendEvent(ctrl, event);
-  }
-}
+  | { ok: false; reason: 'self' | 'not_online' };
 
 // ── Public API ─────────────────────────────────────────────────────────────────
 
 export function clockIn(user: PresenceUser): void {
   online.set(user.userId, user);
-  broadcast({ type: 'clock_in', user });
-  broadcastToLive({ type: 'clock_in', user });
 }
 
 export function clockOut(userId: number): void {
-  // Broadcast before deleting so filtered subs can still resolve the user
-  broadcast({ type: 'clock_out', userId });
-  broadcastToLive({ type: 'clock_out', userId });
   online.delete(userId);
 }
 
@@ -180,35 +123,9 @@ export function getMyEntry(userId: number): PresenceUser | undefined {
   return online.get(userId);
 }
 
-export function subscribe(sub: Subscriber): void {
-  subs.set(sub.userId, sub);
-}
-
-export function unsubscribe(userId: number): void {
-  subs.delete(userId);
-}
-
 /** All online users — no visibility filter. Used by the live page. */
 export function getAllOnline(): PresenceUser[] {
   return [...online.values()];
-}
-
-export function subscribeToLive(userId: number, ctrl: ReadableStreamDefaultController): void {
-  const ctrls = liveSubs.get(userId) ?? new Set<ReadableStreamDefaultController>();
-  ctrls.add(ctrl);
-  liveSubs.set(userId, ctrls);
-}
-
-export function unsubscribeFromLive(userId: number, ctrl?: ReadableStreamDefaultController): void {
-  if (!ctrl) {
-    liveSubs.delete(userId);
-    return;
-  }
-
-  const ctrls = liveSubs.get(userId);
-  if (!ctrls) return;
-  ctrls.delete(ctrl);
-  if (ctrls.size === 0) liveSubs.delete(userId);
 }
 
 function pingDeadline(createdAt: string): string {
@@ -268,9 +185,6 @@ export function sendPresencePing({
   if (from.userId === toUserId) return { ok: false, reason: 'self' };
   if (!online.has(toUserId)) return { ok: false, reason: 'not_online' };
 
-  const targets = liveSubs.get(toUserId);
-  if (!targets?.size) return { ok: false, reason: 'not_connected' };
-
   const id = nextPingId(createdAt, from.userId, toUserId);
   const deadlineAt = pingDeadline(createdAt);
   const event: PresencePingEvent = {
@@ -293,7 +207,6 @@ export function sendPresencePing({
   };
   presencePings.set(id, record);
 
-  for (const target of targets) sendEvent(target, event);
   return { ok: true, event, record };
 }
 
@@ -339,7 +252,6 @@ export function sendPresencePingReply({
     replyMessage: normalizePingReply(record.replyMessage),
     acknowledgedAt: record.acknowledgedAt ?? new Date().toISOString(),
   };
-  sendToLiveUser(record.senderId, event);
   return event;
 }
 
@@ -417,8 +329,6 @@ export function seedUsers(users: PresenceUser[]): void {
 
 export function __resetPresenceForTests(): void {
   online.clear();
-  subs.clear();
-  liveSubs.clear();
   presencePings.clear();
   pingSequence = 0;
 }
