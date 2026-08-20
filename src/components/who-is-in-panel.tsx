@@ -477,7 +477,7 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
       });
       const data = await res.json() as { error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Force clock-out failed');
-      // Drop them locally now — the next poll will reconcile within 5 minutes anyway.
+      // Drop them locally now — the next poll will reconcile within 2 minutes anyway.
       setOnline(prev => prev.filter(u => u.userId !== user.userId));
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Force clock-out failed');
@@ -547,7 +547,7 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
   // Polling replaces what used to be a single held-open SSE connection — that
   // kept a Vercel function instance (and its billed provisioned memory) alive
   // for as long as the tab stayed open. The online list is low-urgency, so it
-  // polls every 5 minutes; ping status polls every 60s (unchanged) and derives
+  // polls every 2 minutes; ping status polls every 60s (unchanged) and derives
   // "new" toast notifications by diffing against what's already been seen.
   useEffect(() => {
     const initialOnlineTimeout = window.setTimeout(() => {
@@ -555,7 +555,7 @@ export function WhoIsInPanel({ currentUserId, isAdmin = false }: { currentUserId
     }, 0);
     const onlineInterval = window.setInterval(() => {
       void loadOnline();
-    }, 5 * 60_000);
+    }, 2 * 60_000);
 
     const initialPingStatusTimeout = window.setTimeout(() => {
       void loadPingSnapshot();

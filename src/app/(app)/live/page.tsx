@@ -128,7 +128,7 @@ export default function LivePage() {
 
   // Polling replaces what used to be a held-open SSE connection — that kept a
   // Vercel function instance (and its billed provisioned memory) alive for as
-  // long as this page stayed open. 5 minutes is plenty for a "who's in" board.
+  // long as this page stayed open. 2 minutes is plenty for a "who's in" board.
   useEffect(() => {
     let cancelled = false;
 
@@ -150,7 +150,7 @@ export default function LivePage() {
     }
 
     void load();
-    const id = window.setInterval(() => { void load(); }, 5 * 60_000);
+    const id = window.setInterval(() => { void load(); }, 2 * 60_000);
     return () => { cancelled = true; window.clearInterval(id); };
   }, []);
 
