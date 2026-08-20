@@ -50,9 +50,6 @@ sqlite.db-shm
 sqlite.db-wal
 .env*.local
 
-#packages
-package-lock.json
-
 # Git worktrees (isolated agent workspaces)
 .claude/worktrees/
 
