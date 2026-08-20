@@ -9,6 +9,7 @@ import { getPhotoResolver } from "@/lib/orgchart";
 import { hasIncompleteHardCourse, isPathExemptFromHardEnforcement } from "@/lib/lms-enforcement";
 import { ClockWidget } from "@/components/clock-widget";
 import { LiveClock } from "@/components/live-clock";
+import { EnvBadge } from "@/components/env-badge";
 import { WhoIsInPanel } from "@/components/who-is-in-panel";
 import { NotificationBell } from "@/components/notification-bell.client";
 import { FloatingGuide } from "@/components/guide/floating-guide.client";

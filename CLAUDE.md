@@ -205,5 +205,6 @@ UI components come from **shadcn/ui** (`components.json` at root). The codebase 
 | `SUPABASE_RESUMES_BUCKET` / `SUPABASE_ONBOARDER_BUCKET` | Storage bucket names (default `candidate-resumes` / `onboarder-docs`) |
 | `PUBLIC_APPLICATIONS_TOKEN` | Shared bearer token for external `/api/public/applications/[positionId]` posts |
 | `NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS` | `true` shows demo logins on `/login` |
+| `NEXT_PUBLIC_ENABLE_DEV_LOGIN` | `true` shows the dev-only email/password sign-in block on `/login` outside local dev (e.g. on Vercel Staging). Set only in Staging, never Production. |
 
 `.env` is gitignored; only `.env.example` is committed.
