@@ -29,7 +29,7 @@ import { STATUS_LABEL, STATUS_COLOR } from "./onboarder-row";
 import { CreateOnboarderForm } from "./onboarder-forms";
 import { OnboarderFilterBar } from "./onboarder-filter-bar";
 import { OnboardingHelpButton } from "./onboarding-help";
-import { listOnboardingLeadOptions } from '@/lib/onboarding-lead';
+import { listOnboardingLeadOptions } from "@/lib/onboarding-lead";
 
 // ─── Stage groupings (3 happy lanes + 1 terminal lane) ──────────────────────
 
@@ -42,7 +42,7 @@ const LANES: {
   {
     id: "lane-prep",
     title: "Pre-employment",
-    hint: "Pre-onboarding",
+    hint: "Onboarding",
     statuses: ["pre_onboarding"],
   },
   {
@@ -159,7 +159,9 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
   // Stat counts
   const TERMINAL = new Set(["regularized", "failed_probation", "withdrew"]);
   const activeCount = rows.filter((r) => !TERMINAL.has(r.status)).length;
-  const preOnboardingCount = rows.filter((r) => r.status === "pre_onboarding").length;
+  const preOnboardingCount = rows.filter(
+    (r) => r.status === "pre_onboarding",
+  ).length;
 
   const monday = startOfWeek(new Date());
   const sunday = new Date(monday);
@@ -199,7 +201,10 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
               >
                 <Settings2 className="w-4 h-4" /> Setup & workflows
               </Link>
-              <CreateOnboarderForm departments={[...APP_DEPARTMENTS]} leads={onboardingLeads} />
+              <CreateOnboarderForm
+                departments={[...APP_DEPARTMENTS]}
+                leads={onboardingLeads}
+              />
             </div>
           ) : null
         }

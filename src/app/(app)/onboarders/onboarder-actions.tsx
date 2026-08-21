@@ -112,15 +112,24 @@ export function SendBgCheckButton({ id }: { id: number }) {
   );
 }
 
-export function SendWelcomeButton({ id, type }: { id: number; type: string }) {
+export function SendWelcomeButton({
+  id,
+  type,
+  alreadySubmitted,
+}: {
+  id: number;
+  type: string;
+  alreadySubmitted: boolean;
+}) {
   return (
     <ActionButton
       onClick={() => sendWelcomeEmail(id)}
-      label={`Send welcome (${type})`}
+      label={alreadySubmitted ? 'Onboarding form received' : `Confirm & send welcome (${type})`}
       icon={<Mail className="w-3.5 h-3.5" />}
-      variant="primary"
+      variant={alreadySubmitted ? 'subtle' : 'primary'}
       size="md"
-      confirm={`Send the ${type} welcome email (SOP §5) now?`}
+      confirm={`Confirm the handoff and send the ${type} welcome email now? This assigns the Friday onboarding cohort.`}
+      disabled={alreadySubmitted}
     />
   );
 }

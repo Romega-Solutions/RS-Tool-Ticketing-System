@@ -40,3 +40,4 @@ WHERE onboarder.direct_supervisor_id IS NULL
     FROM users AS possible_user
     WHERE LOWER(BTRIM(possible_user.name)) = LOWER(BTRIM(onboarder.direct_supervisor))
   ) = 1;
+ 
