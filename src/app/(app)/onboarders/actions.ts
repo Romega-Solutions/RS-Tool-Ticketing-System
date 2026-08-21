@@ -24,6 +24,12 @@ import {
   type OnboarderType,
 } from './constants';
 import { resolveOnboardingLead } from '@/lib/onboarding-lead';
+import {
+  getOrAssignOnboarderToOpenSession,
+  formatSessionForEmail,
+  issueOnboardingFormToken,
+  onboardingFormUrl,
+} from '@/lib/onboarding-sessions';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal type guards
@@ -358,20 +364,8 @@ export async function updateOnboarderStatus(id: number, status: string): Promise
     if (status === 'pre_onboarding') {
       // SOP §5: the official welcome email (contractor/intern variant, forked in
       // n8n on onboarder_type) goes out when the onboarder enters pre_onboarding.
-      await fireOnboardingTemplate(
-        supabase, session, id,
-        {
-          onboarderId: id,
-          template:    'welcome',
-          event:       'status_changed',
-          context:     {
-            ...baseContext,
-            onboarder_type: before.onboarder_type,
-            chief_of_staff: before.chief_of_staff ?? '',
-          },
-        },
-        'auto: welcome email on stage entry',
-      );
+      // The Onboarding Lead explicitly sends the welcome email once the
+      // handoff details have been reviewed and assigned.
     } else if (status === 'thirty_day') {
       await fireOnboardingTemplate(
         supabase, session, id,
@@ -663,10 +657,35 @@ export async function sendWelcomeEmail(onboarderId: number): Promise<void> {
   const supabase = createAdminClient();
   const { data: o } = await supabase
     .from('onboarders')
-    .select('id, full_name, personal_email, onboarder_type, role_title, onboarding_lead, chief_of_staff, direct_supervisor')
+    .select('id, full_name, personal_email, onboarder_type, role_title, onboarding_lead, onboarding_lead_id, direct_supervisor, direct_supervisor_id, onboarding_form_submitted_at')
     .eq('id', onboarderId)
     .maybeSingle();
   if (!o) throw new Error('Onboarder not found');
+  if (o.onboarding_form_submitted_at) {
+    throw new Error('The onboarding form has already been submitted. Do not send another welcome link.');
+  }
+  if (!o.onboarding_lead_id || !o.onboarding_lead) {
+    throw new Error('Assign an Onboarding Lead before sending the welcome email');
+  }
+  if (!o.direct_supervisor_id || !o.direct_supervisor) {
+    throw new Error('Assign a Direct Supervisor before sending the welcome email');
+  }
+
+  const [leadResult, supervisorResult] = await Promise.all([
+    supabase.from('users').select('name, email').eq('id', o.onboarding_lead_id).maybeSingle(),
+    supabase.from('users').select('name, email').eq('id', o.direct_supervisor_id).maybeSingle(),
+  ]);
+  if (leadResult.error || !leadResult.data?.email?.trim()) {
+    throw new Error('The assigned Onboarding Lead needs an email address before sending the welcome email');
+  }
+  if (supervisorResult.error || !supervisorResult.data?.email?.trim()) {
+    throw new Error('The assigned Direct Supervisor needs an email address before sending the welcome email');
+  }
+  const onboardingLeadName = leadResult.data.name?.trim() || o.onboarding_lead;
+  const directSupervisorName = supervisorResult.data.name?.trim() || o.direct_supervisor;
+
+  const onboardingSession = await getOrAssignOnboarderToOpenSession(onboarderId);
+  const formToken = await issueOnboardingFormToken(onboarderId);
 
   await fireOnboardingTemplate(
     supabase, session, onboarderId,
@@ -680,9 +699,13 @@ export async function sendWelcomeEmail(onboarderId: number): Promise<void> {
         first_name:        firstName(o.full_name),
         personal_email:    o.personal_email,
         role_title:        o.role_title         ?? '',
-        onboarding_lead:   o.onboarding_lead    ?? session.name,
-        chief_of_staff:    o.chief_of_staff     ?? '',
-        direct_supervisor: o.direct_supervisor  ?? '',
+        onboarding_lead:   onboardingLeadName,
+        onboarding_lead_email: leadResult.data.email.trim(),
+        direct_supervisor: directSupervisorName,
+        direct_supervisor_email: supervisorResult.data.email.trim(),
+        onboarding_session_date: formatSessionForEmail(onboardingSession),
+        onboarding_session_starts_at: onboardingSession.starts_at,
+        onboarding_form_url: onboardingFormUrl(formToken, o.onboarder_type, onboardingSession),
       },
     },
     `welcome (${o.onboarder_type})`,
@@ -728,7 +751,6 @@ const DAY1_KEYS = [
   'teams_installed_at',
   'gmail_created_at',
   'signature_set_at',
-  'jibble_invited_at',
   'wise_setup_at',
   'group_chats_joined_at',
   'orientation_done_at',
@@ -739,7 +761,6 @@ const DAY1_LABEL: Record<Day1Key, string> = {
   teams_installed_at:    'Teams installed',
   gmail_created_at:      'Romega Gmail created',
   signature_set_at:      'Email signature set',
-  jibble_invited_at:     'Jibble invited',
   wise_setup_at:         'Wise account set up',
   group_chats_joined_at: 'Group chats joined',
   orientation_done_at:   'Orientation done',
@@ -761,7 +782,7 @@ export async function toggleChecklistItem(
   const now = new Date().toISOString();
   const supabase = createAdminClient();
 
-  // Read current row so we can detect "all 7 done" and auto-advance.
+  // Read current row so we can detect "all 6 done" and auto-advance.
   const { data: before } = await supabase
     .from('onboarders')
     .select(`id, status, ${DAY1_KEYS.join(', ')}`)
@@ -784,7 +805,7 @@ export async function toggleChecklistItem(
       : `Day-1 checklist: ${DAY1_LABEL[key]} cleared`,
   }]);
 
-  // Auto-advance to thirty_day if all 7 checklist items are now set AND the
+  // Auto-advance to thirty_day if all 6 checklist items are now set AND the
   // onboarder is currently in day_one. Skip from any other status (don't
   // accidentally promote someone in pre_onboarding or ninety_day).
   if (on && before.status === 'day_one') {
@@ -799,7 +820,7 @@ export async function toggleChecklistItem(
         field:    'status',
         oldValue: 'day_one',
         newValue: 'thirty_day',
-        summary:  `Auto-advanced to thirty_day — all 7 Day-1 checklist items complete`,
+        summary:  'Auto-advanced to thirty_day - all 6 Day-1 checklist items complete',
       }]);
     }
   }

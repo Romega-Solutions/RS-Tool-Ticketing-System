@@ -123,7 +123,7 @@ const BACKGROUND_CHECKS = [
 
 const POST_MVP_PHASES = [
   { letter: 'A', title: 'ATS auto-promotion',    summary: 'When candidates.status flips to "hired", automatically create the onboarder row.' },
-  { letter: 'B', title: 'Day-1 checklist UI',    summary: 'Render the seven *_at columns as toggleable checkboxes; auto-advance status when all done.' },
+  { letter: 'B', title: 'Day-1 checklist UI',    summary: 'Render the six current checklist columns as toggleable checkboxes; auto-advance status when all are done.' },
   { letter: 'C', title: 'Two extra emails',      summary: 'Ship gmail-signature-nudge (contractor/intern) and group-chat-announce.' },
   { letter: 'D', title: 'Onboarder-facing UI',   summary: 'In-app intake forms + welcome banner on /my-tasks, replacing the Google Forms.' },
   { letter: 'E', title: '30/90-day workflows',   summary: 'Probation milestone emails and decision UI.' },
