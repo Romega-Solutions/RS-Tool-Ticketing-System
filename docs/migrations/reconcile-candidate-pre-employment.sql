@@ -3,7 +3,7 @@
 -- Run this single file in the Supabase SQL editor for a new environment or
 -- an environment that was set up with the older incremental migrations. It is
 -- additive: it preserves submitted forms, references, verification responses,
--- and uploaded documents. It does not migrate legacy onboarding data.
+-- uploaded documents, and onboarding session data.
 --
 -- The older add-candidate-pre-employment-*.sql files are retained as history;
 -- do not run their full chain for a new environment after using this file.
@@ -16,16 +16,44 @@ DECLARE
   status_constraint_name TEXT;
 BEGIN
   IF to_regclass('public.onboarders') IS NOT NULL THEN
+    -- Weekly Friday onboarding cohorts. The app assigns a session only when
+    -- the onboarding team confirms and sends the welcome email.
+    CREATE TABLE IF NOT EXISTS onboarding_sessions (
+      id           SERIAL PRIMARY KEY,
+      session_date DATE NOT NULL UNIQUE,
+      starts_at    TIMESTAMPTZ NOT NULL,
+      cutoff_at    TIMESTAMPTZ NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'scheduled'
+                   CHECK (status IN ('scheduled', 'finalized', 'cancelled')),
+      finalized_at TIMESTAMPTZ,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CHECK (cutoff_at < starts_at)
+    );
+
     ALTER TABLE onboarders
       ADD COLUMN IF NOT EXISTS onboarding_lead_id INTEGER
       REFERENCES users(id) ON DELETE SET NULL,
       ADD COLUMN IF NOT EXISTS direct_supervisor_id INTEGER
-      REFERENCES users(id) ON DELETE SET NULL;
+      REFERENCES users(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS onboarding_session_id INTEGER
+      REFERENCES onboarding_sessions(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS meeting_availability TEXT NOT NULL DEFAULT 'pending'
+      CHECK (meeting_availability IN ('pending', 'yes', 'no')),
+      ADD COLUMN IF NOT EXISTS meeting_availability_submitted_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS onboarding_form_token_hash TEXT;
 
     CREATE INDEX IF NOT EXISTS onboarders_onboarding_lead_id_idx
       ON onboarders(onboarding_lead_id);
     CREATE INDEX IF NOT EXISTS onboarders_direct_supervisor_id_idx
       ON onboarders(direct_supervisor_id);
+    CREATE INDEX IF NOT EXISTS onboarders_onboarding_session_id_idx
+      ON onboarders(onboarding_session_id);
+    CREATE INDEX IF NOT EXISTS onboarders_session_availability_idx
+      ON onboarders(onboarding_session_id, meeting_availability);
+    CREATE UNIQUE INDEX IF NOT EXISTS onboarders_onboarding_form_token_hash_idx
+      ON onboarders(onboarding_form_token_hash)
+      WHERE onboarding_form_token_hash IS NOT NULL;
 
     -- Backfill only unambiguous historical lead names; never guess a user.
     UPDATE onboarders AS onboarder
@@ -270,6 +298,7 @@ ALTER TABLE candidate_employment_verifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE candidate_employment_verification_form_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE candidate_employment_verification_form_submissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE candidate_pre_employment_documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE onboarding_sessions ENABLE ROW LEVEL SECURITY;
 
 -- Keep the private storage bucket in sync, including DOCX support.
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)

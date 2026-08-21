@@ -368,10 +368,7 @@ export default async function CandidateDetailPage({
   // resolve both so the panel can say "Applied online" + "Assigned to <owner>"
   // rather than misleadingly crediting the requisition owner as the adder.
   let addedByName: string | null = null;
-  let assignedToName: string | null = null;
-  const lookupIds = [c.created_by, c.assigned_to].filter(
-    (v): v is number => typeof v === "number",
-  );
+  const lookupIds = c.created_by == null ? [] : [c.created_by];
   if (lookupIds.length) {
     const { data: us } = await supabase
       .from("users")
@@ -382,7 +379,6 @@ export default async function CandidateDetailPage({
         ? (us?.find((u) => u.id === id)?.name as string | undefined)
         : undefined) ?? null;
     addedByName = nameOf(c.created_by);
-    assignedToName = nameOf(c.assigned_to);
   }
   const selfApplied = c.created_by == null;
 
@@ -841,7 +837,6 @@ export default async function CandidateDetailPage({
                 <PreEmploymentBackgroundCheckTab
                   candidateId={c.id}
                   canSend={c.status === "offered"}
-                  request={backgroundCheckRequest}
                   submission={backgroundCheckSubmission}
                   candidateReferences={candidateReferences}
                   candidateReferenceSubmissions={candidateReferenceSubmissions}
@@ -1004,7 +999,6 @@ function Section({
 function PreEmploymentBackgroundCheckTab({
   candidateId,
   canSend,
-  request,
   submission,
   candidateReferences,
   candidateReferenceSubmissions,
@@ -1013,7 +1007,6 @@ function PreEmploymentBackgroundCheckTab({
 }: {
   candidateId: number;
   canSend: boolean;
-  request: PreEmploymentRequestRow | null;
   submission: PreEmploymentSubmissionRow | null;
   candidateReferences: CandidateReferenceRow[];
   candidateReferenceSubmissions: CandidateReferenceSubmissionRow[];
@@ -1736,17 +1729,6 @@ function ContactPill({
     </a>
   ) : (
     content
-  );
-}
-
-function KvRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-2 text-xs">
-      <span className="text-(--rs-neutral-grey-500)">{label}</span>
-      <span className="text-(--rs-neutral-grey-900) font-medium text-right">
-        {value}
-      </span>
-    </div>
   );
 }
 
