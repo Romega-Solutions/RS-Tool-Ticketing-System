@@ -182,6 +182,7 @@ export function TaskDetailSheet({
   const [assigneeIds, setAssigneeIds] = useState<number[]>([]);
 
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [imageUploading, setImageUploading] = useState(false);
   const [imageUploadError, setImageUploadError] = useState('');
 
@@ -330,6 +331,10 @@ export function TaskDetailSheet({
       const updated = (await res.json()) as SheetWorkItem;
       setItem(updated);
       onSaved?.(updated);
+
+      if (updated)
+        setSaved(true);
+      
       // Refresh activity (server logs the diff)
       const actRes = await fetch(`/api/tickets/work-items/${item.id}/activity`);
       if (actRes.ok) setActivity((await actRes.json()) as ActivityEntry[]);
@@ -337,6 +342,12 @@ export function TaskDetailSheet({
       setError(e instanceof Error ? e.message : 'Failed');
     } finally {
       setSaving(false);
+      onOpenChange(false);
+
+      setTimeout(()=>{
+        setSaved(false);
+      }, 2000)
+     
     }
   };
 
@@ -521,12 +532,27 @@ export function TaskDetailSheet({
   const navigationBackTarget = navigationTrail[navigationTrail.length - 1] ?? null;
 
   return (
+  <>
+    {saved && !open && 
+      <div className="flex items-center gap-2 absolute top-3 left-1/2 -translate-x-1/2 p-1 px-3 border rounded-md bg-green-400">
+        Saved!
+      </div>
+    }
+  
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
         style={{ width: `${panelWidth}px`, maxWidth: '95vw' }}
         className="w-full max-w-full flex flex-col gap-0 p-0"
       >
+
+        {saving && 
+          <div className="flex items-center gap-2 absolute left-1/2 -translate-x-1/2 top-3 p-1 px-3 border rounded-md">
+            <Loader2 className="w-3.5 animate-spin" />
+            Updating...
+          </div>
+        }
+      
         {/* Drag the left edge to resize the panel to any width (double-click to reset). */}
         <div
           role="separator"
@@ -897,33 +923,7 @@ export function TaskDetailSheet({
                   </button>
                 </div>
               </Field>
-
-              <div className="flex flex-col gap-3 border-t border-(--rs-neutral-grey-100) pt-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap items-center gap-2">
-                  {canEdit && (
-                    <button
-                      onClick={handleSave}
-                      disabled={saving || !name.trim()}
-                      className="flex min-h-10 items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                      style={{ background: 'var(--rs-primary-500)' }}
-                    >
-                      {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                      Save
-                    </button>
-                  )}
-                  <span className="text-xs text-(--rs-neutral-grey-400)">
-                    Updated {fmt(item.completed_at ?? '')}
-                  </span>
-                </div>
-                {caps.canArchiveItem && (
-                  <button
-                    onClick={handleArchive}
-                    className="flex min-h-10 items-center justify-center gap-1.5 rounded-md px-2 text-xs text-red-500 hover:bg-red-50 hover:text-red-700 sm:justify-start"
-                  >
-                    <Trash2 className="w-3 h-3" /> Archive
-                  </button>
-                )}
-              </div>
+              
             </div>
           )}
 
@@ -1001,8 +1001,38 @@ export function TaskDetailSheet({
             </div>
           )}
         </div>
+
+        {!loading && item && tab === 'details' && (
+        <div className="flex flex-col gap-3 border-t border-(--rs-neutral-grey-100) mt-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              {canEdit && (
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !name.trim()}
+                  className="flex min-h-10 items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  style={{ background: 'var(--rs-primary-500)' }}
+                >
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  Save
+                </button>
+              )}
+              <span className="text-xs text-(--rs-neutral-grey-400)">
+                Updated {fmt(item.completed_at ?? '')}
+              </span>
+            </div>
+            {caps.canArchiveItem && (
+              <button
+                onClick={handleArchive}
+                className="flex min-h-10 items-center justify-center gap-1.5 rounded-md px-2 text-xs text-red-500 hover:bg-red-50 hover:text-red-700 sm:justify-start"
+              >
+                <Trash2 className="w-3 h-3" /> Archive
+              </button>
+            )}
+        </div>
+      )}
       </SheetContent>
     </Sheet>
+  </>
   );
 }
 
