@@ -33,6 +33,10 @@ webhook, its `context` includes:
   `onboarding_form_token`, `onboarder_type`, and `onboarding_session_date`
   prefilled
 
+The two `*_email` values use the Microsoft Teams email overrides saved on the
+onboarder record. When an override is blank, the assigned user's normal email
+is used instead.
+
 For attendance only, your form-submission workflow can call:
 
 ```http
@@ -64,22 +68,63 @@ Content-Type: application/json
 ```
 
 Send the opaque form token, `yes`/`no` attendance, a Jotform submission ID, and
-up to four base64 documents. The allowed kinds are `sow`, `gov_id`, and
-`other`. Do not forward the complete Jotform payload, banking details, or the
-raw token inside another field. The app verifies the token, stores each file in
-private Supabase Storage, and skips documents already saved for that Jotform
-submission ID when n8n retries.
+up to five base64 documents. The allowed kinds are `sow`, `w8`, `gov_id`, and
+`other`. Do not forward the complete Jotform payload or put the raw token inside
+another field. The app verifies the token, stores each file in private Supabase
+Storage, and skips documents already saved for that Jotform submission ID when
+n8n retries.
+
+For an **intern**, send the shared payload and documents only. For a
+**contractor**, n8n must additionally send the W-8 as a `w8` document and add
+these fields directly to the same payload (not the whole Jotform response):
+
+```json
+{
+  "hourlyRate": "25.00",
+  "wiseTag": "optional-wise-tag",
+  "bankName": "only-if-not-using-wise",
+  "bankAccountName": "only-if-not-using-wise",
+  "bankAccountNumber": "only-if-not-using-wise"
+}
+```
+
+`hourlyRate` is required. Supply either `wiseTag`, or all three bank fields.
+The app derives the worker type from the verified token; it rejects contractor
+data for an intern and refuses to mark a contractor form complete without both
+payment details and a W-8. Payment values are stored in a separate RLS-protected
+table and are never added to onboarding history or the endpoint response.
 
 At **Friday 1:00 PM PHT**, your scheduled n8n workflow should call:
 
 ```http
 GET /api/cron/onboarding-session-finalizer
-Authorization: Bearer <CRON_SECRET>
+Authorization: Bearer <CRON_ONBOARDER_SECRET>
 ```
 
 The response contains `sessions`, with `confirmed`, `deferred`, and
-`nextSession` lists for your invitation and reschedule emails. The finalizer is
-idempotent: a finalized Friday session is not processed again.
+`nextSession` lists for your invitation and reschedule emails. Each attendee
+also includes `onboardingLead` and `directSupervisor` (`id`, `name`, and the
+Microsoft Teams email override when saved; otherwise the assigned user's
+email). The finalizer is idempotent: a finalized Friday session is not
+processed again.
+
+After n8n creates the Google Calendar event with its Google Meet link for a
+finalized session, record that event back in the app:
+
+```http
+POST /api/automations/onboarding/meeting
+Authorization: Bearer <N8N_ONBOARDING_SECRET>
+Content-Type: application/json
+
+{
+  "sessionId": 123,
+  "googleCalendarEventId": "google-calendar-event-id",
+  "googleMeetUrl": "https://meet.google.com/abc-defg-hij"
+}
+```
+
+The endpoint accepts a retry with the same event details, but rejects a second,
+different event for the same Friday cohort.
 
 ## Weekly behavior
 

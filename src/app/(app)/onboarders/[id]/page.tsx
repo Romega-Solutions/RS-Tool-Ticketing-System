@@ -30,6 +30,7 @@ import { formatPhoneNumber } from '@/lib/format';
 import { listOnboardingLeadOptions, type OnboardingLeadOption } from '@/lib/onboarding-lead';
 import { OnboardingLeadSelect } from '../onboarding-lead-select';
 import { DirectSupervisorSelect } from '../direct-supervisor-select';
+import { TeamsContactEmails } from '../teams-contact-emails';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ type Onboarder = {
   chief_of_staff:    string | null;
   onboarding_lead:   string | null;
   onboarding_lead_id: number | null;
+  onboarding_lead_teams_email: string | null;
   onboarding_session_id: number | null;
   meeting_availability: 'pending' | 'yes' | 'no';
   onboarding_form_submitted_at: string | null;
@@ -55,6 +57,7 @@ type Onboarder = {
   sow_sent_at:       string | null;
   sow_signed_at:     string | null;
   w8_uploaded_at:    string | null;
+  direct_supervisor_teams_email: string | null;
   start_date:        string | null;
   notes:             string | null;
   last_email_template: string | null;
@@ -94,6 +97,16 @@ type OnboardingSessionRow = {
   session_date: string;
   starts_at: string;
   status: 'scheduled' | 'finalized' | 'cancelled';
+  google_meet_url: string | null;
+};
+
+type ContractorPaymentDetails = {
+  hourly_rate: string | number;
+  wise_tag: string | null;
+  bank_name: string | null;
+  bank_account_name: string | null;
+  bank_account_number: string | null;
+  received_at: string;
 };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -194,7 +207,7 @@ export default async function OnboarderDetailPage({
   const photoUrl = (await getPhotoResolver())({ name: o.full_name, email: o.personal_email });
 
   // Children fetched in parallel
-  const [docsRes, histRes, creatorRes, leadRes, supervisorRes, sessionRes] = await Promise.all([
+  const [docsRes, histRes, creatorRes, leadRes, supervisorRes, sessionRes, paymentRes] = await Promise.all([
     supabase.from('onboarder_documents')
       .select('id, kind, label, storage_path, mime_type, size_bytes, uploaded_at')
       .eq('onboarder_id', id)
@@ -214,7 +227,13 @@ export default async function OnboarderDetailPage({
       ? supabase.from('users').select('name').eq('id', o.direct_supervisor_id).maybeSingle()
       : Promise.resolve({ data: null }),
     o.onboarding_session_id
-      ? supabase.from('onboarding_sessions').select('id, session_date, starts_at, status').eq('id', o.onboarding_session_id).maybeSingle()
+      ? supabase.from('onboarding_sessions').select('id, session_date, starts_at, status, google_meet_url').eq('id', o.onboarding_session_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    o.onboarder_type === 'contractor'
+      ? supabase.from('contractor_payment_details')
+        .select('hourly_rate, wise_tag, bank_name, bank_account_name, bank_account_number, received_at')
+        .eq('onboarder_id', id)
+        .maybeSingle()
       : Promise.resolve({ data: null }),
   ]);
 
@@ -224,6 +243,8 @@ export default async function OnboarderDetailPage({
   const onboardingLeadName = (leadRes?.data as { name?: string } | null)?.name ?? o.onboarding_lead;
   const directSupervisorName = (supervisorRes?.data as { name?: string } | null)?.name ?? o.direct_supervisor;
   const onboardingSession = (sessionRes?.data as OnboardingSessionRow | null) ?? null;
+  // Before the updated migration is deployed, this query simply has no data.
+  const contractorPaymentDetails = (paymentRes?.data as ContractorPaymentDetails | null) ?? null;
 
   // Sign every document URL once on the server
   const documentsSigned = await Promise.all(documents.map(async d => {
@@ -341,6 +362,7 @@ export default async function OnboarderDetailPage({
             directSupervisorName={directSupervisorName}
             onboardingLeadOptions={onboardingLeadOptions}
             onboardingSession={onboardingSession}
+            contractorPaymentDetails={contractorPaymentDetails}
           />
           <ActionsRail o={o} lastFailedTemplate={lastFailedTemplate} />
           <HistoryRail history={history} />
@@ -742,12 +764,14 @@ function QuickFacts({
   directSupervisorName,
   onboardingLeadOptions,
   onboardingSession,
+  contractorPaymentDetails,
 }: {
   o: Onboarder;
   onboardingLeadName: string | null;
   directSupervisorName: string | null;
   onboardingLeadOptions: OnboardingLeadOption[];
   onboardingSession: OnboardingSessionRow | null;
+  contractorPaymentDetails: ContractorPaymentDetails | null;
 }) {
   return (
     <div className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-4 space-y-2.5">
@@ -776,7 +800,13 @@ function QuickFacts({
           options={onboardingLeadOptions}
         />
       } />
-      <KvRow label="HRBP"       value={o.hrbp ?? <Dim />} />
+      <TeamsContactEmails
+        onboarderId={o.id}
+        leadAssigned={Boolean(o.onboarding_lead_id)}
+        supervisorAssigned={Boolean(o.direct_supervisor_id)}
+        onboardingLeadTeamsEmail={o.onboarding_lead_teams_email}
+        directSupervisorTeamsEmail={o.direct_supervisor_teams_email}
+      />
       <KvRow label="Start date" value={o.start_date ? formatDate(o.start_date) : <Dim />} />
       <KvRow label="W-8"        value={o.w8_uploaded_at ? formatDate(o.w8_uploaded_at) : <Dim />} />
       <KvRow label="Friday cohort" value={
@@ -784,6 +814,18 @@ function QuickFacts({
           ? <span className="text-right"><span>{formatDate(onboardingSession.session_date)}</span><span className="block text-[10px] text-(--rs-neutral-grey-500)">6:00 PM PHT · {o.meeting_availability}</span></span>
           : <Dim text="not assigned" />
       } />
+      {onboardingSession?.google_meet_url && (
+        <KvRow label="Google Meet" value={
+          <a
+            href={onboardingSession.google_meet_url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-(--rs-primary-700) hover:underline"
+          >
+            Open meeting
+          </a>
+        } />
+      )}
       <KvRow label="Last email" value={
         o.last_email_template
           ? <span className="inline-flex items-center gap-1 text-(--rs-neutral-grey-800)">
@@ -794,6 +836,22 @@ function QuickFacts({
             </span>
           : <Dim text="none" />
       } />
+      {contractorPaymentDetails && (
+        <div className="mt-3 space-y-2.5 border-t border-(--rs-neutral-grey-100) pt-3">
+          <h4 className="text-[10px] font-bold uppercase tracking-widest text-(--rs-neutral-grey-500)">Contractor payment details</h4>
+          <KvRow label="Hourly rate" value={String(contractorPaymentDetails.hourly_rate)} />
+          {contractorPaymentDetails.wise_tag ? (
+            <KvRow label="Wise tag" value={contractorPaymentDetails.wise_tag} />
+          ) : (
+            <>
+              <KvRow label="Bank" value={contractorPaymentDetails.bank_name ?? <Dim />} />
+              <KvRow label="Account name" value={contractorPaymentDetails.bank_account_name ?? <Dim />} />
+              <KvRow label="Account number" value={contractorPaymentDetails.bank_account_number ?? <Dim />} />
+            </>
+          )}
+          <KvRow label="Received" value={formatDate(contractorPaymentDetails.received_at) ?? <Dim />} />
+        </div>
+      )}
     </div>
   );
 }
