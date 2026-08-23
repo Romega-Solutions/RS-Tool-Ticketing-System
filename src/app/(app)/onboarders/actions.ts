@@ -13,6 +13,7 @@ import {
 } from '@/lib/storage';
 import {
   notifyOnboardingWebhook,
+  notifyFormReminder,
   type OnboardingEvent,
   type OnboardingResult,
   type OnboardingTemplate,
@@ -20,10 +21,16 @@ import {
 import {
   ALLOWED_STATUSES,
   ALLOWED_TYPES,
-  DEFAULT_ONBOARDING_LEAD,
   type OnboarderStatus,
   type OnboarderType,
 } from './constants';
+import { resolveOnboardingLead } from '@/lib/onboarding-lead';
+import {
+  getOrAssignOnboarderToOpenSession,
+  formatSessionForEmail,
+  issueOnboardingFormToken,
+  onboardingFormUrl,
+} from '@/lib/onboarding-sessions';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Internal type guards
@@ -42,6 +49,13 @@ function isType(v: string): v is OnboarderType {
 }
 function isDocKind(v: string): v is OnboarderDocumentKind {
   return (ALLOWED_DOC_KINDS as readonly string[]).includes(v);
+}
+
+function normalizeOptionalEmail(value: string | null | undefined, label: string): string | null {
+  const email = String(value ?? '').trim().toLowerCase();
+  if (!email) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error(`${label} must be a valid email address`);
+  return email;
 }
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -95,7 +109,32 @@ async function fireOnboardingTemplate(
   event:       OnboardingEvent,
   context:     string,
 ): Promise<OnboardingResult> {
-  const result = await notifyOnboardingWebhook(event);
+  const { data: onboardingRecord, error: onboardingRecordError } = await supabase
+    .from('onboarders')
+    .select('onboarding_lead_id')
+    .eq('id', onboarderId)
+    .maybeSingle();
+  if (onboardingRecordError) throw new Error(onboardingRecordError.message);
+
+  let onboardingLeadEmail: string | undefined;
+  if (onboardingRecord?.onboarding_lead_id) {
+    const { data: onboardingLead, error: onboardingLeadError } = await supabase
+      .from('users')
+      .select('email')
+      .eq('id', onboardingRecord.onboarding_lead_id)
+      .maybeSingle();
+    if (onboardingLeadError) throw new Error(onboardingLeadError.message);
+    onboardingLeadEmail = onboardingLead?.email?.trim() || undefined;
+  }
+
+  const eventWithRequester: OnboardingEvent = {
+    ...event,
+    context: {
+      ...event.context,
+      onboarding_lead_email: onboardingLeadEmail,
+    },
+  };
+  const result = await notifyOnboardingWebhook(eventWithRequester);
   if (result.ok) {
     await supabase
       .from('onboarders')
@@ -137,7 +176,8 @@ export async function createOnboarder(formData: FormData): Promise<void> {
   const typeRaw       = String(formData.get('onboarderType')    ?? 'contractor');
   const roleTitle     = String(formData.get('roleTitle')        ?? '').trim() || null;
   const teamRaw       = String(formData.get('team')             ?? '').trim();
-  const directSup     = String(formData.get('directSupervisor') ?? '').trim() || null;
+  const directSupervisorIdRaw = String(formData.get('directSupervisorId') ?? '').trim();
+  const onboardingLeadIdRaw = String(formData.get('onboardingLeadId') ?? '').trim();
   const startDateRaw  = String(formData.get('startDate')        ?? '').trim() || null;
 
   // ── Guardrails ─────────────────────────────────────────────────────────
@@ -156,6 +196,14 @@ export async function createOnboarder(formData: FormData): Promise<void> {
   if (!teamRaw) {
     throw new Error('Department is required');
   }
+  const onboardingLeadId = Number(onboardingLeadIdRaw);
+  if (!Number.isInteger(onboardingLeadId) || onboardingLeadId <= 0) {
+    throw new Error('Select an onboarding lead');
+  }
+  const directSupervisorId = directSupervisorIdRaw ? Number(directSupervisorIdRaw) : null;
+  if (directSupervisorIdRaw && (!Number.isInteger(directSupervisorId) || (directSupervisorId ?? 0) <= 0)) {
+    throw new Error('Select a valid direct supervisor');
+  }
   if (!(APP_DEPARTMENTS as readonly string[]).includes(teamRaw)) {
     throw new Error(`Department '${teamRaw}' is not on the org chart. Pick from the dropdown.`);
   }
@@ -169,6 +217,9 @@ export async function createOnboarder(formData: FormData): Promise<void> {
   const startDate = startDateRaw && /^\d{4}-\d{2}-\d{2}$/.test(startDateRaw) ? startDateRaw : null;
 
   const supabase = createAdminClient();
+  const onboardingLead = await resolveOnboardingLead(onboardingLeadId);
+  const directSupervisor = await resolveOnboardingLead(directSupervisorId);
+  if (!onboardingLead) throw new Error('Select an onboarding lead');
   const { data: inserted, error } = await supabase
     .from('onboarders')
     .insert({
@@ -178,10 +229,12 @@ export async function createOnboarder(formData: FormData): Promise<void> {
       onboarder_type:    typeRaw,
       role_title:        roleTitle,
       team,
-      direct_supervisor: directSup,
-      onboarding_lead:   DEFAULT_ONBOARDING_LEAD,
+      direct_supervisor: directSupervisor?.name ?? null,
+      direct_supervisor_id: directSupervisor?.id ?? null,
+      onboarding_lead:   onboardingLead.name,
+      onboarding_lead_id: onboardingLead.id,
       start_date:        startDate,
-      status:            'offer_signed',
+      status:            'pre_onboarding',
       created_by:        session.id,
     })
     .select('id')
@@ -194,7 +247,7 @@ export async function createOnboarder(formData: FormData): Promise<void> {
     field:    'created',
     oldValue: null,
     newValue: fullName,
-    summary:  `Created onboarder '${fullName}' (${typeRaw}) at stage 'offer_signed' — Lead: ${DEFAULT_ONBOARDING_LEAD}`,
+    summary:  `Created onboarder '${fullName}' (${typeRaw}) at stage 'pre_onboarding' — Lead: ${onboardingLead.name}`,
   }]);
 
   revalidatePath('/onboarders');
@@ -210,6 +263,136 @@ export async function deleteOnboarder(id: number): Promise<void> {
   if (error) throw new Error(`Failed to delete onboarder: ${error.message}`);
 
   revalidatePath('/onboarders');
+}
+
+export async function assignOnboardingLead(
+  onboarderId: number,
+  leadUserId: number | null,
+): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(onboarderId) || onboarderId <= 0) throw new Error('Invalid onboarder id');
+
+  const supabase = createAdminClient();
+  const { data: before, error: beforeError } = await supabase
+    .from('onboarders')
+    .select('onboarding_lead, onboarding_lead_id')
+    .eq('id', onboarderId)
+    .maybeSingle();
+  if (beforeError) throw new Error(`Failed to load onboarding record: ${beforeError.message}`);
+  if (!before) throw new Error('Onboarder not found');
+
+  const lead = await resolveOnboardingLead(leadUserId);
+  const { error } = await supabase
+    .from('onboarders')
+    .update({
+      onboarding_lead_id: lead?.id ?? null,
+      onboarding_lead: lead?.name ?? null,
+      onboarding_lead_teams_email: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', onboarderId);
+  if (error) throw new Error(`Failed to assign onboarding lead: ${error.message}`);
+
+  const oldName = before.onboarding_lead ?? null;
+  const newName = lead?.name ?? null;
+  if (oldName !== newName) {
+    await writeHistory(supabase, onboarderId, session, [{
+      field: 'onboarding_lead',
+      oldValue: oldName,
+      newValue: newName,
+      summary: newName
+        ? `Onboarding Lead assigned to '${newName}'`
+        : 'Onboarding Lead assignment cleared',
+    }]);
+  }
+
+  revalidatePath('/onboarders');
+  revalidatePath(`/onboarders/${onboarderId}`);
+}
+
+export async function assignDirectSupervisor(
+  onboarderId: number,
+  supervisorUserId: number | null,
+): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(onboarderId) || onboarderId <= 0) throw new Error('Invalid onboarder id');
+
+  const supabase = createAdminClient();
+  const { data: before, error: beforeError } = await supabase
+    .from('onboarders')
+    .select('direct_supervisor, direct_supervisor_id')
+    .eq('id', onboarderId)
+    .maybeSingle();
+  if (beforeError) throw new Error(`Failed to load onboarding record: ${beforeError.message}`);
+  if (!before) throw new Error('Onboarder not found');
+
+  const supervisor = await resolveOnboardingLead(supervisorUserId);
+  const { error } = await supabase
+    .from('onboarders')
+    .update({
+      direct_supervisor_id: supervisor?.id ?? null,
+      direct_supervisor: supervisor?.name ?? null,
+      direct_supervisor_teams_email: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', onboarderId);
+  if (error) throw new Error(`Failed to assign direct supervisor: ${error.message}`);
+
+  const oldName = before.direct_supervisor ?? null;
+  const newName = supervisor?.name ?? null;
+  if (oldName !== newName) {
+    await writeHistory(supabase, onboarderId, session, [{
+      field: 'direct_supervisor',
+      oldValue: oldName,
+      newValue: newName,
+      summary: newName
+        ? `Direct Supervisor assigned to '${newName}'`
+        : 'Direct Supervisor assignment cleared',
+    }]);
+  }
+
+  revalidatePath('/onboarders');
+  revalidatePath(`/onboarders/${onboarderId}`);
+}
+
+export async function updateOnboardingTeamsEmails(
+  onboarderId: number,
+  values: { onboardingLeadTeamsEmail: string; directSupervisorTeamsEmail: string },
+): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(onboarderId) || onboarderId <= 0) throw new Error('Invalid onboarder id');
+
+  const onboardingLeadTeamsEmail = normalizeOptionalEmail(values.onboardingLeadTeamsEmail, 'Onboarding Lead Teams email');
+  const directSupervisorTeamsEmail = normalizeOptionalEmail(values.directSupervisorTeamsEmail, 'Direct Supervisor Teams email');
+  const supabase = createAdminClient();
+  const { data: onboarder, error: findError } = await supabase
+    .from('onboarders')
+    .select('onboarding_lead_id, direct_supervisor_id')
+    .eq('id', onboarderId)
+    .maybeSingle();
+  if (findError) throw new Error(`Failed to load onboarding record: ${findError.message}`);
+  if (!onboarder) throw new Error('Onboarder not found');
+  if (onboardingLeadTeamsEmail && !onboarder.onboarding_lead_id) {
+    throw new Error('Assign an Onboarding Lead before setting their Teams email');
+  }
+  if (directSupervisorTeamsEmail && !onboarder.direct_supervisor_id) {
+    throw new Error('Assign a Direct Supervisor before setting their Teams email');
+  }
+
+  const { error } = await supabase.from('onboarders').update({
+    onboarding_lead_teams_email: onboardingLeadTeamsEmail,
+    direct_supervisor_teams_email: directSupervisorTeamsEmail,
+    updated_at: new Date().toISOString(),
+  }).eq('id', onboarderId);
+  if (error) throw new Error(`Failed to save Teams email overrides: ${error.message}`);
+
+  await writeHistory(supabase, onboarderId, session, [{
+    field: 'teams_contact_emails',
+    oldValue: null,
+    newValue: null,
+    summary: 'Updated Microsoft Teams contact email overrides',
+  }]);
+  revalidatePath(`/onboarders/${onboarderId}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -253,32 +436,11 @@ export async function updateOnboarderStatus(id: number, status: string): Promise
       direct_supervisor: before.direct_supervisor ?? '',
       onboarding_lead:   before.onboarding_lead ?? session.name,
     };
-    if (status === 'background_check') {
-      // SOP §3: the background-check email goes out when the onboarder enters
-      // background_check. Reference + employment-verification asks stay manual
-      // (they need per-referee / per-company child rows).
-      await fireOnboardingTemplate(
-        supabase, session, id,
-        { onboarderId: id, template: 'bg-check-initiate', event: 'status_changed', context: baseContext },
-        'auto: BG-check initiate on stage entry',
-      );
-    } else if (status === 'pre_onboarding') {
+    if (status === 'pre_onboarding') {
       // SOP §5: the official welcome email (contractor/intern variant, forked in
       // n8n on onboarder_type) goes out when the onboarder enters pre_onboarding.
-      await fireOnboardingTemplate(
-        supabase, session, id,
-        {
-          onboarderId: id,
-          template:    'welcome',
-          event:       'status_changed',
-          context:     {
-            ...baseContext,
-            onboarder_type: before.onboarder_type,
-            chief_of_staff: before.chief_of_staff ?? '',
-          },
-        },
-        'auto: welcome email on stage entry',
-      );
+      // The Onboarding Lead explicitly sends the welcome email once the
+      // handoff details have been reviewed and assigned.
     } else if (status === 'thirty_day') {
       await fireOnboardingTemplate(
         supabase, session, id,
@@ -570,10 +732,43 @@ export async function sendWelcomeEmail(onboarderId: number): Promise<void> {
   const supabase = createAdminClient();
   const { data: o } = await supabase
     .from('onboarders')
-    .select('id, full_name, personal_email, onboarder_type, role_title, onboarding_lead, chief_of_staff, direct_supervisor')
+    .select('id, full_name, personal_email, onboarder_type, role_title, onboarding_lead, onboarding_lead_id, onboarding_lead_teams_email, direct_supervisor, direct_supervisor_id, direct_supervisor_teams_email, onboarding_form_submitted_at')
     .eq('id', onboarderId)
     .maybeSingle();
   if (!o) throw new Error('Onboarder not found');
+  if (o.onboarding_form_submitted_at) {
+    throw new Error('The onboarding form has already been submitted. Do not send another welcome link.');
+  }
+  if (!o.onboarding_lead_id || !o.onboarding_lead) {
+    throw new Error('Assign an Onboarding Lead before sending the welcome email');
+  }
+  if (!o.direct_supervisor_id || !o.direct_supervisor) {
+    throw new Error('Assign a Direct Supervisor before sending the welcome email');
+  }
+
+  const [leadResult, supervisorResult] = await Promise.all([
+    supabase.from('users').select('name, email').eq('id', o.onboarding_lead_id).maybeSingle(),
+    supabase.from('users').select('name, email').eq('id', o.direct_supervisor_id).maybeSingle(),
+  ]);
+  if (leadResult.error || !leadResult.data) {
+    throw new Error('Could not load the assigned Onboarding Lead');
+  }
+  if (supervisorResult.error || !supervisorResult.data) {
+    throw new Error('Could not load the assigned Direct Supervisor');
+  }
+  const onboardingLeadName = leadResult.data.name?.trim() || o.onboarding_lead;
+  const directSupervisorName = supervisorResult.data.name?.trim() || o.direct_supervisor;
+  const onboardingLeadTeamsEmail = o.onboarding_lead_teams_email?.trim() || leadResult.data.email?.trim();
+  const directSupervisorTeamsEmail = o.direct_supervisor_teams_email?.trim() || supervisorResult.data.email?.trim();
+  if (!onboardingLeadTeamsEmail) {
+    throw new Error('Set an Onboarding Lead Teams email before sending the welcome email');
+  }
+  if (!directSupervisorTeamsEmail) {
+    throw new Error('Set a Direct Supervisor Teams email before sending the welcome email');
+  }
+
+  const onboardingSession = await getOrAssignOnboarderToOpenSession(onboarderId);
+  const formToken = await issueOnboardingFormToken(onboarderId);
 
   await fireOnboardingTemplate(
     supabase, session, onboarderId,
@@ -587,14 +782,74 @@ export async function sendWelcomeEmail(onboarderId: number): Promise<void> {
         first_name:        firstName(o.full_name),
         personal_email:    o.personal_email,
         role_title:        o.role_title         ?? '',
-        onboarding_lead:   o.onboarding_lead    ?? session.name,
-        chief_of_staff:    o.chief_of_staff     ?? '',
-        direct_supervisor: o.direct_supervisor  ?? '',
+        onboarding_lead:   onboardingLeadName,
+        onboarding_lead_email: onboardingLeadTeamsEmail,
+        direct_supervisor: directSupervisorName,
+        direct_supervisor_email: directSupervisorTeamsEmail,
+        onboarding_session_date: formatSessionForEmail(onboardingSession),
+        onboarding_session_starts_at: onboardingSession.starts_at,
+        onboarding_form_url: onboardingFormUrl(formToken, o.onboarder_type, onboardingSession),
       },
     },
     `welcome (${o.onboarder_type})`,
   );
 
+  revalidatePath(`/onboarders/${onboarderId}`);
+}
+
+/** Sends a linkless nudge. The original, still-valid Jotform link is preserved. */
+export async function sendOnboardingFormReminder(onboarderId: number): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(onboarderId) || onboarderId <= 0) throw new Error('Invalid id');
+
+  const supabase = createAdminClient();
+  const { data: onboarder, error } = await supabase
+    .from('onboarders')
+    .select('id, full_name, personal_email, onboarding_form_submitted_at, last_email_template, last_email_sent_at, onboarding_form_reminder_sent_at, onboarding_lead_id')
+    .eq('id', onboarderId)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load onboarding record: ${error.message}`);
+  if (!onboarder) throw new Error('Onboarder not found');
+  if (onboarder.onboarding_form_submitted_at) throw new Error('The onboarding form has already been submitted');
+  if (onboarder.last_email_template !== 'welcome' || !onboarder.last_email_sent_at) {
+    throw new Error('Send the welcome email before sending a form reminder');
+  }
+  if (!onboarder.personal_email?.trim()) {
+    throw new Error('This onboarder does not have a personal email address');
+  }
+
+  let onboardingLeadEmail: string | undefined;
+  if (onboarder.onboarding_lead_id) {
+    const { data: onboardingLead, error: onboardingLeadError } = await supabase
+      .from('users')
+      .select('email')
+      .eq('id', onboarder.onboarding_lead_id)
+      .maybeSingle();
+    if (onboardingLeadError) throw new Error(onboardingLeadError.message);
+    onboardingLeadEmail = onboardingLead?.email?.trim() || undefined;
+  }
+
+  const result = await notifyFormReminder({
+    source: 'onboarding',
+    reminderType: 'onboarding_form',
+    onboarderId,
+    recipientEmail: onboarder.personal_email.trim(),
+    recipientName: firstName(onboarder.full_name),
+    subjectName: onboarder.full_name,
+    onboardingLeadEmail,
+  });
+  if (!result.ok) throw new Error(result.error);
+
+  const now = new Date().toISOString();
+  const { error: markError } = await supabase.from('onboarders')
+    .update({ onboarding_form_reminder_sent_at: now, updated_at: now })
+    .eq('id', onboarderId);
+  if (markError) throw new Error(`Reminder sent but could not save its timestamp: ${markError.message}`);
+  await writeHistory(supabase, onboarderId, session, [{
+    field: 'onboarding_form_reminder_sent', oldValue: null, newValue: now,
+    summary: 'Manual reminder sent for the existing onboarding form link',
+  }]);
+  revalidatePath('/onboarders');
   revalidatePath(`/onboarders/${onboarderId}`);
 }
 
@@ -635,7 +890,6 @@ const DAY1_KEYS = [
   'teams_installed_at',
   'gmail_created_at',
   'signature_set_at',
-  'jibble_invited_at',
   'wise_setup_at',
   'group_chats_joined_at',
   'orientation_done_at',
@@ -646,7 +900,6 @@ const DAY1_LABEL: Record<Day1Key, string> = {
   teams_installed_at:    'Teams installed',
   gmail_created_at:      'Romega Gmail created',
   signature_set_at:      'Email signature set',
-  jibble_invited_at:     'Jibble invited',
   wise_setup_at:         'Wise account set up',
   group_chats_joined_at: 'Group chats joined',
   orientation_done_at:   'Orientation done',
@@ -668,7 +921,7 @@ export async function toggleChecklistItem(
   const now = new Date().toISOString();
   const supabase = createAdminClient();
 
-  // Read current row so we can detect "all 7 done" and auto-advance.
+  // Read current row so we can detect "all 6 done" and auto-advance.
   const { data: before } = await supabase
     .from('onboarders')
     .select(`id, status, ${DAY1_KEYS.join(', ')}`)
@@ -691,7 +944,7 @@ export async function toggleChecklistItem(
       : `Day-1 checklist: ${DAY1_LABEL[key]} cleared`,
   }]);
 
-  // Auto-advance to thirty_day if all 7 checklist items are now set AND the
+  // Auto-advance to thirty_day if all 6 checklist items are now set AND the
   // onboarder is currently in day_one. Skip from any other status (don't
   // accidentally promote someone in pre_onboarding or ninety_day).
   if (on && before.status === 'day_one') {
@@ -706,7 +959,7 @@ export async function toggleChecklistItem(
         field:    'status',
         oldValue: 'day_one',
         newValue: 'thirty_day',
-        summary:  `Auto-advanced to thirty_day — all 7 Day-1 checklist items complete`,
+        summary:  'Auto-advanced to thirty_day - all 6 Day-1 checklist items complete',
       }]);
     }
   }
@@ -906,7 +1159,7 @@ export async function triggerTestWorkflow(args: {
   recipientEmail: string;
   onboarderType?: 'contractor' | 'intern';
 }): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
-  await requireSession();
+  const session = await requireSession();
 
   const template = args.template as OnboardingTemplate;
   if (!TEST_ELIGIBLE_TEMPLATES.includes(template)) {
@@ -927,7 +1180,7 @@ export async function triggerTestWorkflow(args: {
     team:              'Engineering',
     direct_supervisor: 'Mark Tan',
     chief_of_staff:    'Chief of Staff',
-    onboarding_lead:   DEFAULT_ONBOARDING_LEAD,
+    onboarding_lead:   session.name,
   };
 
   let context: Record<string, unknown> = sharedContext;

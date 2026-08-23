@@ -1,8 +1,8 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import {
-  ArrowLeft, Mail, Phone, Building2, Calendar, User2, History as HistoryIcon,
-  ShieldCheck, FileText, ListChecks, StickyNote, Download, MailCheck, MailWarning,
+  ArrowLeft, Mail, Phone, Calendar, User2, History as HistoryIcon,
+  FileText, ListChecks, StickyNote, Download, MailCheck, MailWarning,
   CheckCircle2, AlertCircle, Hash, Clock, Sparkles,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -16,18 +16,9 @@ import {
   OnboarderDelete,
   STATUS_LABEL,
 } from '../onboarder-row';
+import { UploadDocumentForm } from '../onboarder-forms';
 import {
-  AddReferenceForm,
-  AddVerificationForm,
-  UploadDocumentForm,
-} from '../onboarder-forms';
-import {
-  MarkSowSentButton,
-  MarkSowSignedButton,
-  SendBgCheckButton,
   SendWelcomeButton,
-  SendReferenceRequestButton,
-  SendVerificationButton,
   ResendLastEmailButton,
   SendGmailNudgeButton,
   SendGroupChatButton,
@@ -36,6 +27,10 @@ import {
 } from '../onboarder-actions';
 import type { OnboarderStatus } from '../constants';
 import { formatPhoneNumber } from '@/lib/format';
+import { listOnboardingLeadOptions, type OnboardingLeadOption } from '@/lib/onboarding-lead';
+import { OnboardingLeadSelect } from '../onboarding-lead-select';
+import { DirectSupervisorSelect } from '../direct-supervisor-select';
+import { TeamsContactEmails } from '../teams-contact-emails';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -49,52 +44,33 @@ type Onboarder = {
   role_title:        string | null;
   team:              string | null;
   direct_supervisor: string | null;
+  direct_supervisor_id: number | null;
   chief_of_staff:    string | null;
   onboarding_lead:   string | null;
+  onboarding_lead_id: number | null;
+  onboarding_lead_teams_email: string | null;
+  onboarding_session_id: number | null;
+  meeting_availability: 'pending' | 'yes' | 'no';
+  onboarding_form_submitted_at: string | null;
   hrbp:              string | null;
   status:            string;
   sow_sent_at:       string | null;
   sow_signed_at:     string | null;
   w8_uploaded_at:    string | null;
+  direct_supervisor_teams_email: string | null;
   start_date:        string | null;
   notes:             string | null;
   last_email_template: string | null;
   last_email_sent_at:  string | null;
   created_at:        string;
   created_by:        number | null;
-  // Day-1 checklist (7 timestamps; nullable until done)
+  // Day-1 checklist (6 timestamps; nullable until done)
   teams_installed_at:     string | null;
   gmail_created_at:       string | null;
   signature_set_at:       string | null;
-  jibble_invited_at:      string | null;
   wise_setup_at:          string | null;
   group_chats_joined_at:  string | null;
   orientation_done_at:    string | null;
-};
-
-type ReferenceRow = {
-  id:              number;
-  referee_name:    string;
-  referee_role:    string | null;
-  referee_company: string | null;
-  email:           string;
-  mobile:          string | null;
-  best_time:       string | null;
-  request_sent_at: string | null;
-  responded_at:    string | null;
-  outcome:         string | null;
-};
-
-type VerificationRow = {
-  id:              number;
-  company:         string;
-  hr_contact_name: string | null;
-  hr_email:        string;
-  hr_phone:        string | null;
-  best_time:       string | null;
-  request_sent_at: string | null;
-  responded_at:    string | null;
-  outcome:         string | null;
 };
 
 type DocumentRow = {
@@ -116,9 +92,26 @@ type HistoryRow = {
   created_at: string;
 };
 
+type OnboardingSessionRow = {
+  id: number;
+  session_date: string;
+  starts_at: string;
+  status: 'scheduled' | 'finalized' | 'cancelled';
+  google_meet_url: string | null;
+};
+
+type ContractorPaymentDetails = {
+  hourly_rate: string | number;
+  wise_tag: string | null;
+  bank_name: string | null;
+  bank_account_name: string | null;
+  bank_account_number: string | null;
+  received_at: string;
+};
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-const VALID_TABS = ['overview', 'bg-check', 'documents', 'day-one', 'notes'] as const;
+const VALID_TABS = ['overview', 'documents', 'day-one', 'notes'] as const;
 type Tab = typeof VALID_TABS[number];
 
 const DOC_KIND_LABEL: Record<string, string> = {
@@ -206,6 +199,7 @@ export default async function OnboarderDetailPage({
   }
   if (!data) notFound();
   const o = data as Onboarder;
+  const onboardingLeadOptions = await listOnboardingLeadOptions();
 
   // Onboarders are pre-employment, so most won't be on the org chart yet — this
   // resolves to a photo only once they've been added there; otherwise the
@@ -213,15 +207,7 @@ export default async function OnboarderDetailPage({
   const photoUrl = (await getPhotoResolver())({ name: o.full_name, email: o.personal_email });
 
   // Children fetched in parallel
-  const [refsRes, versRes, docsRes, histRes, creatorRes] = await Promise.all([
-    supabase.from('onboarder_references')
-      .select('id, referee_name, referee_role, referee_company, email, mobile, best_time, request_sent_at, responded_at, outcome')
-      .eq('onboarder_id', id)
-      .order('created_at', { ascending: true }),
-    supabase.from('onboarder_employment_verifications')
-      .select('id, company, hr_contact_name, hr_email, hr_phone, best_time, request_sent_at, responded_at, outcome')
-      .eq('onboarder_id', id)
-      .order('created_at', { ascending: true }),
+  const [docsRes, histRes, creatorRes, leadRes, supervisorRes, sessionRes, paymentRes] = await Promise.all([
     supabase.from('onboarder_documents')
       .select('id, kind, label, storage_path, mime_type, size_bytes, uploaded_at')
       .eq('onboarder_id', id)
@@ -234,13 +220,31 @@ export default async function OnboarderDetailPage({
     o.created_by
       ? supabase.from('users').select('name').eq('id', o.created_by).maybeSingle()
       : Promise.resolve({ data: null }),
+    o.onboarding_lead_id
+      ? supabase.from('users').select('name').eq('id', o.onboarding_lead_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    o.direct_supervisor_id
+      ? supabase.from('users').select('name').eq('id', o.direct_supervisor_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    o.onboarding_session_id
+      ? supabase.from('onboarding_sessions').select('id, session_date, starts_at, status, google_meet_url').eq('id', o.onboarding_session_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    o.onboarder_type === 'contractor'
+      ? supabase.from('contractor_payment_details')
+        .select('hourly_rate, wise_tag, bank_name, bank_account_name, bank_account_number, received_at')
+        .eq('onboarder_id', id)
+        .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
-  const references:    ReferenceRow[]    = (refsRes.data as ReferenceRow[] | null) ?? [];
-  const verifications: VerificationRow[] = (versRes.data as VerificationRow[] | null) ?? [];
   const documents:     DocumentRow[]     = (docsRes.data as DocumentRow[] | null) ?? [];
   const history:       HistoryRow[]      = (histRes.data as HistoryRow[]      | null) ?? [];
   const createdByName  = (creatorRes?.data as { name?: string } | null)?.name ?? null;
+  const onboardingLeadName = (leadRes?.data as { name?: string } | null)?.name ?? o.onboarding_lead;
+  const directSupervisorName = (supervisorRes?.data as { name?: string } | null)?.name ?? o.direct_supervisor;
+  const onboardingSession = (sessionRes?.data as OnboardingSessionRow | null) ?? null;
+  // Before the updated migration is deployed, this query simply has no data.
+  const contractorPaymentDetails = (paymentRes?.data as ContractorPaymentDetails | null) ?? null;
 
   // Sign every document URL once on the server
   const documentsSigned = await Promise.all(documents.map(async d => {
@@ -340,13 +344,7 @@ export default async function OnboarderDetailPage({
             <OverviewTab
               o={o}
               onLastFailedTemplate={lastFailedTemplate}
-            />
-          )}
-          {tab === 'bg-check' && (
-            <BgCheckTab
-              onboarderId={id}
-              references={references}
-              verifications={verifications}
+              onboardingSession={onboardingSession}
             />
           )}
           {tab === 'documents' && (
@@ -358,7 +356,14 @@ export default async function OnboarderDetailPage({
 
         {/* Right rail */}
         <aside className="space-y-5">
-          <QuickFacts o={o} />
+          <QuickFacts
+            o={o}
+            onboardingLeadName={onboardingLeadName}
+            directSupervisorName={directSupervisorName}
+            onboardingLeadOptions={onboardingLeadOptions}
+            onboardingSession={onboardingSession}
+            contractorPaymentDetails={contractorPaymentDetails}
+          />
           <ActionsRail o={o} lastFailedTemplate={lastFailedTemplate} />
           <HistoryRail history={history} />
         </aside>
@@ -372,7 +377,6 @@ export default async function OnboarderDetailPage({
 function TabBar({ id, active }: { id: number; active: Tab }) {
   const tabs: { id: Tab; label: string; icon: typeof Mail; badge?: string }[] = [
     { id: 'overview',  label: 'Overview',         icon: User2 },
-    { id: 'bg-check',  label: 'Background check', icon: ShieldCheck },
     { id: 'documents', label: 'Documents',        icon: FileText },
     { id: 'day-one',   label: 'Day-1 checklist',  icon: ListChecks },
     { id: 'notes',     label: 'Notes',            icon: StickyNote },
@@ -410,54 +414,21 @@ function TabBar({ id, active }: { id: number; active: Tab }) {
 
 // ─── Overview tab ───────────────────────────────────────────────────────────
 
-function OverviewTab({ o, onLastFailedTemplate }: { o: Onboarder; onLastFailedTemplate: string | null }) {
+function OverviewTab({
+  o,
+  onLastFailedTemplate,
+  onboardingSession,
+}: {
+  o: Onboarder;
+  onLastFailedTemplate: string | null;
+  onboardingSession: OnboardingSessionRow | null;
+}) {
   return (
-    <Section title="Stage actions" icon={<Sparkles className="w-4 h-4" />}>
-      <div className="space-y-5">
-        {/* Current stage explainer */}
-        <div className="rounded-lg border border-(--rs-primary-100) bg-(--rs-primary-50)/50 p-4">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-(--rs-primary-700)">Current stage</p>
-          <p className="mt-1 text-base font-semibold text-(--rs-neutral-grey-900)">
-            {STATUS_LABEL[o.status as OnboarderStatus] ?? o.status}
-          </p>
-          <p className="mt-1 text-xs text-(--rs-neutral-grey-600) leading-relaxed">
-            {stageExplainer(o.status)}
-          </p>
-        </div>
+    <>
+      <OnboardingNextAction o={o} onboardingSession={onboardingSession} />
 
-        {/* SOW row */}
-        <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-white p-4">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-(--rs-neutral-grey-500)">Statement of Work</p>
-              <p className="mt-1 text-sm text-(--rs-neutral-grey-700)">
-                {o.sow_signed_at
-                  ? <>Signed <strong>{formatDate(o.sow_signed_at)}</strong></>
-                  : o.sow_sent_at
-                    ? <>Sent <strong>{formatDate(o.sow_sent_at)}</strong> — awaiting signature</>
-                    : <>Not yet sent. HRBP emails the SOW out-of-band, then marks it sent here.</>}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <MarkSowSentButton   id={o.id} alreadySent={!!o.sow_sent_at} />
-              <MarkSowSignedButton id={o.id} alreadySigned={!!o.sow_signed_at} />
-            </div>
-          </div>
-        </div>
-
-        {/* BG check email */}
-        <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-white p-4">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-(--rs-neutral-grey-500)">Background check email (SOP §3)</p>
-              <p className="mt-1 text-sm text-(--rs-neutral-grey-700)">
-                Asks for 3 character references + employment verification contacts.
-              </p>
-            </div>
-            <SendBgCheckButton id={o.id} />
-          </div>
-        </div>
-
+      <Section title="Stage actions" icon={<Sparkles className="w-4 h-4" />}>
+        <div className="space-y-5">
         {/* Welcome email */}
         <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-white p-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -467,7 +438,11 @@ function OverviewTab({ o, onLastFailedTemplate }: { o: Onboarder; onLastFailedTe
                 Sends the {o.onboarder_type === 'intern' ? 'intern' : 'contractor'} variant with Teams + onboarding form{o.onboarder_type === 'contractor' && ' + W-8'} instructions.
               </p>
             </div>
-            <SendWelcomeButton id={o.id} type={o.onboarder_type} />
+            <SendWelcomeButton
+              id={o.id}
+              type={o.onboarder_type}
+              alreadySubmitted={Boolean(o.onboarding_form_submitted_at)}
+            />
           </div>
         </div>
 
@@ -514,142 +489,155 @@ function OverviewTab({ o, onLastFailedTemplate }: { o: Onboarder; onLastFailedTe
           </div>
         )}
       </div>
-    </Section>
+      </Section>
+    </>
   );
 }
 
-function stageExplainer(status: string): string {
-  switch (status) {
-    case 'offer_signed':     return 'SOW out-of-band by HRBP. Mark it sent + signed here. When you advance to Background check, send the SOP §3 email.';
-    case 'background_check': return 'Collect 3 character references + employment verifications. Send the BG-check email and the per-row requests, then upload PDF responses.';
-    case 'pre_onboarding':   return 'Send the welcome email. New hire installs Teams, creates Romega Gmail, configures signature, submits the onboarding form + W-8 if contractor.';
-    case 'day_one':          return 'Account provisioning, team intros, calendar handoff. Orientation call with the Onboarding Lead.';
-    case 'thirty_day':       return 'First review with the lead — fit, blockers, training gaps. (30-day workflow ships post-MVP.)';
-    case 'ninety_day':       return 'End of probation — pass/fail decision documented. (90-day workflow ships post-MVP.)';
-    case 'regularized':      return 'Full-time hire; onboarding flow complete.';
-    case 'failed_probation': return 'Did not pass the 90-day review.';
-    case 'withdrew':         return 'Resigned during onboarding.';
-    default:                 return '';
-  }
-}
-
-// ─── Background check tab ───────────────────────────────────────────────────
-
-function BgCheckTab({
-  onboarderId, references, verifications,
+function OnboardingNextAction({
+  o,
+  onboardingSession,
 }: {
-  onboarderId:   number;
-  references:    ReferenceRow[];
-  verifications: VerificationRow[];
+  o: Onboarder;
+  onboardingSession: OnboardingSessionRow | null;
 }) {
-  return (
-    <div className="space-y-6">
-      <Section
-        title={`Character references · ${references.length}`}
-        icon={<Mail className="w-4 h-4" />}
-        action={<AddReferenceForm onboarderId={onboarderId} />}
-      >
-        {references.length === 0
-          ? <EmptyRow text="No references yet. SOP §3 requires 3. Use Add reference to start." />
-          : (
-            <div className="overflow-x-auto -mx-5">
-              <table className="w-full text-sm">
-                <thead className="border-b border-(--rs-neutral-grey-100) text-left text-[10px] uppercase tracking-wider text-(--rs-neutral-grey-500)">
-                  <tr>
-                    <th className="px-5 py-2 font-semibold">Referee</th>
-                    <th className="px-3 py-2 font-semibold">Contact</th>
-                    <th className="px-3 py-2 font-semibold">Sent</th>
-                    <th className="px-3 py-2 font-semibold">Responded</th>
-                    <th className="px-5 py-2 font-semibold text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-(--rs-neutral-grey-100)">
-                  {references.map(r => (
-                    <tr key={r.id} className="align-top">
-                      <td className="px-5 py-3">
-                        <p className="font-semibold text-(--rs-neutral-grey-900)">{r.referee_name}</p>
-                        {(r.referee_role || r.referee_company) && (
-                          <p className="text-[11px] text-(--rs-neutral-grey-500) mt-0.5">
-                            {[r.referee_role, r.referee_company].filter(Boolean).join(' · ')}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-3 py-3 text-[11px] text-(--rs-neutral-grey-600)">
-                        <p className="truncate max-w-[160px]">{r.email}</p>
-                        {r.mobile && <p className="mt-0.5 tabular-nums">{formatPhoneNumber(r.mobile)}</p>}
-                      </td>
-                      <td className="px-3 py-3 text-[11px] text-(--rs-neutral-grey-600) whitespace-nowrap">
-                        {r.request_sent_at ? formatDate(r.request_sent_at) : '—'}
-                      </td>
-                      <td className="px-3 py-3 text-[11px] whitespace-nowrap">
-                        {r.responded_at
-                          ? <span className="inline-flex items-center gap-1 text-green-700"><CheckCircle2 className="w-3 h-3" /> {formatDate(r.responded_at)}</span>
-                          : <span className="text-(--rs-neutral-grey-400)">—</span>}
-                      </td>
-                      <td className="px-5 py-3 text-right">
-                        <SendReferenceRequestButton refId={r.id} alreadySent={!!r.request_sent_at} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-      </Section>
+  type Progress = {
+    title: string;
+    detail: string;
+    tone: 'next' | 'waiting' | 'complete';
+  };
 
-      <Section
-        title={`Employment verifications · ${verifications.length}`}
-        icon={<Building2 className="w-4 h-4" />}
-        action={<AddVerificationForm onboarderId={onboarderId} />}
-      >
-        {verifications.length === 0
-          ? <EmptyRow text="No verifications yet. SOP §4 — one per prior employer." />
-          : (
-            <div className="overflow-x-auto -mx-5">
-              <table className="w-full text-sm">
-                <thead className="border-b border-(--rs-neutral-grey-100) text-left text-[10px] uppercase tracking-wider text-(--rs-neutral-grey-500)">
-                  <tr>
-                    <th className="px-5 py-2 font-semibold">Company</th>
-                    <th className="px-3 py-2 font-semibold">HR contact</th>
-                    <th className="px-3 py-2 font-semibold">Sent</th>
-                    <th className="px-3 py-2 font-semibold">Responded</th>
-                    <th className="px-5 py-2 font-semibold text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-(--rs-neutral-grey-100)">
-                  {verifications.map(v => (
-                    <tr key={v.id} className="align-top">
-                      <td className="px-5 py-3">
-                        <p className="font-semibold text-(--rs-neutral-grey-900)">{v.company}</p>
-                      </td>
-                      <td className="px-3 py-3 text-[11px] text-(--rs-neutral-grey-600)">
-                        {v.hr_contact_name && <p className="font-semibold text-(--rs-neutral-grey-800)">{v.hr_contact_name}</p>}
-                        <p className="truncate max-w-[160px]">{v.hr_email}</p>
-                        {v.hr_phone && <p className="mt-0.5 tabular-nums">{formatPhoneNumber(v.hr_phone)}</p>}
-                      </td>
-                      <td className="px-3 py-3 text-[11px] text-(--rs-neutral-grey-600) whitespace-nowrap">
-                        {v.request_sent_at ? formatDate(v.request_sent_at) : '—'}
-                      </td>
-                      <td className="px-3 py-3 text-[11px] whitespace-nowrap">
-                        {v.responded_at
-                          ? <span className="inline-flex items-center gap-1 text-green-700"><CheckCircle2 className="w-3 h-3" /> {formatDate(v.responded_at)}</span>
-                          : <span className="text-(--rs-neutral-grey-400)">—</span>}
-                      </td>
-                      <td className="px-5 py-3 text-right">
-                        <SendVerificationButton verId={v.id} alreadySent={!!v.request_sent_at} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-      </Section>
+  const remainingDayOneItems = DAY1_ITEMS.filter(item => !o[item.key]);
+  let progress: Progress;
+
+  switch (o.status) {
+    case 'pre_onboarding':
+      if (!o.onboarding_lead_id) {
+        progress = {
+          title: 'Next action: Assign an Onboarding Lead',
+          detail: 'Choose the person responsible for the new hire’s onboarding handoff.',
+          tone: 'next',
+        };
+      } else if (!o.direct_supervisor_id) {
+        progress = {
+          title: 'Next action: Assign a Direct Supervisor',
+          detail: 'Choose the person who will own the new hire’s day-to-day work and probation reviews.',
+          tone: 'next',
+        };
+      } else if (!onboardingSession) {
+        progress = {
+          title: 'Next action: Send the welcome email',
+          detail: 'This assigns the new hire to the next available Friday onboarding session and sends their setup instructions.',
+          tone: 'next',
+        };
+      } else if (onboardingSession.status !== 'scheduled') {
+        progress = {
+          title: 'Next action: Assign the next onboarding session',
+          detail: 'The current session is no longer open. Send the welcome email again to assign a new Friday cohort.',
+          tone: 'next',
+        };
+      } else if (o.meeting_availability === 'pending') {
+        progress = {
+          title: 'Awaiting onboarding-form response',
+          detail: `Waiting for the new hire to confirm availability for ${formatDate(onboardingSession.session_date)}.`,
+          tone: 'waiting',
+        };
+      } else if (o.meeting_availability === 'no') {
+        progress = {
+          title: 'Awaiting next-session assignment',
+          detail: 'The new hire cannot attend this cohort. After the Friday cutoff, they will be moved to the next open session.',
+          tone: 'waiting',
+        };
+      } else {
+        progress = {
+          title: 'Next action: Prepare Day 1',
+          detail: `The new hire confirmed attendance for ${formatDate(onboardingSession.session_date)}. Prepare accounts, introductions, and orientation.`,
+          tone: 'next',
+        };
+      }
+      break;
+
+    case 'day_one':
+      progress = remainingDayOneItems.length > 0
+        ? {
+            title: 'Next action: Complete the Day-1 checklist',
+            detail: `${remainingDayOneItems.length} of ${DAY1_ITEMS.length} Day-1 task${remainingDayOneItems.length === 1 ? '' : 's'} remain.`,
+            tone: 'next',
+          }
+        : {
+            title: 'Day-1 setup complete',
+            detail: 'All Day-1 tasks are complete. The record advances to the 30-day check-in stage automatically.',
+            tone: 'complete',
+          };
+      break;
+
+    case 'thirty_day':
+      progress = {
+        title: 'Next action: Run the 30-day check-in',
+        detail: 'Review fit, blockers, and training gaps with the new hire and their lead.',
+        tone: 'next',
+      };
+      break;
+
+    case 'ninety_day':
+      progress = {
+        title: 'Next action: Record the probation outcome',
+        detail: 'Complete the 90-day review, then move the record to Regularized or Failed probation.',
+        tone: 'next',
+      };
+      break;
+
+    case 'regularized':
+      progress = {
+        title: 'Onboarding complete',
+        detail: 'The new hire completed probation and is now regularized.',
+        tone: 'complete',
+      };
+      break;
+
+    case 'failed_probation':
+      progress = {
+        title: 'Onboarding closed',
+        detail: 'The probation outcome has been recorded as unsuccessful.',
+        tone: 'complete',
+      };
+      break;
+
+    case 'withdrew':
+      progress = {
+        title: 'Onboarding closed',
+        detail: 'The new hire withdrew during onboarding.',
+        tone: 'complete',
+      };
+      break;
+
+    default:
+      progress = {
+        title: 'Next action: Review onboarding status',
+        detail: 'Confirm the current stage and update the onboarding record as needed.',
+        tone: 'next',
+      };
+  }
+
+  const toneClass = progress.tone === 'complete'
+    ? 'border-green-200 bg-green-50/60 text-green-900'
+    : progress.tone === 'waiting'
+      ? 'border-(--rs-accent-200) bg-(--rs-accent-50)/60 text-(--rs-accent-900)'
+      : 'border-(--rs-primary-200) bg-(--rs-primary-50)/60 text-(--rs-primary-900)';
+  const detailClass = progress.tone === 'complete'
+    ? 'text-green-800'
+    : progress.tone === 'waiting'
+      ? 'text-(--rs-accent-800)'
+      : 'text-(--rs-primary-800)';
+
+  return (
+    <div className={`rounded-lg border p-4 ${toneClass}`}>
+      <p className="text-[10px] font-bold uppercase tracking-widest opacity-75">Onboarding progress</p>
+      <p className="mt-1 text-base font-semibold">{progress.title}</p>
+      <p className={`mt-1 text-xs leading-relaxed ${detailClass}`}>{progress.detail}</p>
     </div>
   );
 }
-
-// ─── Documents tab ──────────────────────────────────────────────────────────
 
 function DocumentsTab({
   onboarderId, documents,
@@ -712,7 +700,6 @@ const DAY1_ITEMS: { key: keyof Onboarder; label: string; hint: string }[] = [
   { key: 'teams_installed_at',    label: 'Teams installed',       hint: 'Microsoft Teams app on desktop or mobile' },
   { key: 'gmail_created_at',      label: 'Romega Gmail created',  hint: 'firstName@romega-solutions.com (contractor) or jsmith.romegasolutions@gmail.com (intern)' },
   { key: 'signature_set_at',      label: 'Email signature set',   hint: 'Generated at romega-email-signature.vercel.app' },
-  { key: 'jibble_invited_at',     label: 'Jibble invited',        hint: 'Time-tracking onboarded' },
   { key: 'wise_setup_at',         label: 'Wise account set up',   hint: 'Banking details captured + verified' },
   { key: 'group_chats_joined_at', label: 'Group chats joined',    hint: 'Team + company-wide Teams chats' },
   { key: 'orientation_done_at',   label: 'Orientation done',      hint: 'Welcome call + tooling tour complete' },
@@ -771,7 +758,21 @@ function NotesTab({ o }: { o: Onboarder }) {
 
 // ─── Right rail ─────────────────────────────────────────────────────────────
 
-function QuickFacts({ o }: { o: Onboarder }) {
+function QuickFacts({
+  o,
+  onboardingLeadName,
+  directSupervisorName,
+  onboardingLeadOptions,
+  onboardingSession,
+  contractorPaymentDetails,
+}: {
+  o: Onboarder;
+  onboardingLeadName: string | null;
+  directSupervisorName: string | null;
+  onboardingLeadOptions: OnboardingLeadOption[];
+  onboardingSession: OnboardingSessionRow | null;
+  contractorPaymentDetails: ContractorPaymentDetails | null;
+}) {
   return (
     <div className="rounded-xl border border-(--rs-neutral-grey-200) bg-white p-4 space-y-2.5">
       <h3 className="text-[10px] font-bold uppercase tracking-widest text-(--rs-neutral-grey-500)">Quick facts</h3>
@@ -783,12 +784,48 @@ function QuickFacts({ o }: { o: Onboarder }) {
       <KvRow label="Type"       value={o.onboarder_type === 'intern' ? 'Intern' : 'Contractor'} />
       <KvRow label="Role"       value={o.role_title ?? <Dim />} />
       <KvRow label="Team"       value={o.team ?? <Dim />} />
-      <KvRow label="Supervisor" value={o.direct_supervisor ?? <Dim />} />
-      <KvRow label="Onboarding Lead" value={o.onboarding_lead ?? <Dim />} />
-      <KvRow label="HRBP"       value={o.hrbp ?? <Dim />} />
+      <KvRow label="Supervisor" value={
+        <DirectSupervisorSelect
+          onboarderId={o.id}
+          currentSupervisorId={o.direct_supervisor_id}
+          currentSupervisorName={directSupervisorName}
+          options={onboardingLeadOptions}
+        />
+      } />
+      <KvRow label="Onboarding Lead" value={
+        <OnboardingLeadSelect
+          onboarderId={o.id}
+          currentLeadId={o.onboarding_lead_id}
+          currentLeadName={onboardingLeadName}
+          options={onboardingLeadOptions}
+        />
+      } />
+      <TeamsContactEmails
+        onboarderId={o.id}
+        leadAssigned={Boolean(o.onboarding_lead_id)}
+        supervisorAssigned={Boolean(o.direct_supervisor_id)}
+        onboardingLeadTeamsEmail={o.onboarding_lead_teams_email}
+        directSupervisorTeamsEmail={o.direct_supervisor_teams_email}
+      />
       <KvRow label="Start date" value={o.start_date ? formatDate(o.start_date) : <Dim />} />
-      <KvRow label="SOW signed" value={o.sow_signed_at ? formatDate(o.sow_signed_at) : <Dim />} />
       <KvRow label="W-8"        value={o.w8_uploaded_at ? formatDate(o.w8_uploaded_at) : <Dim />} />
+      <KvRow label="Friday cohort" value={
+        onboardingSession
+          ? <span className="text-right"><span>{formatDate(onboardingSession.session_date)}</span><span className="block text-[10px] text-(--rs-neutral-grey-500)">6:00 PM PHT · {o.meeting_availability}</span></span>
+          : <Dim text="not assigned" />
+      } />
+      {onboardingSession?.google_meet_url && (
+        <KvRow label="Google Meet" value={
+          <a
+            href={onboardingSession.google_meet_url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-(--rs-primary-700) hover:underline"
+          >
+            Open meeting
+          </a>
+        } />
+      )}
       <KvRow label="Last email" value={
         o.last_email_template
           ? <span className="inline-flex items-center gap-1 text-(--rs-neutral-grey-800)">
@@ -799,6 +836,22 @@ function QuickFacts({ o }: { o: Onboarder }) {
             </span>
           : <Dim text="none" />
       } />
+      {contractorPaymentDetails && (
+        <div className="mt-3 space-y-2.5 border-t border-(--rs-neutral-grey-100) pt-3">
+          <h4 className="text-[10px] font-bold uppercase tracking-widest text-(--rs-neutral-grey-500)">Contractor payment details</h4>
+          <KvRow label="Hourly rate" value={String(contractorPaymentDetails.hourly_rate)} />
+          {contractorPaymentDetails.wise_tag ? (
+            <KvRow label="Wise tag" value={contractorPaymentDetails.wise_tag} />
+          ) : (
+            <>
+              <KvRow label="Bank" value={contractorPaymentDetails.bank_name ?? <Dim />} />
+              <KvRow label="Account name" value={contractorPaymentDetails.bank_account_name ?? <Dim />} />
+              <KvRow label="Account number" value={contractorPaymentDetails.bank_account_number ?? <Dim />} />
+            </>
+          )}
+          <KvRow label="Received" value={formatDate(contractorPaymentDetails.received_at) ?? <Dim />} />
+        </div>
+      )}
     </div>
   );
 }

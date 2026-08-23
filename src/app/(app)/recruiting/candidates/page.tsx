@@ -8,7 +8,7 @@ import { ToolResetButton } from '@/components/tool-reset-button';
 import { getSession } from '@/lib/session';
 import { hasToolAccess } from '@/lib/rbac';
 import { CandidateForm } from './candidate-form';
-import { CandidateStatus, CandidateRating, CandidateDelete } from './candidate-row';
+import { CandidateStatus, CandidateRating, CandidateDelete, CandidateReminderButton } from './candidate-row';
 import { ResumeUploadButton } from './resume-upload';
 import { deleteAllCandidates } from './actions';
 import { AtsTabs } from '../ats-tabs';
@@ -27,6 +27,16 @@ type CandidateRowData = {
   linkedin_url: string | null;
   parsed_at:    string | null;
   created_at:   string;
+};
+
+type PositionOptionRow = {
+  id: number;
+  job_title: string;
+};
+
+type CandidateReminder = {
+  kind: 'background_check' | 'reference_check' | 'employment_verification';
+  count: number;
 };
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -94,10 +104,56 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
     .order('created_at', { ascending: false })
     .limit(200);
 
+  // Manual candidates must be attached to a real, currently open position.
+  // The server action validates the chosen ID again before saving.
+  const { data: positionData } = await supabase
+    .from('positions')
+    .select('id, job_title')
+    .eq('is_open', true)
+    .order('job_title', { ascending: true })
+    .limit(200);
+  const positions = ((positionData ?? []) as PositionOptionRow[])
+    .filter(position => Number.isInteger(position.id) && position.job_title.trim())
+    .map(position => ({ id: Number(position.id), jobTitle: position.job_title }));
+
   const errorMsg = error?.message;
   const tableMissing = isTableMissing(errorMsg);
   const unexpectedError = error && !tableMissing ? errorMsg : null;
   const allCandidates: CandidateRowData[] = (data as CandidateRowData[] | null) ?? [];
+  const candidateIds = allCandidates
+    .filter(candidate => candidate.status === 'offered')
+    .map(candidate => candidate.id);
+  const remindersByCandidate = new Map<number, CandidateReminder[]>();
+  const addReminder = (candidateId: number, kind: CandidateReminder['kind'], count = 1) => {
+    const existing = remindersByCandidate.get(candidateId) ?? [];
+    const prior = existing.find(reminder => reminder.kind === kind);
+    if (prior) prior.count += count;
+    else existing.push({ kind, count });
+    remindersByCandidate.set(candidateId, existing);
+  };
+  if (candidateIds.length) {
+    const [backgroundResult, referencesResult, verificationsResult] = await Promise.all([
+      supabase.from('candidate_pre_employment_requests')
+        .select('candidate_id, sent_at, last_reminder_sent_at')
+        .in('candidate_id', candidateIds)
+        .eq('form_key', 'background_check')
+        .is('submitted_at', null)
+        .is('invalidated_at', null),
+      supabase.from('candidate_references')
+        .select('candidate_id, request_sent_at, last_reminder_sent_at')
+        .in('candidate_id', candidateIds)
+        .not('request_sent_at', 'is', null)
+        .is('responded_at', null),
+      supabase.from('candidate_employment_verifications')
+        .select('candidate_id, request_sent_at, last_reminder_sent_at')
+        .in('candidate_id', candidateIds)
+        .not('request_sent_at', 'is', null)
+        .is('responded_at', null),
+    ]);
+    for (const request of backgroundResult.data ?? []) addReminder(request.candidate_id, 'background_check');
+    for (const reference of referencesResult.data ?? []) addReminder(reference.candidate_id, 'reference_check');
+    for (const verification of verificationsResult.data ?? []) addReminder(verification.candidate_id, 'employment_verification');
+  }
   const candidates = allCandidates.filter(candidate => {
     const matchesQuery = !query || [
       candidate.full_name,
@@ -134,7 +190,7 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
                 action={deleteAllCandidates}
               />
               <ResumeUploadButton mode="create" variant="outline" />
-              <CandidateForm />
+              <CandidateForm positions={positions} />
             </div>
           ) : null
         }
@@ -254,6 +310,7 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
                         <th className="px-4 py-3 font-semibold">Rating</th>
                         <th className="px-4 py-3 font-semibold">Applied</th>
                         <th className="px-4 py-3 font-semibold">Status</th>
+                        <th className="px-4 py-3 font-semibold">Needs reminder</th>
                         <th className="px-4 py-3 font-semibold w-10" />
                       </tr>
                     </thead>
@@ -293,6 +350,18 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
                           <td className="px-4 py-3.5"><CandidateRating id={c.id} rating={c.rating} /></td>
                           <td className="px-4 py-3.5 text-(--rs-neutral-grey-500) whitespace-nowrap">{formatDate(c.created_at)}</td>
                           <td className="px-4 py-3.5"><CandidateStatus id={c.id} status={c.status} /></td>
+                          <td className="px-4 py-3.5">
+                            <div className="flex flex-wrap gap-1">
+                              {(remindersByCandidate.get(c.id) ?? []).map(reminder => (
+                                <CandidateReminderButton
+                                  key={reminder.kind}
+                                  candidateId={c.id}
+                                  kind={reminder.kind}
+                                  count={reminder.count}
+                                />
+                              ))}
+                            </div>
+                          </td>
                           <td className="px-4 py-3.5"><CandidateDelete id={c.id} /></td>
                         </tr>
                       ))}

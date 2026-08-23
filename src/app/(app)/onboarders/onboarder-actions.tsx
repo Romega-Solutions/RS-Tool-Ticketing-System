@@ -3,11 +3,12 @@
 import { useState, useTransition } from 'react';
 import {
   Mail, Send, FileSignature, CheckCircle2, RefreshCw, MailWarning,
-  MessageSquare, PenSquare,
+  MessageSquare, PenSquare, Bell,
 } from 'lucide-react';
 import {
   sendBgCheckEmail,
   sendWelcomeEmail,
+  sendOnboardingFormReminder,
   sendReferenceRequest,
   sendEmploymentVerification,
   markSowSent,
@@ -112,15 +113,36 @@ export function SendBgCheckButton({ id }: { id: number }) {
   );
 }
 
-export function SendWelcomeButton({ id, type }: { id: number; type: string }) {
+export function SendWelcomeButton({
+  id,
+  type,
+  alreadySubmitted,
+}: {
+  id: number;
+  type: string;
+  alreadySubmitted: boolean;
+}) {
   return (
     <ActionButton
       onClick={() => sendWelcomeEmail(id)}
-      label={`Send welcome (${type})`}
+      label={alreadySubmitted ? 'Onboarding form received' : `Confirm & send welcome (${type})`}
       icon={<Mail className="w-3.5 h-3.5" />}
-      variant="primary"
+      variant={alreadySubmitted ? 'subtle' : 'primary'}
       size="md"
-      confirm={`Send the ${type} welcome email (SOP §5) now?`}
+      confirm={`Confirm the handoff and send the ${type} welcome email now? This assigns the Friday onboarding cohort.`}
+      disabled={alreadySubmitted}
+    />
+  );
+}
+
+export function SendOnboardingFormReminderButton({ id }: { id: number }) {
+  return (
+    <ActionButton
+      onClick={() => sendOnboardingFormReminder(id)}
+      label="Send form reminder"
+      icon={<Bell className="w-3.5 h-3.5" />}
+      variant="outline"
+      confirm="Send a reminder without changing the original onboarding-form link?"
     />
   );
 }

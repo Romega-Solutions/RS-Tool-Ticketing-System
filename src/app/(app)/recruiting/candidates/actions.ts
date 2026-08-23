@@ -7,6 +7,8 @@ import { getSession, type SessionUser } from '@/lib/session';
 import {
   parseResumeWithN8n,
   notifyCommunicationWebhook,
+  notifyOnboardingWebhook,
+  notifyFormReminder,
   notifyRecruiterOfApplication,
   type ParsedResume,
   type ParsedEducation,
@@ -16,8 +18,17 @@ import {
 } from '@/lib/n8n';
 import { hasToolAccess } from '@/lib/rbac';
 import { toProperName, formatPhoneNumber } from '@/lib/format';
-import { uploadResumeToStorage } from '@/lib/storage';
+import { uploadCandidatePreEmploymentDocument, uploadResumeToStorage } from '@/lib/storage';
 import { createOnboarderFromCandidate } from '@/lib/onboarders';
+import {
+  buildPreEmploymentFormUrl,
+  buildEmploymentVerificationFormUrl,
+  buildReferenceCheckFormUrl,
+  getEmploymentVerificationRequestExpiry,
+  getReferenceCheckRequestExpiry,
+  getPreEmploymentRequestExpiry,
+  mintPreEmploymentRequestToken,
+} from '@/lib/pre-employment-forms';
 
 // SOP's 11 status stages. See docs/RECRUITMENT_AI_AGENT_BUILD_PLAN.md §2.
 const ALLOWED_STATUSES = [
@@ -72,6 +83,8 @@ type HistoryEntry = {
   newValue: string | null;
   summary:  string;
 };
+
+export type RecruitmentReminderKind = 'background_check' | 'reference_check' | 'employment_verification';
 
 async function writeHistory(
   supabase: AdminClient,
@@ -239,6 +252,484 @@ async function fireAutoCommunication(
   return result;
 }
 
+/**
+ * Sends the existing BG-check request workflow from Recruitment, while the
+ * candidate is still in the offered stage. The n8n workflow uses the supplied
+ * context to address the candidate; no onboarding row is created or changed.
+ */
+export async function sendPreEmploymentBgCheckEmail(candidateId: number): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
+
+  const supabase = createAdminClient();
+  const { data: candidate, error } = await supabase
+    .from('candidates')
+    .select('full_name, email, position, status')
+    .eq('id', candidateId)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load candidate: ${error.message}`);
+  if (!candidate) throw new Error('Candidate not found');
+  if (candidate.status !== 'offered') {
+    throw new Error('Background-check emails can only be sent while a candidate is offered');
+  }
+  if (!candidate.email?.trim()) throw new Error('Candidate has no email address');
+
+  const { token, tokenHash } = mintPreEmploymentRequestToken();
+  const formUrl = buildPreEmploymentFormUrl({
+    formKey: 'background_check',
+    token,
+    candidateName: candidate.full_name,
+    candidateEmail: candidate.email.trim(),
+  });
+  const now = new Date().toISOString();
+
+  // A resend replaces any still-open link. This lets the recruiter recover
+  // from a lost email without leaving multiple usable links for one form.
+  const { error: invalidateError } = await supabase
+    .from('candidate_pre_employment_requests')
+    .update({ invalidated_at: now })
+    .eq('candidate_id', candidateId)
+    .eq('form_key', 'background_check')
+    .is('submitted_at', null)
+    .is('invalidated_at', null);
+  if (invalidateError) {
+    throw new Error(`Failed to replace the existing form request: ${invalidateError.message}`);
+  }
+
+  const { error: requestError } = await supabase
+    .from('candidate_pre_employment_requests')
+    .insert({
+      candidate_id: candidateId,
+      form_key: 'background_check',
+      token_hash: tokenHash,
+      created_by: session.id,
+      sent_at: now,
+      expires_at: getPreEmploymentRequestExpiry('background_check'),
+    });
+  if (requestError) {
+    throw new Error(`Failed to create the form request: ${requestError.message}`);
+  }
+
+  const firstName = candidate.full_name.trim().split(/\s+/)[0] ?? '';
+  const result = await notifyOnboardingWebhook({
+    // The shipped n8n workflow keeps this field in its response only. The
+    // candidate id makes the delivery traceable without creating an onboarder.
+    onboarderId: candidateId,
+    template:    'bg-check-initiate',
+    event:       'manual_send',
+    context: {
+      full_name:      candidate.full_name,
+      first_name:     firstName,
+      personal_email: candidate.email.trim(),
+      role_title:     candidate.position ?? '',
+      onboarding_lead: session.name,
+      requested_by_email: session.email,
+      form_url:       formUrl,
+      form_key:       'background_check',
+    },
+  });
+
+  await writeHistory(supabase, candidateId, session, [
+    result.ok
+      ? {
+          field:    'pre_employment_email_sent',
+          oldValue: null,
+          newValue: result.template ?? 'bg-check-initiate',
+          summary:  'Pre-employment background-check email sent',
+        }
+      : {
+          field:    'pre_employment_email_failed',
+          oldValue: 'bg-check-initiate',
+          newValue: null,
+          summary:  `Pre-employment background-check email FAILED: ${result.error}`,
+        },
+  ]);
+
+  if (!result.ok) throw new Error(result.error);
+  revalidatePath(`/recruiting/candidates/${candidateId}`);
+}
+
+/**
+ * Sends the existing per-referee email workflow for the three references the
+ * candidate supplied in Recruitment. This deliberately uses candidate_refs,
+ * never the legacy onboarder_references table.
+ */
+export async function sendCandidateReferenceEmails(candidateId: number): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
+
+  const supabase = createAdminClient();
+  const { data: candidate, error: candidateError } = await supabase
+    .from('candidates')
+    .select('full_name, position, status')
+    .eq('id', candidateId)
+    .maybeSingle();
+  if (candidateError) throw new Error(`Failed to load candidate: ${candidateError.message}`);
+  if (!candidate) throw new Error('Candidate not found');
+  if (candidate.status !== 'offered') {
+    throw new Error('Reference-request emails can only be sent while a candidate is offered');
+  }
+
+  const { data: submission, error: submissionError } = await supabase
+    .from('candidate_pre_employment_submissions')
+    .select('id')
+    .eq('candidate_id', candidateId)
+    .eq('form_key', 'background_check')
+    .order('submitted_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (submissionError) throw new Error(`Failed to load background-check submission: ${submissionError.message}`);
+  if (!submission) throw new Error('The candidate has not submitted a background-check form yet');
+
+  const { data: references, error: referencesError } = await supabase
+    .from('candidate_references')
+    .select('id, referee_name, referee_email, referee_company, referee_job_title, request_sent_at')
+    .eq('candidate_id', candidateId)
+    .eq('submission_id', submission.id)
+    .order('reference_number', { ascending: true });
+  if (referencesError) throw new Error(`Failed to load candidate references: ${referencesError.message}`);
+  const rows = (references ?? []) as Array<{
+    id: number;
+    referee_name: string;
+    referee_email: string;
+    referee_company: string | null;
+    referee_job_title: string | null;
+    request_sent_at: string | null;
+  }>;
+  if (rows.length !== 3 || rows.some(reference => !reference.referee_name.trim() || !reference.referee_email.trim())) {
+    throw new Error('All three character references need a name and email address before requests can be sent');
+  }
+
+  const pending = rows.filter(reference => !reference.request_sent_at);
+  if (pending.length === 0) throw new Error('Reference-request emails have already been sent');
+  if (!process.env.JOTFORM_REFERENCE_CHECK_FORM_URL?.trim()) {
+    throw new Error('JOTFORM_REFERENCE_CHECK_FORM_URL is not configured');
+  }
+
+  const historyEntries: HistoryEntry[] = [];
+  const failures: string[] = [];
+  for (const reference of pending) {
+    const { token, tokenHash } = mintPreEmploymentRequestToken();
+    const formUrl = buildReferenceCheckFormUrl({
+      token,
+      candidateName: candidate.full_name,
+      candidatePosition: candidate.position ?? '',
+      refereeName: reference.referee_name,
+      refereePosition: reference.referee_job_title ?? '',
+      refereeCompany: reference.referee_company ?? '',
+    });
+    const now = new Date().toISOString();
+    const { error: invalidateError } = await supabase
+      .from('candidate_reference_form_requests')
+      .update({ invalidated_at: now })
+      .eq('reference_id', reference.id)
+      .is('submitted_at', null)
+      .is('invalidated_at', null);
+    if (invalidateError) {
+      failures.push(`${reference.referee_name}: could not replace the previous form link`);
+      continue;
+    }
+    const { error: requestError } = await supabase
+      .from('candidate_reference_form_requests')
+      .insert({
+        reference_id: reference.id,
+        token_hash: tokenHash,
+        sent_at: now,
+        expires_at: getReferenceCheckRequestExpiry(),
+      });
+    if (requestError) {
+      failures.push(`${reference.referee_name}: could not create the secure form link`);
+      continue;
+    }
+
+    const result = await notifyOnboardingWebhook({
+      // The legacy workflow contract uses `onboarderId`; it is a trace id only
+      // for this Recruitment use and does not create or update an onboarder.
+      onboarderId: candidateId,
+      template: 'reference-request',
+      event: 'manual_send',
+      context: {
+        candidate_id: candidateId,
+        referee_id: reference.id,
+        referee_name: reference.referee_name,
+        referee_email: reference.referee_email,
+        full_name: candidate.full_name,
+        role_title: candidate.position ?? '',
+        onboarding_lead: session.name,
+        requested_by_email: session.email,
+        form_url: formUrl,
+        form_key: 'reference_check',
+      },
+    });
+
+    if (result.ok) {
+      const sentAt = new Date().toISOString();
+      const { error: updateError } = await supabase
+        .from('candidate_references')
+        .update({ request_sent_at: sentAt })
+        .eq('id', reference.id)
+        .is('request_sent_at', null);
+      if (updateError) {
+        failures.push(`${reference.referee_name}: email sent but its delivery status could not be saved`);
+        continue;
+      }
+      historyEntries.push({
+        field: 'reference_request_sent', oldValue: null, newValue: reference.referee_email,
+        summary: `Character reference request sent to ${reference.referee_name}`,
+      });
+    } else {
+      failures.push(`${reference.referee_name}: ${result.error}`);
+      historyEntries.push({
+        field: 'reference_request_failed', oldValue: reference.referee_email, newValue: null,
+        summary: `Character reference request FAILED for ${reference.referee_name}: ${result.error}`,
+      });
+    }
+  }
+
+  await writeHistory(supabase, candidateId, session, historyEntries);
+  revalidatePath(`/recruiting/candidates/${candidateId}`);
+  if (failures.length) throw new Error(`Some reference emails could not be sent: ${failures.join('; ')}`);
+}
+
+export async function sendCandidateEmploymentVerificationEmails(candidateId: number): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
+  if (!process.env.JOTFORM_EMPLOYMENT_VERIFICATION_FORM_URL?.trim()) throw new Error('JOTFORM_EMPLOYMENT_VERIFICATION_FORM_URL is not configured');
+
+  const supabase = createAdminClient();
+  const { data: candidate, error: candidateError } = await supabase
+    .from('candidates').select('full_name, position, status').eq('id', candidateId).maybeSingle();
+  if (candidateError) throw new Error(`Failed to load candidate: ${candidateError.message}`);
+  if (!candidate) throw new Error('Candidate not found');
+  if (candidate.status !== 'offered') throw new Error('Employment-verification emails can only be sent while a candidate is offered');
+
+  const { data, error } = await supabase
+    .from('candidate_employment_verifications')
+    .select('id, company, hr_contact_name, hr_email, request_sent_at')
+    .eq('candidate_id', candidateId).order('verification_number', { ascending: true });
+  if (error) throw new Error(`Failed to load employment verifications: ${error.message}`);
+  const rows = (data ?? []) as Array<{ id: number; company: string; hr_contact_name: string | null; hr_email: string; request_sent_at: string | null }>;
+  if (!rows.length) {
+    throw new Error('No employment-verification contacts were found. Re-run the employment-verification migration backfill or submit the candidate background-check form again.');
+  }
+  const pending = rows.filter(row => !row.request_sent_at);
+  if (!pending.length) throw new Error('Employment-verification emails have already been sent');
+
+  const failures: string[] = [];
+  const history: HistoryEntry[] = [];
+  for (const verification of pending) {
+    const { token, tokenHash } = mintPreEmploymentRequestToken();
+    const now = new Date().toISOString();
+    const formUrl = buildEmploymentVerificationFormUrl({ token, candidateName: candidate.full_name, candidatePosition: candidate.position ?? '', employerCompany: verification.company });
+    const { error: invalidateError } = await supabase.from('candidate_employment_verification_form_requests')
+      .update({ invalidated_at: now }).eq('verification_id', verification.id).is('submitted_at', null).is('invalidated_at', null);
+    if (invalidateError) { failures.push(`${verification.company}: could not replace prior link`); continue; }
+    const { error: requestError } = await supabase.from('candidate_employment_verification_form_requests').insert({
+      verification_id: verification.id, token_hash: tokenHash, sent_at: now, expires_at: getEmploymentVerificationRequestExpiry(),
+    });
+    if (requestError) { failures.push(`${verification.company}: could not create secure link`); continue; }
+    const result = await notifyOnboardingWebhook({
+      onboarderId: candidateId, template: 'employment-verification', event: 'manual_send',
+      context: { candidate_id: candidateId, verification_id: verification.id, company: verification.company, hr_contact_name: verification.hr_contact_name ?? '', hr_email: verification.hr_email, full_name: candidate.full_name, role_title: candidate.position ?? '', onboarding_lead: session.name, requested_by_email: session.email, form_url: formUrl, form_key: 'employment_verification' },
+    });
+    if (!result.ok) { failures.push(`${verification.company}: ${result.error}`); continue; }
+    const { error: sentError } = await supabase.from('candidate_employment_verifications').update({ request_sent_at: now }).eq('id', verification.id).is('request_sent_at', null);
+    if (sentError) { failures.push(`${verification.company}: email sent but status was not saved`); continue; }
+    history.push({ field: 'employment_verification_request_sent', oldValue: null, newValue: verification.hr_email, summary: `Employment-verification request sent to ${verification.company}` });
+  }
+  await writeHistory(supabase, candidateId, session, history);
+  revalidatePath(`/recruiting/candidates/${candidateId}`);
+  if (failures.length) throw new Error(`Some employment-verification emails could not be sent: ${failures.join('; ')}`);
+}
+
+/**
+ * Sends a manual nudge for an already-sent form. It deliberately does not
+ * mint, invalidate, or include a Jotform URL; recipients use their original
+ * invitation link.
+ */
+export async function sendCandidateFormReminder(candidateId: number, kind: RecruitmentReminderKind): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
+  if (!['background_check', 'reference_check', 'employment_verification'].includes(kind)) {
+    throw new Error('Invalid reminder type');
+  }
+
+  const supabase = createAdminClient();
+  const { data: candidate, error: candidateError } = await supabase
+    .from('candidates')
+    .select('full_name, email, position, status')
+    .eq('id', candidateId)
+    .maybeSingle();
+  if (candidateError) throw new Error(`Failed to load candidate: ${candidateError.message}`);
+  if (!candidate) throw new Error('Candidate not found');
+  if (candidate.status !== 'offered') throw new Error('Reminders can only be sent while a candidate is offered');
+
+  const now = new Date();
+  const sentAt = now.toISOString();
+  const sendReminder = async (recipientEmail: string, recipientName: string) => notifyFormReminder({
+    source: 'recruitment',
+    reminderType: kind,
+    candidateId,
+    recipientEmail,
+    recipientName,
+    subjectName: candidate.full_name,
+    roleTitle: candidate.position ?? undefined,
+    requestedByEmail: session.email,
+  });
+
+  if (kind === 'background_check') {
+    if (!candidate.email?.trim()) throw new Error('Candidate has no email address');
+    const { data: request, error } = await supabase
+      .from('candidate_pre_employment_requests')
+      .select('id, sent_at, last_reminder_sent_at')
+      .eq('candidate_id', candidateId)
+      .eq('form_key', 'background_check')
+      .is('submitted_at', null)
+      .is('invalidated_at', null)
+      .order('sent_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(`Failed to load background-check request: ${error.message}`);
+    if (!request) throw new Error('There is no unanswered background-check request');
+    const result = await sendReminder(
+      candidate.email.trim(),
+      candidate.full_name.trim().split(/\s+/)[0] ?? 'there',
+    );
+    if (!result.ok) throw new Error(result.error);
+    const { error: markError } = await supabase.from('candidate_pre_employment_requests')
+      .update({ last_reminder_sent_at: sentAt })
+      .eq('id', request.id);
+    if (markError) throw new Error(`Reminder sent but could not save its timestamp: ${markError.message}`);
+  } else if (kind === 'reference_check') {
+    const { data, error } = await supabase.from('candidate_references')
+      .select('id, referee_name, referee_email, request_sent_at, responded_at, last_reminder_sent_at')
+      .eq('candidate_id', candidateId)
+      .not('request_sent_at', 'is', null)
+      .is('responded_at', null);
+    if (error) throw new Error(`Failed to load reference requests: ${error.message}`);
+    const due = data ?? [];
+    if (!due.length) throw new Error('No character-reference reminder is due yet');
+    for (const reference of due) {
+      const result = await sendReminder(reference.referee_email, reference.referee_name);
+      if (!result.ok) throw new Error(`Could not remind ${reference.referee_name}: ${result.error}`);
+      const { error: markError } = await supabase.from('candidate_references')
+        .update({ last_reminder_sent_at: sentAt })
+        .eq('id', reference.id);
+      if (markError) throw new Error(`Reminder sent but could not save its timestamp: ${markError.message}`);
+    }
+  } else {
+    const { data, error } = await supabase.from('candidate_employment_verifications')
+      .select('id, company, hr_contact_name, hr_email, request_sent_at, responded_at, last_reminder_sent_at')
+      .eq('candidate_id', candidateId)
+      .not('request_sent_at', 'is', null)
+      .is('responded_at', null);
+    if (error) throw new Error(`Failed to load employment-verification requests: ${error.message}`);
+    const due = data ?? [];
+    if (!due.length) throw new Error('No employment-verification reminder is due yet');
+    for (const verification of due) {
+      const result = await sendReminder(verification.hr_email, verification.hr_contact_name?.trim() || 'HR Department');
+      if (!result.ok) throw new Error(`Could not remind ${verification.company}: ${result.error}`);
+      const { error: markError } = await supabase.from('candidate_employment_verifications')
+        .update({ last_reminder_sent_at: sentAt })
+        .eq('id', verification.id);
+      if (markError) throw new Error(`Reminder sent but could not save its timestamp: ${markError.message}`);
+    }
+  }
+
+  const label = kind === 'background_check' ? 'background-check form' : kind === 'reference_check' ? 'character-reference form' : 'employment-verification form';
+  await writeHistory(supabase, candidateId, session, [{
+    field: 'pre_employment_reminder_sent', oldValue: null, newValue: kind,
+    summary: `Manual reminder sent for the existing ${label} link`,
+  }]);
+  revalidatePath('/recruiting/candidates');
+  revalidatePath(`/recruiting/candidates/${candidateId}`);
+}
+
+export async function uploadPreEmploymentDocument(candidateId: number, kind: 'sow' | 'job_description' | 'ai_policy' | 'nda', formData: FormData): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
+  const file = formData.get('file');
+  if (!(file instanceof File)) throw new Error('Choose a PDF document');
+  const supabase = createAdminClient();
+  const { data: candidate } = await supabase.from('candidates').select('status').eq('id', candidateId).maybeSingle();
+  if (!candidate) throw new Error('Candidate not found');
+  if (candidate.status !== 'offered') throw new Error('Documents can only be uploaded while a candidate is offered');
+  const upload = await uploadCandidatePreEmploymentDocument({ candidateId, kind, file });
+  const { error } = await supabase.from('candidate_pre_employment_documents').upsert({
+    candidate_id: candidateId, kind, file_name: file.name, storage_path: upload.path, signed_url: upload.signedUrl,
+    mime_type: upload.mimeType, size_bytes: upload.sizeBytes, uploaded_by: session.id, uploaded_at: new Date().toISOString(),
+  }, { onConflict: 'candidate_id,kind' });
+  if (error) throw new Error(`Failed to save document: ${error.message}`);
+  await writeHistory(supabase, candidateId, session, [{ field: 'pre_employment_document_uploaded', oldValue: null, newValue: kind, summary: `Uploaded pre-employment ${kind.replace(/_/g, ' ')}` }]);
+  revalidatePath(`/recruiting/candidates/${candidateId}`);
+}
+
+export async function sendCandidateDocumentPackage(candidateId: number): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
+  const supabase = createAdminClient();
+  const { data: candidate } = await supabase.from('candidates').select('full_name, email, position, status').eq('id', candidateId).maybeSingle();
+  if (!candidate) throw new Error('Candidate not found');
+  if (candidate.status !== 'offered') throw new Error('Documents can only be sent while a candidate is offered');
+  if (!candidate.email?.trim()) throw new Error('Candidate has no email address');
+  const { data, error: documentsError } = await supabase.from('candidate_pre_employment_documents')
+    .select('id, kind, file_name, signed_url').eq('candidate_id', candidateId);
+  if (documentsError) throw new Error(`Failed to load documents: ${documentsError.message}`);
+  const documents = (data ?? []) as Array<{ id: number; kind: string; file_name: string; signed_url: string }>;
+  const requiredKinds = ['sow', 'job_description', 'ai_policy', 'nda'];
+  const missing = requiredKinds.filter(kind => !documents.some(document => document.kind === kind));
+  if (missing.length) throw new Error(`Upload all documents before sending: ${missing.map(kind => kind.replace(/_/g, ' ')).join(', ')}`);
+  const result = await notifyOnboardingWebhook({
+    onboarderId: candidateId, template: 'pre-employment-documents-send', event: 'manual_send',
+    context: { candidate_id: candidateId, full_name: candidate.full_name, personal_email: candidate.email.trim(), role_title: candidate.position ?? '', documents: documents.map(document => ({ kind: document.kind, name: document.file_name, url: document.signed_url })), onboarding_lead: session.name, requested_by_email: session.email },
+  });
+  await writeHistory(supabase, candidateId, session, [result.ok
+    ? { field: 'pre_employment_documents_sent', oldValue: null, newValue: candidate.email, summary: 'Pre-employment document package sent to candidate' }
+    : { field: 'pre_employment_documents_send_failed', oldValue: 'documents', newValue: null, summary: `Pre-employment document package email FAILED: ${result.error}` },
+  ]);
+  if (!result.ok) throw new Error(result.error);
+  const { error } = await supabase.from('candidate_pre_employment_documents').update({ sent_at: new Date().toISOString() }).in('id', documents.map(document => document.id));
+  if (error) throw new Error(`Document package email sent but could not record delivery: ${error.message}`);
+  revalidatePath(`/recruiting/candidates/${candidateId}`);
+}
+
+/**
+ * Records the manually verified SOW signature, then uses the same existing
+ * hired-status action for the Recruitment -> Onboarding handoff. That action
+ * owns the idempotent candidate_id-based onboarder creation.
+ */
+export async function markCandidateSowSigned(candidateId: number): Promise<void> {
+  const session = await requireSession();
+  if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
+  const supabase = createAdminClient();
+  const { data: candidate } = await supabase
+    .from('candidates').select('status').eq('id', candidateId).maybeSingle();
+  if (!candidate) throw new Error('Candidate not found');
+  if (candidate.status !== 'offered') throw new Error('Only offered candidates can be marked as having signed their SOW');
+
+  const { data: sow, error: sowError } = await supabase
+    .from('candidate_pre_employment_documents')
+    .select('id, sent_at, signed_at').eq('candidate_id', candidateId).eq('kind', 'sow').maybeSingle();
+  if (sowError) throw new Error(`Failed to load Statement of Work: ${sowError.message}`);
+  if (!sow) throw new Error('Upload the Statement of Work before marking it signed');
+  if (!sow.sent_at) throw new Error('Send the document package before marking the Statement of Work signed');
+  if (sow.signed_at) throw new Error('The Statement of Work is already marked signed');
+
+  const signedAt = new Date().toISOString();
+  const { error: signError } = await supabase
+    .from('candidate_pre_employment_documents').update({ signed_at: signedAt }).eq('id', sow.id).is('signed_at', null);
+  if (signError) throw new Error(`Failed to mark Statement of Work signed: ${signError.message}`);
+  await writeHistory(supabase, candidateId, session, [{
+    field: 'sow_signed', oldValue: null, newValue: signedAt,
+    summary: 'Statement of Work marked signed; candidate is moving to hired and onboarding',
+  }]);
+
+  // Do not duplicate the handoff. updateCandidateStatus owns the hired history,
+  // status automation, and idempotent onboarder creation.
+  await updateCandidateStatus(candidateId, 'hired');
+  revalidatePath(`/recruiting/candidates/${candidateId}`);
+}
+
 // Teams whose active members are emailed every new public application. Read
 // live from `users`, so future HR/recruiting hires are included automatically.
 // Mirrors the recruiting-access teams in lib/rbac.ts (core HR + recruiting).
@@ -281,20 +772,35 @@ export async function createCandidate(formData: FormData) {
   const fullNameRaw = String(formData.get('fullName')    ?? '').trim();
   const emailRaw    = String(formData.get('email')       ?? '').trim() || null;
   const phoneRaw    = String(formData.get('phone')       ?? '').trim() || null;
-  const position    = String(formData.get('position')    ?? '').trim() || null;
+  const positionIdRaw = String(formData.get('positionId') ?? '').trim();
   const source      = String(formData.get('source')      ?? '').trim() || null;
   const linkedinUrl = String(formData.get('linkedinUrl') ?? '').trim() || null;
   const notes       = String(formData.get('notes')       ?? '').trim() || null;
 
   if (!fullNameRaw) throw new Error('Full name is required');
+  const positionId = Number(positionIdRaw);
+  if (!Number.isInteger(positionId) || positionId <= 0) {
+    throw new Error('Select an open position');
+  }
 
   const fullName = toProperName(fullNameRaw);
   const phone    = phoneRaw ? formatPhoneNumber(phoneRaw) : null;
   const email    = emailRaw;
 
   const supabase = createAdminClient();
+  // Do not trust a position title submitted by the browser. Resolve the ID
+  // server-side so the candidate remains linked to the actual ATS position.
+  const { data: selectedPosition, error: positionError } = await supabase
+    .from('positions')
+    .select('id, job_title, is_open')
+    .eq('id', positionId)
+    .maybeSingle();
+  if (positionError) throw new Error(`Failed to load selected position: ${positionError.message}`);
+  if (!selectedPosition || !selectedPosition.is_open || !selectedPosition.job_title?.trim()) {
+    throw new Error('Select an open position');
+  }
+  const position = selectedPosition.job_title.trim();
   const applicationCode = await mintApplicationCode(supabase);
-  const positionId = await findPositionIdByTitle(supabase, position);
 
   const insertPayload = {
     full_name:        fullName,

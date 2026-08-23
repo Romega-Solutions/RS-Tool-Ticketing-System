@@ -27,17 +27,27 @@
     },
     {
       "parameters": {
+        "jsCode": "const to = String($json.to || '').trim().toLowerCase();\nconst payload = ($('Webhook').first().json.body ?? $('Webhook').first().json);\nconst ccRecipient = String(payload.context?.onboarding_lead_email || payload.context?.requested_by_email || '').trim().toLowerCase();\nconst cc = ccRecipient && ccRecipient !== to ? ccRecipient : '';\n\nreturn [{ json: { ...$json, cc } }];"
+      },
+      "id": "node-add-cc",
+      "name": "Add CC Recipient",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 304]
+    },
+    {
+      "parameters": {
         "sendTo": "={{ $json.to }}",
         "subject": "={{ $json.subject }}",
         "emailType": "text",
         "message": "={{ $json.body }}",
-        "options": {}
+        "options": { "ccEmail": "={{ $json.cc }}" }
       },
       "id": "node-send-gmail",
       "name": "Send Gmail",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2,
-      "position": [720, 304],
+      "position": [920, 304],
       "credentials": { "gmailOAuth2": { "id": "REPLACE_ME", "name": "Gmail — Onboarding" } }
     },
     {
@@ -49,12 +59,13 @@
       "name": "Respond OK",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [960, 304]
+      "position": [1160, 304]
     }
   ],
   "connections": {
     "Webhook":     { "main": [[{ "node": "Build Email", "type": "main", "index": 0 }]] },
-    "Build Email": { "main": [[{ "node": "Send Gmail",  "type": "main", "index": 0 }]] },
+    "Build Email": { "main": [[{ "node": "Add CC Recipient", "type": "main", "index": 0 }]] },
+    "Add CC Recipient": { "main": [[{ "node": "Send Gmail",  "type": "main", "index": 0 }]] },
     "Send Gmail":  { "main": [[{ "node": "Respond OK",  "type": "main", "index": 0 }]] }
   },
   "settings": { "executionOrder": "v1" },
