@@ -26,9 +26,38 @@ BEGIN
       status       TEXT NOT NULL DEFAULT 'scheduled'
                    CHECK (status IN ('scheduled', 'finalized', 'cancelled')),
       finalized_at TIMESTAMPTZ,
+      google_calendar_event_id TEXT,
+      google_meet_url TEXT,
+      meeting_created_at TIMESTAMPTZ,
       created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       CHECK (cutoff_at < starts_at)
+    );
+
+    ALTER TABLE onboarding_sessions
+      ADD COLUMN IF NOT EXISTS google_calendar_event_id TEXT,
+      ADD COLUMN IF NOT EXISTS google_meet_url TEXT,
+      ADD COLUMN IF NOT EXISTS meeting_created_at TIMESTAMPTZ;
+
+    -- Payroll data is intentionally kept off the general onboarders row.
+    -- RLS below permits only server-side service-role access.
+    CREATE TABLE IF NOT EXISTS contractor_payment_details (
+      onboarder_id         INTEGER PRIMARY KEY REFERENCES onboarders(id) ON DELETE CASCADE,
+      hourly_rate          NUMERIC(10, 2) NOT NULL CHECK (hourly_rate >= 0),
+      wise_tag             TEXT,
+      bank_name            TEXT,
+      bank_account_name    TEXT,
+      bank_account_number  TEXT,
+      received_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CHECK (
+        (wise_tag IS NOT NULL AND BTRIM(wise_tag) <> '')
+        OR (
+          bank_name IS NOT NULL AND BTRIM(bank_name) <> ''
+          AND bank_account_name IS NOT NULL AND BTRIM(bank_account_name) <> ''
+          AND bank_account_number IS NOT NULL AND BTRIM(bank_account_number) <> ''
+        )
+      )
     );
 
     ALTER TABLE onboarders
@@ -41,7 +70,10 @@ BEGIN
       ADD COLUMN IF NOT EXISTS meeting_availability TEXT NOT NULL DEFAULT 'pending'
       CHECK (meeting_availability IN ('pending', 'yes', 'no')),
       ADD COLUMN IF NOT EXISTS meeting_availability_submitted_at TIMESTAMPTZ,
-      ADD COLUMN IF NOT EXISTS onboarding_form_token_hash TEXT;
+      ADD COLUMN IF NOT EXISTS onboarding_form_token_hash TEXT,
+      ADD COLUMN IF NOT EXISTS onboarding_form_reminder_sent_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS onboarding_lead_teams_email TEXT,
+      ADD COLUMN IF NOT EXISTS direct_supervisor_teams_email TEXT;
 
     CREATE INDEX IF NOT EXISTS onboarders_onboarding_lead_id_idx
       ON onboarders(onboarding_lead_id);
@@ -155,6 +187,8 @@ CREATE INDEX IF NOT EXISTS candidate_pre_employment_requests_candidate_form_idx
 CREATE INDEX IF NOT EXISTS candidate_pre_employment_requests_open_idx
   ON candidate_pre_employment_requests(form_key, expires_at)
   WHERE submitted_at IS NULL AND invalidated_at IS NULL;
+ALTER TABLE candidate_pre_employment_requests
+  ADD COLUMN IF NOT EXISTS last_reminder_sent_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS candidate_pre_employment_submissions_candidate_idx
   ON candidate_pre_employment_submissions(candidate_id, form_key, submitted_at DESC);
 
@@ -208,6 +242,8 @@ CREATE INDEX IF NOT EXISTS candidate_references_candidate_idx
   ON candidate_references(candidate_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS candidate_references_pending_send_idx
   ON candidate_references(candidate_id) WHERE request_sent_at IS NULL;
+ALTER TABLE candidate_references
+  ADD COLUMN IF NOT EXISTS last_reminder_sent_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS candidate_reference_form_requests_reference_idx
   ON candidate_reference_form_requests(reference_id, created_at DESC);
 
@@ -259,6 +295,8 @@ CREATE INDEX IF NOT EXISTS candidate_employment_verifications_candidate_idx
   ON candidate_employment_verifications(candidate_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS candidate_employment_verification_requests_idx
   ON candidate_employment_verification_form_requests(verification_id, created_at DESC);
+ALTER TABLE candidate_employment_verifications
+  ADD COLUMN IF NOT EXISTS last_reminder_sent_at TIMESTAMPTZ;
 
 -- Uploaded documents. The ALTER statements reconcile environments that had
 -- an earlier version of this table before send/sign tracking was added.
@@ -299,6 +337,7 @@ ALTER TABLE candidate_employment_verification_form_requests ENABLE ROW LEVEL SEC
 ALTER TABLE candidate_employment_verification_form_submissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE candidate_pre_employment_documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE onboarding_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contractor_payment_details ENABLE ROW LEVEL SECURITY;
 
 -- Keep the private storage bucket in sync, including DOCX support.
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)

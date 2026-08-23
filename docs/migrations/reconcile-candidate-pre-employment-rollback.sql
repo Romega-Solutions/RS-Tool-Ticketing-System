@@ -36,6 +36,7 @@ BEGIN
     'candidate_employment_verification_form_requests',
     'candidate_employment_verification_form_submissions',
     'candidate_pre_employment_documents',
+    'contractor_payment_details',
     'onboarding_sessions'
   ] LOOP
     IF to_regclass('public.' || table_name) IS NOT NULL THEN
@@ -123,6 +124,7 @@ DROP TABLE IF EXISTS public.candidate_references;
 DROP TABLE IF EXISTS public.candidate_pre_employment_documents;
 DROP TABLE IF EXISTS public.candidate_pre_employment_submissions;
 DROP TABLE IF EXISTS public.candidate_pre_employment_requests;
+DROP TABLE IF EXISTS public.contractor_payment_details;
 
 DROP INDEX IF EXISTS public.onboarders_direct_supervisor_id_idx;
 DROP INDEX IF EXISTS public.onboarders_onboarding_form_token_hash_idx;
@@ -135,6 +137,9 @@ ALTER TABLE public.onboarders
   DROP COLUMN IF EXISTS meeting_availability_submitted_at,
   DROP COLUMN IF EXISTS meeting_availability,
   DROP COLUMN IF EXISTS onboarding_form_token_hash,
+  DROP COLUMN IF EXISTS onboarding_form_reminder_sent_at,
+  DROP COLUMN IF EXISTS onboarding_lead_teams_email,
+  DROP COLUMN IF EXISTS direct_supervisor_teams_email,
   DROP COLUMN IF EXISTS onboarding_lead_id,
   DROP COLUMN IF EXISTS onboarding_session_id;
 

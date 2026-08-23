@@ -1,0 +1,104 @@
+{
+  "name": "Romega Form Reminders",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "form-reminder",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "form-reminder"
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = ($input.first().json.body ?? $input.first().json);\n\nconst typeLabel = {\n  background_check: 'background-check form',\n  reference_check: 'reference-check form',\n  employment_verification: 'employment-verification form',\n  onboarding_form: 'onboarding form',\n}[payload.reminderType] || 'requested form';\n\nconst to = String(payload.recipientEmail || '').trim();\nconst name = String(payload.recipientName || 'there').trim();\nconst person = String(payload.subjectName || '').trim();\nif (!to) throw new Error('recipientEmail is required');\n\nconst subject = `Reminder: ${typeLabel} | Romega Solutions`;\nconst body = `Hi ${name},\n\nThis is a friendly reminder to complete the ${typeLabel}${person ? ` for ${person}` : ''}. Please use the original email/link we sent you.\n\nIf you cannot find the original email or need help, please reply to this message.\n\nThank you,\nRomega Solutions`;\n\nreturn [{ json: { to, subject, body, template: 'manual-form-reminder', source: payload.source, reminderType: payload.reminderType } }];"
+      },
+      "id": "node-build-email",
+      "name": "Build Reminder Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const email = String($json.to || '').trim().toLowerCase();\nconst payload = ($('Webhook').first().json.body ?? $('Webhook').first().json);\nconst cc = [...new Set(\n  [payload.requestedByEmail, payload.onboardingLeadEmail]\n    .map((value) => String(value || '').trim().toLowerCase())\n    .filter((value) => value && value !== email),\n)].join(',');\n\nreturn [{ json: { ...$json, cc } }];"
+      },
+      "id": "node-add-cc",
+      "name": "Add CC Recipients",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = ($('Webhook').first().json.body ?? $('Webhook').first().json);\nconst escapeHtml = (value) => String(value ?? '').replace(/[&<>\"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' })[character]);\nconst typeLabel = {\n  background_check: 'background-check form',\n  reference_check: 'reference-check form',\n  employment_verification: 'employment-verification form',\n  onboarding_form: 'onboarding form',\n}[payload.reminderType] || 'requested form';\nconst name = escapeHtml(payload.recipientName || 'there');\nconst subjectName = escapeHtml(payload.subjectName || '');\nconst subjectSuffix = subjectName ? ' for ' + subjectName : '';\n\nconst htmlBody = [\n  '<!doctype html>',\n  '<html lang=' + \"'en'\" + '>',\n  '<body style=' + \"'margin:0;padding:0;background:#f4f7fb;font-family:Arial,Helvetica,sans-serif;color:#1f2937;'\" + '>',\n  '<table role=' + \"'presentation'\" + ' width=' + \"'100%'\" + ' cellspacing=' + \"'0'\" + ' cellpadding=' + \"'0'\" + ' style=' + \"'padding:32px 16px;'\" + '><tr><td align=' + \"'center'\" + '>',\n  '<table role=' + \"'presentation'\" + ' width=' + \"'100%'\" + ' cellspacing=' + \"'0'\" + ' cellpadding=' + \"'0'\" + ' style=' + \"'max-width:600px;background:#ffffff;border:1px solid #d9e2f0;border-radius:16px;overflow:hidden;'\" + '>',\n  '<tr><td style=' + \"'padding:28px 36px 24px;background:#0f4c81;color:#ffffff;'\" + '><p style=' + \"'margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:1.8px;'\" + '>ROMEGA SOLUTIONS</p><h1 style=' + \"'margin:0;font-size:27px;line-height:1.25;font-family:Georgia,serif;'\" + '>A quick reminder</h1></td></tr>',\n  '<tr><td style=' + \"'padding:34px 36px 20px;font-size:16px;line-height:1.65;'\" + '>',\n  '<p style=' + \"'margin:0 0 20px;'\" + '>Hi ' + name + ',</p>',\n  '<p style=' + \"'margin:0 0 24px;'\" + '>Just a friendly reminder to complete the <strong>' + escapeHtml(typeLabel) + '</strong>' + subjectSuffix + '.</p>',\n  '<div style=' + \"'margin:0 0 24px;padding:18px 20px;border-left:4px solid #1d8acb;background:#edf7ff;border-radius:4px;'\" + '><p style=' + \"'margin:0;font-size:14px;line-height:1.55;color:#174a6b;'\" + '><strong>Please use the original email and link we sent you.</strong><br>That link remains the secure way to submit your form.</p></div>',\n  '<p style=' + \"'margin:0 0 26px;'\" + '>Cannot find the original email or need help? Reply to this message and we will assist you.</p>',\n  '<p style=' + \"'margin:0;'\" + '>Thank you,<br><strong>Romega Solutions</strong></p>',\n  '</td></tr>',\n  '<tr><td style=' + \"'padding:18px 36px;background:#f8fafc;border-top:1px solid #e5eaf1;color:#64748b;font-size:12px;line-height:1.5;'\" + '>This is a reminder about your pending Romega Solutions form.</td></tr>',\n  '</table></td></tr></table>',\n  '</body></html>',\n].join('');\n\nreturn [{ json: { ...$json, htmlBody } }];"
+      },
+      "id": "node-build-reminder-html",
+      "name": "Build Reminder HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.htmlBody }}",
+        "options": {
+          "ccEmail": "={{ $json.cc }}"
+        }
+      },
+      "id": "node-send-gmail",
+      "name": "Send Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1140, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_ME",
+          "name": "Gmail - Onboarding"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true, template: $('Build Reminder Email').first().json.template, sentTo: $('Build Reminder Email').first().json.to } }}"
+      },
+      "id": "node-respond-ok",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1380, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Build Reminder Email", "type": "main", "index": 0 }]]
+    },
+    "Build Reminder Email": {
+      "main": [[{ "node": "Add CC Recipients", "type": "main", "index": 0 }]]
+    },
+    "Add CC Recipients": {
+      "main": [[{ "node": "Build Reminder HTML", "type": "main", "index": 0 }]]
+    },
+    "Build Reminder HTML": {
+      "main": [[{ "node": "Send Gmail", "type": "main", "index": 0 }]]
+    },
+    "Send Gmail": {
+      "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "versionId": "form-reminders-v1",
+  "meta": {
+    "description": "One shared, manual reminder sender for Recruitment and Onboarding. It receives source, reminderType, recipientEmail, recipientName, subjectName, requestedByEmail, and optional onboardingLeadEmail/roleTitle. Recruitment reminders CC the requester; onboarding reminders CC the assigned onboarding lead. It never receives or creates a Jotform URL. Set the production webhook URL as N8N_FORM_REMINDER_URL in the app after activating."
+  }
+}

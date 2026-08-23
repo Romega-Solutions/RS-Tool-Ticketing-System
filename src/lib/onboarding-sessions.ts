@@ -11,6 +11,20 @@ export type OnboardingSession = {
   status: 'scheduled' | 'finalized' | 'cancelled';
 };
 
+type OnboardingContact = {
+  id: number | null;
+  name: string | null;
+  email: string | null;
+};
+
+type FinalizerAttendee = {
+  id: number;
+  full_name: string;
+  personal_email: string;
+  onboardingLead: OnboardingContact;
+  directSupervisor: OnboardingContact;
+};
+
 const MANILA_TIME_ZONE = 'Asia/Manila';
 const FRIDAY = 5;
 
@@ -244,18 +258,60 @@ export async function finalizeTodayOnboardingSession(now = new Date()) {
     .eq('status', 'scheduled');
   if (error) throw new Error(`Failed to load today's onboarding session: ${error.message}`);
 
-  const results: Array<{ session: OnboardingSession; confirmed: Array<{ id: number; full_name: string; personal_email: string }>; deferred: Array<{ id: number; full_name: string; personal_email: string }>; nextSession: OnboardingSession | null }> = [];
+  const results: Array<{ session: OnboardingSession; confirmed: FinalizerAttendee[]; deferred: FinalizerAttendee[]; nextSession: OnboardingSession | null }> = [];
   for (const rawSession of (sessions ?? [])) {
     const session = rawSession as OnboardingSession;
     if (new Date(session.cutoff_at) > now) continue;
 
     const { data: members, error: memberError } = await supabase.from('onboarders')
-      .select('id, full_name, personal_email, meeting_availability, onboarding_form_submitted_at')
+      .select('id, full_name, personal_email, meeting_availability, onboarding_form_submitted_at, onboarding_lead_id, onboarding_lead, onboarding_lead_teams_email, direct_supervisor_id, direct_supervisor, direct_supervisor_teams_email')
       .eq('onboarding_session_id', session.id);
     if (memberError) throw new Error(`Failed to load cohort members: ${memberError.message}`);
-    const cohort = (members ?? []) as Array<{ id: number; full_name: string; personal_email: string; meeting_availability: MeetingAvailability; onboarding_form_submitted_at: string | null }>;
-    const confirmed = cohort.filter(person => person.meeting_availability === 'yes' && !!person.onboarding_form_submitted_at);
-    const deferred = cohort.filter(person => !confirmed.includes(person));
+    const cohort = (members ?? []) as Array<{
+      id: number;
+      full_name: string;
+      personal_email: string;
+      meeting_availability: MeetingAvailability;
+      onboarding_form_submitted_at: string | null;
+      onboarding_lead_id: number | null;
+      onboarding_lead: string | null;
+      onboarding_lead_teams_email: string | null;
+      direct_supervisor_id: number | null;
+      direct_supervisor: string | null;
+      direct_supervisor_teams_email: string | null;
+    }>;
+    const contactIds = Array.from(new Set(cohort.flatMap(person =>
+      [person.onboarding_lead_id, person.direct_supervisor_id].filter((id): id is number => typeof id === 'number'),
+    )));
+    const contactsById = new Map<number, { name: string | null; email: string | null }>();
+    if (contactIds.length) {
+      const { data: contacts, error: contactsError } = await supabase.from('users')
+        .select('id, name, email')
+        .in('id', contactIds);
+      if (contactsError) throw new Error(`Failed to load onboarding contacts: ${contactsError.message}`);
+      for (const contact of contacts ?? []) {
+        contactsById.set(contact.id, { name: contact.name, email: contact.email });
+      }
+    }
+    const toContact = (id: number | null, fallbackName: string | null, teamsEmail: string | null): OnboardingContact => {
+      const contact = id ? contactsById.get(id) : undefined;
+      return {
+        id,
+        name: contact?.name?.trim() || fallbackName?.trim() || null,
+        email: teamsEmail?.trim() || contact?.email?.trim() || null,
+      };
+    };
+    const enrichedCohort = cohort.map(person => ({
+      id: person.id,
+      full_name: person.full_name,
+      personal_email: person.personal_email,
+      meeting_availability: person.meeting_availability,
+      onboarding_form_submitted_at: person.onboarding_form_submitted_at,
+      onboardingLead: toContact(person.onboarding_lead_id, person.onboarding_lead, person.onboarding_lead_teams_email),
+      directSupervisor: toContact(person.direct_supervisor_id, person.direct_supervisor, person.direct_supervisor_teams_email),
+    }));
+    const confirmed = enrichedCohort.filter(person => person.meeting_availability === 'yes' && !!person.onboarding_form_submitted_at);
+    const deferred = enrichedCohort.filter(person => !confirmed.includes(person));
     let nextSession: OnboardingSession | null = null;
 
     if (deferred.length) {

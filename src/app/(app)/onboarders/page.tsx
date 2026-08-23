@@ -4,7 +4,7 @@ import {
   GraduationCap,
   ShieldCheck,
   CalendarCheck,
-  Workflow,
+  UserCheck,
   AlertCircle,
   ArrowRight,
   UserPlus2,
@@ -29,7 +29,9 @@ import { STATUS_LABEL, STATUS_COLOR } from "./onboarder-row";
 import { CreateOnboarderForm } from "./onboarder-forms";
 import { OnboarderFilterBar } from "./onboarder-filter-bar";
 import { OnboardingHelpButton } from "./onboarding-help";
+import { SendOnboardingFormReminderButton } from "./onboarder-actions";
 import { listOnboardingLeadOptions } from "@/lib/onboarding-lead";
+import { manilaDate } from "@/lib/onboarding-sessions";
 
 // ─── Stage groupings (3 happy lanes + 1 terminal lane) ──────────────────────
 
@@ -67,6 +69,12 @@ type Row = {
   role_title: string | null;
   team: string | null;
   direct_supervisor: string | null;
+  onboarding_session_id: number | null;
+  meeting_availability: "pending" | "yes" | "no";
+  onboarding_form_submitted_at: string | null;
+  onboarding_form_reminder_sent_at: string | null;
+  last_email_template: string | null;
+  last_email_sent_at: string | null;
   status: string;
   start_date: string | null;
   sow_signed_at: string | null;
@@ -131,7 +139,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
   const { data, error } = await supabase
     .from("onboarders")
     .select(
-      "id, full_name, personal_email, onboarder_type, role_title, team, direct_supervisor, status, start_date, sow_signed_at, created_at",
+      "id, full_name, personal_email, onboarder_type, role_title, team, direct_supervisor, onboarding_session_id, meeting_availability, onboarding_form_submitted_at, onboarding_form_reminder_sent_at, last_email_template, last_email_sent_at, status, start_date, sow_signed_at, created_at",
     )
     .order("created_at", { ascending: false })
     .limit(300);
@@ -173,17 +181,24 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
     return d >= monday && d <= sunday;
   }).length;
 
-  const workflowEnvKeys = [
-    "N8N_BG_CHECK_INITIATE_URL",
-    "N8N_REFERENCE_REQUEST_URL",
-    "N8N_EMPLOYMENT_VERIFICATION_URL",
-    "N8N_ONBOARDING_WELCOME_URL",
-    "N8N_GMAIL_SIGNATURE_NUDGE_URL",
-    "N8N_GROUP_CHAT_ANNOUNCE_URL",
-  ];
-  const configuredCount = workflowEnvKeys.filter((k) =>
-    process.env[k]?.trim(),
-  ).length;
+  // The upcoming Friday cohort is created when the first welcome email is
+  // sent. Once Friday's cutoff runs, the same row becomes finalized.
+  const { data: fridaySession } = await supabase
+    .from("onboarding_sessions")
+    .select("id, session_date")
+    .gte("session_date", manilaDate())
+    .in("status", ["scheduled", "finalized"])
+    .order("session_date", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const { count: fridayAttendeeCount } = fridaySession
+    ? await supabase
+      .from("onboarders")
+      .select("id", { count: "exact", head: true })
+      .eq("onboarding_session_id", fridaySession.id)
+      .eq("meeting_availability", "yes")
+      .not("onboarding_form_submitted_at", "is", null)
+    : { count: 0 };
 
   return (
     <div className="space-y-6">
@@ -249,10 +264,10 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
               hint="starting Mon–Sun"
             />
             <StatCard
-              icon={<Workflow className="w-4 h-4" />}
-              label="Workflows configured"
-              value={`${configuredCount} / ${workflowEnvKeys.length}`}
-              hint="n8n MVP webhooks"
+              icon={<UserCheck className="w-4 h-4" />}
+              label="Friday attendees"
+              value={String(fridayAttendeeCount ?? 0)}
+              hint={fridaySession ? `${formatDateShort(fridaySession.session_date)} · confirmed` : "no upcoming cohort"}
               accent
             />
           </div>
@@ -272,7 +287,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
                 <EmptyState />
               ) : (
                 <div className="p-4 lg:p-6">
-                  <Kanban rows={filtered} />
+                  <Kanban rows={filtered} fridaySession={fridaySession} />
                 </div>
               )}
             </CardContent>
@@ -285,7 +300,13 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
 
 // ─── Kanban ─────────────────────────────────────────────────────────────────
 
-function Kanban({ rows }: { rows: Row[] }) {
+function Kanban({
+  rows,
+  fridaySession,
+}: {
+  rows: Row[];
+  fridaySession: { id: number; session_date: string } | null;
+}) {
   const byStatus = new Map<OnboarderStatus, Row[]>();
   for (const s of ALLOWED_STATUSES) byStatus.set(s, []);
   for (const r of rows) {
@@ -317,7 +338,7 @@ function Kanban({ rows }: { rows: Row[] }) {
 
             <div className="space-y-3">
               {lane.statuses.map((s) => (
-                <StageColumn key={s} status={s} rows={byStatus.get(s) ?? []} />
+                <StageColumn key={s} status={s} rows={byStatus.get(s) ?? []} fridaySession={fridaySession} />
               ))}
             </div>
           </div>
@@ -330,9 +351,11 @@ function Kanban({ rows }: { rows: Row[] }) {
 function StageColumn({
   status,
   rows,
+  fridaySession,
 }: {
   status: OnboarderStatus;
   rows: Row[];
+  fridaySession: { id: number; session_date: string } | null;
 }) {
   const label = STATUS_LABEL[status];
   return (
@@ -354,7 +377,7 @@ function StageColumn({
       ) : (
         <ul className="space-y-2">
           {rows.map((r) => (
-            <Card_ key={r.id} row={r} />
+            <Card_ key={r.id} row={r} fridaySession={fridaySession} />
           ))}
         </ul>
       )}
@@ -362,9 +385,26 @@ function StageColumn({
   );
 }
 
-function Card_({ row }: { row: Row }) {
+function Card_({
+  row,
+  fridaySession,
+}: {
+  row: Row;
+  fridaySession: { id: number; session_date: string } | null;
+}) {
   const typeLabel =
     TYPE_LABEL[row.onboarder_type as OnboarderType] ?? row.onboarder_type;
+  const isInFridayCohort = row.onboarding_session_id === fridaySession?.id;
+  const attendance = !isInFridayCohort
+    ? null
+    : row.meeting_availability === "yes" && row.onboarding_form_submitted_at
+      ? { label: "Attending", className: "bg-emerald-50 text-emerald-700 border-emerald-200" }
+      : row.meeting_availability === "no"
+        ? { label: "Can’t attend", className: "bg-amber-50 text-amber-700 border-amber-200" }
+        : { label: "Form pending", className: "bg-(--rs-neutral-grey-50) text-(--rs-neutral-grey-600) border-(--rs-neutral-grey-200)" };
+  const needsFormReminder = row.status === "pre_onboarding"
+    && !row.onboarding_form_submitted_at
+    && row.last_email_template === "welcome";
   return (
     <li>
       <Link
@@ -402,11 +442,24 @@ function Card_({ row }: { row: Row }) {
           )}
         </div>
 
+        {attendance && fridaySession && (
+          <div className="mt-2">
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${attendance.className}`}>
+              <CalendarCheck className="w-3 h-3" /> Friday {formatDateShort(fridaySession.session_date)} · {attendance.label}
+            </span>
+          </div>
+        )}
+
         <div className="mt-2 flex items-center gap-1 text-[10px] text-(--rs-neutral-grey-400)">
           <ArrowRight className="w-2.5 h-2.5" />
           Open record
         </div>
       </Link>
+      {needsFormReminder && (
+        <div className="mt-1 flex justify-end">
+          <SendOnboardingFormReminderButton id={row.id} />
+        </div>
+      )}
     </li>
   );
 }

@@ -224,7 +224,7 @@ export type OnboardingTemplate =
 export type OnboardingEvent = {
   onboarderId: number;
   template:    OnboardingTemplate;
-  event:       'status_changed' | 'manual_send' | 'scheduled_sweep';
+  event:       'status_changed' | 'manual_send' | 'manual_reminder' | 'scheduled_sweep';
   // Free-form context substituted into the template by n8n. The MVP uses
   // these keys: onboarder_type, full_name, first_name, role_title, team,
   // start_date, direct_supervisor, onboarding_lead, chief_of_staff,
@@ -296,6 +296,46 @@ export async function notifyOnboardingWebhook(
       ok: false,
       error: err instanceof Error ? err.message : 'network error',
     };
+  }
+}
+
+// One shared manual-reminder workflow. It is deliberately separate from the
+// initial Jotform-request workflows so it can send a short, linkless nudge.
+export type FormReminderEvent = {
+  source: 'recruitment' | 'onboarding';
+  reminderType: 'background_check' | 'reference_check' | 'employment_verification' | 'onboarding_form';
+  candidateId?: number;
+  onboarderId?: number;
+  recipientEmail: string;
+  recipientName: string;
+  subjectName: string;
+  roleTitle?: string;
+  requestedByEmail?: string;
+  onboardingLeadEmail?: string;
+};
+
+export async function notifyFormReminder(event: FormReminderEvent): Promise<OnboardingResult> {
+  const url = process.env.N8N_FORM_REMINDER_URL?.trim();
+  if (!url) return { ok: false, error: 'N8N_FORM_REMINDER_URL is not configured' };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(event),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return { ok: false, error: `n8n responded ${res.status}` };
+    let payload: unknown = null;
+    try { payload = await res.json(); } catch { /* empty body is OK */ }
+    const template = (payload as { template?: unknown })?.template;
+    return { ok: true, template: typeof template === 'string' ? template : 'manual-form-reminder' };
+  } catch (err) {
+    clearTimeout(timer);
+    return { ok: false, error: err instanceof Error ? err.message : 'network error' };
   }
 }
 

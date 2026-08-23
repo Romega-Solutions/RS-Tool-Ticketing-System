@@ -22,6 +22,7 @@ BEGIN
 
   FOREACH object_name IN ARRAY ARRAY[
     'public.onboarding_sessions',
+    'public.contractor_payment_details',
     'public.candidate_pre_employment_requests',
     'public.candidate_pre_employment_submissions',
     'public.candidate_references',
@@ -43,7 +44,9 @@ BEGIN
     'onboarding_session_id',
     'meeting_availability',
     'meeting_availability_submitted_at',
-    'onboarding_form_token_hash'
+    'onboarding_form_token_hash',
+    'onboarding_lead_teams_email',
+    'direct_supervisor_teams_email'
   ] LOOP
     IF EXISTS (
       SELECT 1

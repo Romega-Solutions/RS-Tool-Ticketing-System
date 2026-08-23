@@ -62,6 +62,14 @@ const WORKFLOWS: WorkflowEntry[] = [
     template: 'welcome',
   },
   {
+    envKey:   'N8N_FORM_REMINDER_URL',
+    label:    'Manual Form Reminders',
+    purpose:  'One shared, linkless reminder sender for overdue Recruitment and Onboarding form responses. It runs only when HR clicks a reminder button.',
+    stage:    'Manual button after 24h',
+    icon:     Mail,
+    phase:    'mvp',
+  },
+  {
     envKey:   'N8N_GMAIL_SIGNATURE_NUDGE_URL',
     label:    'Gmail + Signature Nudge',
     purpose:  'SOP §6 — Tells the new hire what format their Romega Gmail should follow and links to the signature builder.',
