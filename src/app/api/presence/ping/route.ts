@@ -15,10 +15,9 @@ const pingSchema = z.object({
   message: z.string().max(500).optional(),
 });
 
-const errorByReason: Record<'self' | 'not_online' | 'not_connected', { status: number; message: string }> = {
-  self:          { status: 400, message: 'You cannot ping yourself' },
-  not_online:    { status: 409, message: 'User is not clocked in right now' },
-  not_connected: { status: 409, message: 'User is not connected right now' },
+const errorByReason: Record<'self' | 'not_online', { status: number; message: string }> = {
+  self:       { status: 400, message: 'You cannot ping yourself' },
+  not_online: { status: 409, message: 'User is not clocked in right now' },
 };
 
 export const GET = route(async () => {

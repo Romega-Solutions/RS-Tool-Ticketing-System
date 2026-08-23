@@ -131,14 +131,14 @@ describe('route hardening coverage', () => {
     expect(await res.json()).toEqual({ error: 'targetMemberId is required.' });
   });
 
-  it('presence stream preserves its legacy plain-text unauthorized response', async () => {
+  it('presence live polling endpoint is blocked for unauthenticated requests', async () => {
     mockSession(null);
 
-    const { GET } = await import('@/app/api/presence/stream/route');
+    const { GET } = await import('@/app/api/presence/live/route');
     const res = await GET();
 
     expect(res.status).toBe(401);
-    expect(await res.text()).toBe('Unauthorized');
+    expect(await res.json()).toEqual({ error: 'Unauthorized' });
   });
 
   it('orgchart lookup converts unexpected lookup failures into a 500 envelope', async () => {
