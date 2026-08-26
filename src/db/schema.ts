@@ -217,6 +217,7 @@ export const candidatePreEmploymentRequests = pgTable('candidate_pre_employment_
   invalidatedAt:        text('invalidated_at'),
   provider:             text('provider'),
   providerSubmissionId: text('provider_submission_id'),
+  lastReminderSentAt:   text('last_reminder_sent_at'),
   createdAt:            text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (t) => [
   index('candidate_pre_employment_requests_candidate_form_idx').on(t.candidateId, t.formKey, t.createdAt),
@@ -254,6 +255,7 @@ export const candidateReferences = pgTable('candidate_references', {
   requestSentAt:    text('request_sent_at'),
   respondedAt:      text('responded_at'),
   outcome:          text('outcome'),
+  lastReminderSentAt: text('last_reminder_sent_at'),
   createdAt:        text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (t) => [
   unique('candidate_references_submission_number_unique').on(t.submissionId, t.referenceNumber),
@@ -304,6 +306,7 @@ export const candidateEmploymentVerifications = pgTable('candidate_employment_ve
   requestSentAt:      text('request_sent_at'),
   respondedAt:        text('responded_at'),
   outcome:            text('outcome'),
+  lastReminderSentAt: text('last_reminder_sent_at'),
   createdAt:          text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (t) => [
   unique('candidate_employment_verifications_submission_number_unique').on(t.submissionId, t.verificationNumber),
