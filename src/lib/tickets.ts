@@ -729,6 +729,16 @@ export async function removeProjectMember(projectId: string, userId: number): Pr
   if (error) throw new PlaneApiError(502, `project-members/${projectId}/${userId}`);
 }
 
+// Strips a user out of every project entirely — membership rows and any
+// work items they're still assigned to. Used when a user is deactivated.
+export async function removeUserFromAllProjects(userId: number): Promise<void> {
+  const sb = createAdminClient();
+  const { error: assigneeError } = await sb.from('work_item_assignees').delete().eq('user_id', userId);
+  if (assigneeError) throw new PlaneApiError(502, `work-item-assignees/user/${userId}`);
+  const { error: memberError } = await sb.from('project_members').delete().eq('user_id', userId);
+  if (memberError) throw new PlaneApiError(502, `project-members/user/${userId}`);
+}
+
 // ── Activity log ────────────────────────────────────────────────────────
 
 export interface WorkItemActivityEntry {
