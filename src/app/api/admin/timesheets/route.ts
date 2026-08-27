@@ -195,6 +195,88 @@ export const PATCH = route(async (req: Request) => {
   return NextResponse.json({ success: true });
 });
 
+// POST /api/admin/timesheets — admin-only creation of a session entry for a
+// day that has no clock-in record at all (e.g. the user was tagged present
+// but couldn't clock in themselves because they'd hit the weekly hour cap).
+//
+// Body: { userId: number, clockedInAt: ISO, clockedOutAt?: ISO | null }
+export const POST = route(async (req: Request) => {
+  const session = await requireAdmin();
+
+  let body: { userId?: number; clockedInAt?: string; clockedOutAt?: string | null };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  const userId = Number(body.userId);
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+  }
+  if (!body.clockedInAt) {
+    return NextResponse.json({ error: 'clockedInAt is required' }, { status: 400 });
+  }
+
+  const inDate = new Date(body.clockedInAt);
+  if (isNaN(inDate.getTime())) {
+    return NextResponse.json({ error: 'clockedInAt is not a valid date' }, { status: 400 });
+  }
+
+  let outDate: Date | null = null;
+  if (body.clockedOutAt) {
+    outDate = new Date(body.clockedOutAt);
+    if (isNaN(outDate.getTime())) {
+      return NextResponse.json({ error: 'clockedOutAt is not a valid date' }, { status: 400 });
+    }
+    if (outDate.getTime() <= inDate.getTime()) {
+      return NextResponse.json({ error: 'clockedOutAt must be after clockedInAt' }, { status: 400 });
+    }
+  }
+
+  const admin = createAdminClient();
+  const { data: targetUser } = await admin
+    .from('users')
+    .select('id, is_active')
+    .eq('id', userId)
+    .maybeSingle();
+  if (!targetUser || !targetUser.is_active) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
+  }
+
+  const insert: Record<string, string | number | null> = {
+    user_id:        userId,
+    clocked_in_at:  inDate.toISOString(),
+    clocked_out_at: outDate ? outDate.toISOString() : null,
+    date:           toLocalISO(inDate),
+    edited_by:      session.id,
+    edited_at:      new Date().toISOString(),
+  };
+
+  if (outDate) {
+    const durationSeconds = Math.round((outDate.getTime() - inDate.getTime()) / 1000);
+    const [weekSecondsBefore, baseSeconds] = await Promise.all([
+      weeklySecondsForUser(admin, userId, inDate),
+      baseWeeklySecondsForUser(admin, userId),
+    ]);
+    const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds, baseSeconds);
+    insert.duration_seconds = durationSeconds;
+    insert.is_overtime = isOvertime ? 1 : 0;
+    insert.overtime_seconds = isOvertime ? overtimeSeconds : null;
+  } else {
+    insert.duration_seconds = null;
+    insert.is_overtime = 0;
+    insert.overtime_seconds = null;
+  }
+
+  const { error } = await admin.from('timesheets').insert(insert);
+  if (error) {
+    return NextResponse.json({ error: `Create failed: ${error.message}` }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
+});
+
 // DELETE /api/admin/timesheets?id=N — admin-only removal of a session entry.
 export const DELETE = route(async (req: Request) => {
   await requireAdmin();
