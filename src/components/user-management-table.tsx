@@ -1022,7 +1022,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
         title="Remove this user?"
         description={
           pendingRemove
-            ? `${pendingRemove.name} will be deactivated — they won't be able to sign in. Their data is preserved, and you can restore them anytime.`
+            ? `${pendingRemove.name} will be deactivated — they won't be able to sign in, and they'll be removed from every project they're a member of or assigned work in. Their other data is preserved, and you can restore them anytime.`
             : ''
         }
         confirmLabel="Remove user"
