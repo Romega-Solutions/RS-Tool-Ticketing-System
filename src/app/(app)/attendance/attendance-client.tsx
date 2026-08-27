@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { AttendanceExportSheet } from '@/components/attendance-export-sheet';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { PersonAvatar } from '@/components/person-avatar';
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock, Search, X, Pencil, LogOut, Save, Trash2, ShieldCheck, Check, History } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock, Search, X, Pencil, LogOut, Save, Trash2, ShieldCheck, Check, History, Plus } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -172,6 +172,9 @@ function TimesheetDetailPanel({
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editIn,    setEditIn]    = useState('');
   const [editOut,   setEditOut]   = useState('');
+  // Date (YYYY-MM-DD) of a "tagged present but no clock-in session" day
+  // currently being filled in via the Add action below.
+  const [addingDate, setAddingDate] = useState<string | null>(null);
   const [dayDraft,  setDayDraft]  = useState<Record<string, string | null>>(
     () => Object.fromEntries(detailDays.map(d => [d.key, d.status])),
   );
@@ -219,6 +222,7 @@ function TimesheetDetailPanel({
   }
 
   function startEditTimes(entry: TimesheetEntry) {
+    setAddingDate(null);
     setEditingId(entry.id);
     setEditIn(toLocalInputValue(entry.clockedInAt));
     setEditOut(entry.clockedOutAt ? toLocalInputValue(entry.clockedOutAt) : '');
@@ -244,6 +248,38 @@ function TimesheetDetailPanel({
       onChanged();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Update failed');
+    } finally {
+      setAdminBusy(false);
+    }
+  }
+
+  function startAddTime(date: string) {
+    setEditingId(null);
+    setAddingDate(date);
+    setEditIn('');
+    setEditOut('');
+  }
+
+  async function saveNewEntry() {
+    if (!editIn) { alert('Clock-in time is required'); return; }
+    setAdminBusy(true);
+    try {
+      const res = await fetch('/api/admin/timesheets', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          userId,
+          clockedInAt:  new Date(editIn).toISOString(),
+          clockedOutAt: editOut ? new Date(editOut).toISOString() : null,
+        }),
+      });
+      const data = await res.json() as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Add failed');
+      setAddingDate(null);
+      setReloadKey(k => k + 1);
+      onChanged();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Add failed');
     } finally {
       setAdminBusy(false);
     }
@@ -347,6 +383,13 @@ function TimesheetDetailPanel({
   for (const e of entries) {
     (byDate[e.date] ??= []).push(e);
   }
+  // A day tagged Present with zero clock-in sessions (e.g. the user hit the
+  // weekly hour cap and couldn't clock in themselves) still needs an In/Out
+  // row with an Add action, so it can't fall under the "no sessions at all"
+  // shortcut below.
+  const hasPresentDayWithoutSession = detailDays.some(
+    d => d.status === 'present' && (byDate[d.date]?.length ?? 0) === 0,
+  );
 
   return (
     <>
@@ -498,7 +541,7 @@ function TimesheetDetailPanel({
                 <Clock className="w-3 h-3 text-(--rs-neutral-grey-400)" />
                 <span className="text-xs font-semibold text-(--rs-neutral-grey-600) uppercase tracking-wider">Clock-in / Clock-out log</span>
               </div>
-              {entries.length === 0 ? (
+              {entries.length === 0 && !hasPresentDayWithoutSession ? (
                 <p className="text-xs text-(--rs-neutral-grey-400) italic">No clock-in sessions recorded this week.</p>
               ) : (
                 <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-7">
@@ -516,7 +559,76 @@ function TimesheetDetailPanel({
                           </p>
                         )}
                         {daySessions.length === 0 ? (
-                          <p className="text-xs text-(--rs-neutral-grey-300)">—</p>
+                          day.status === 'present' ? (
+                            addingDate === day.date ? (
+                              <div className="bg-white border border-(--rs-neutral-grey-200) rounded px-2 py-1.5 space-y-1.5">
+                                <label className="block text-[10px] text-(--rs-neutral-grey-500) font-semibold">
+                                  Clock-in
+                                  <input
+                                    type="datetime-local"
+                                    value={editIn}
+                                    onChange={e => setEditIn(e.target.value)}
+                                    className="mt-0.5 block w-full rounded border border-(--rs-neutral-grey-200) px-1.5 py-0.5 text-[11px]"
+                                  />
+                                </label>
+                                <label className="block text-[10px] text-(--rs-neutral-grey-500) font-semibold">
+                                  Clock-out
+                                  <input
+                                    type="datetime-local"
+                                    value={editOut}
+                                    onChange={e => setEditOut(e.target.value)}
+                                    className="mt-0.5 block w-full rounded border border-(--rs-neutral-grey-200) px-1.5 py-0.5 text-[11px]"
+                                  />
+                                </label>
+                                <div className="flex gap-1 pt-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => saveNewEntry()}
+                                    disabled={adminBusy}
+                                    className="flex-1 inline-flex items-center justify-center gap-1 rounded bg-(--rs-primary-600) px-2 py-1 text-[10px] font-semibold text-white hover:bg-(--rs-primary-700) disabled:opacity-50"
+                                  >
+                                    {adminBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                                    Save
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setAddingDate(null)}
+                                    disabled={adminBusy}
+                                    className="rounded border border-(--rs-neutral-grey-200) px-2 py-1 text-[10px] font-semibold text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-100) disabled:opacity-50"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="bg-white border border-(--rs-neutral-grey-200) rounded px-2 py-1.5 space-y-0.5">
+                                <div className="flex items-center gap-1 text-xs text-(--rs-neutral-grey-400) font-medium">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-(--rs-neutral-grey-300) shrink-0" />
+                                  In: -
+                                </div>
+                                <div className="flex items-center gap-1 text-xs text-(--rs-neutral-grey-400) font-medium">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-(--rs-neutral-grey-300) shrink-0" />
+                                  Out: -
+                                </div>
+                                {isAdmin && (
+                                  <div className="flex items-center gap-1 pt-1 border-t border-(--rs-neutral-grey-100) mt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => startAddTime(day.date)}
+                                      disabled={adminBusy}
+                                      title="Add clock-in / clock-out"
+                                      aria-label={`Add clock-in / clock-out for ${day.label} ${day.date}`}
+                                      className="ml-auto rounded p-1 text-(--rs-neutral-grey-500) hover:bg-(--rs-primary-50) hover:text-(--rs-primary-700) transition-colors"
+                                    >
+                                      <Plus className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          ) : (
+                            <p className="text-xs text-(--rs-neutral-grey-300)">—</p>
+                          )
                         ) : (
                           daySessions.map(s => {
                             const isEditing = editingId === s.id;
