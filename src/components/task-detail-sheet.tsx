@@ -13,6 +13,7 @@ import {
 import { isAllowedTaskImageUpload } from '@/lib/task-image-uploads';
 import { RichTextEditor } from '@/components/rich-text-editor.client';
 import { RichText } from '@/components/rich-text';
+import { PersonAvatar } from '@/components/person-avatar';
 import { sanitizeRichText, isRichTextEmpty } from '@/lib/sanitize';
 import type { ProjectCaps } from '@/lib/permissions';
 
@@ -31,6 +32,7 @@ export interface SheetWorkItem {
   parent_id: number | null;
   labels: Array<{ id: number; name: string; color: string }>;
   assignee_users: Array<{ id: number; name: string; email: string }>;
+  creator: { id: number; name: string; email: string } | null;
 }
 
 interface SubIssueRow {
@@ -830,6 +832,15 @@ export function TaskDetailSheet({
                   </div>
                 )}
               </Field>
+
+              {item.creator && (
+                <Field label="Created by">
+                  <div className="flex items-center gap-2 px-1">
+                    <PersonAvatar name={item.creator.name} size={20} />
+                    <span className="text-sm text-(--rs-neutral-grey-700)">{item.creator.name}</span>
+                  </div>
+                </Field>
+              )}
 
               <Field label="Labels">
                 {projectLabels.length === 0 ? (
