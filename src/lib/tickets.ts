@@ -258,6 +258,7 @@ export interface WorkItemDetail extends Omit<PlaneWorkItem, 'labels'> {
   parent_id: number | null;
   labels: Array<{ id: number; name: string; color: string }>;
   assignee_users: Array<{ id: number; name: string; email: string }>;
+  creator: { id: number; name: string; email: string } | null;
 }
 
 export async function getWorkItemDetail(itemId: string): Promise<WorkItemDetail | null> {
@@ -266,7 +267,7 @@ export async function getWorkItemDetail(itemId: string): Promise<WorkItemDetail 
 
   const { data: wi, error } = await sb
     .from('work_items')
-    .select('id, project_id, sequence_id, name, description, priority, state_id, cycle_id, parent_id, target_date, completed_at, created_at, updated_at, archived, work_item_assignees(user_id, users(id, name, email)), work_item_labels(label_id, labels(id, name, color))')
+    .select('id, project_id, sequence_id, name, description, priority, state_id, cycle_id, parent_id, target_date, completed_at, created_at, updated_at, archived, created_by, work_item_assignees(user_id, users(id, name, email)), work_item_labels(label_id, labels(id, name, color))')
     .eq('id', id)
     .maybeSingle();
   if (error) throw new PlaneApiError(500, `work-items/${itemId}`);
@@ -292,6 +293,19 @@ export async function getWorkItemDetail(itemId: string): Promise<WorkItemDetail 
     .filter((l): l is Row => !!l)
     .map(l => ({ id: Number(l.id), name: String(l.name), color: String(l.color) }));
 
+  let creator: WorkItemDetail['creator'] = null;
+  if (r.created_by != null) {
+    const { data: creatorRow } = await sb
+      .from('users')
+      .select('id, name, email')
+      .eq('id', r.created_by)
+      .maybeSingle();
+    if (creatorRow) {
+      const c = creatorRow as Row;
+      creator = { id: Number(c.id), name: String(c.name ?? ''), email: String(c.email ?? '') };
+    }
+  }
+
   return {
     id: String(r.id),
     project_id: Number(r.project_id),
@@ -307,6 +321,7 @@ export async function getWorkItemDetail(itemId: string): Promise<WorkItemDetail 
     assignee_ids: assigneeIds,
     assignee_users: assigneeUsers,
     labels,
+    creator,
     target_date: (r.target_date as string | null) ?? null,
     completed_at: (r.completed_at as string | null) ?? null,
     created_at: String(r.created_at ?? ''),
@@ -1151,7 +1166,7 @@ export async function updateWorkItem(
 
 export async function createWorkItem(
   projectId: string,
-  data: { name: string; state?: string; priority?: string },
+  data: { name: string; state?: string; priority?: string; createdBy?: number },
 ): Promise<PlaneWorkItem> {
   const sb = createAdminClient();
   const pid = Number(projectId);
@@ -1170,6 +1185,7 @@ export async function createWorkItem(
     name: data.name,
     priority: data.priority ?? 'none',
     state_id: data.state ? Number(data.state) : null,
+    created_by: data.createdBy ?? null,
   }).select('id').single();
   if (error || !inserted) throw new PlaneApiError(502, `work-items create`);
 
