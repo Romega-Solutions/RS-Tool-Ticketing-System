@@ -60,7 +60,7 @@ export const POST = route(async (req: Request) => {
   if (!(await canCreateWorkItem(session, Number(projectId)))) throw forbidden();
 
   try {
-    const created = await createWorkItem(projectId, { name, state, priority });
+    const created = await createWorkItem(projectId, { name, state, priority, createdBy: session.id });
     await logActivity(Number(created.id), session.id, 'created', null, name);
     return NextResponse.json(created);
   } catch (err) {
