@@ -46,12 +46,8 @@ export interface RichTextEditorProps {
   enableEmoji?: boolean;
 }
 
-const FONT_SIZES = [
-  { label: 'Small',  value: '13px' },
-  { label: 'Normal', value: '16px' },
-  { label: 'Large',  value: '20px' },
-  { label: 'Huge',   value: '28px' },
-];
+const MIN_FONT_SIZE = 8;
+const MAX_FONT_SIZE = 96;
 
 // Lightweight curated set — no heavy emoji extension/asset pack.
 const EMOJIS = [
@@ -94,6 +90,7 @@ function Toolbar({ editor, trailing }: { editor: Editor | null; trailing?: React
   if (!editor) return null;
   const currentSize =
     (editor.getAttributes('textStyle').fontSize as string | undefined) ?? '';
+  const currentSizeInt = currentSize ? parseInt(currentSize, 10) : NaN;
 
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-2 py-1.5">
@@ -109,19 +106,26 @@ function Toolbar({ editor, trailing }: { editor: Editor | null; trailing?: React
 
       <span className="mx-1 h-5 w-px bg-(--rs-neutral-grey-200)" />
 
-      <select
-        aria-label="Font size"
-        value={currentSize}
+      <input
+        type="number"
+        inputMode="numeric"
+        aria-label="Font size (px)"
+        title="Font size (px)"
+        placeholder="16"
+        min={MIN_FONT_SIZE}
+        max={MAX_FONT_SIZE}
+        step={1}
+        value={Number.isNaN(currentSizeInt) ? '' : currentSizeInt}
         onChange={(e) => {
-          const v = e.target.value;
-          if (!v) editor.chain().focus().unsetFontSize().run();
-          else editor.chain().focus().setFontSize(v).run();
+          const raw = e.target.value;
+          if (!raw) { editor.chain().focus().unsetFontSize().run(); return; }
+          const n = Math.trunc(Number(raw));
+          if (!Number.isFinite(n)) return;
+          const clamped = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, n));
+          editor.chain().focus().setFontSize(`${clamped}px`).run();
         }}
-        className="h-8 rounded-md border border-(--rs-neutral-grey-200) bg-white px-2 text-xs text-(--rs-neutral-grey-700) focus:border-(--rs-primary-300) focus:outline-none"
-      >
-        <option value="">Font size</option>
-        {FONT_SIZES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-      </select>
+        className="h-8 w-14 rounded-md border border-(--rs-neutral-grey-200) bg-white px-2 text-xs text-(--rs-neutral-grey-700) focus:border-(--rs-primary-300) focus:outline-none"
+      />
 
       {trailing}
     </div>
