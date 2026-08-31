@@ -21,6 +21,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, GripVertical, Plus, Loader2, X, Archive } from 'lucide-react';
 import { ProjectArchiveDrawer } from '@/components/project-archive-drawer';
+import { PersonAvatar } from '@/components/person-avatar';
 import { TaskDetailSheet, type SheetWorkItem } from '@/components/task-detail-sheet';
 import type { ProjectCaps } from '@/lib/permissions';
 import {
@@ -50,6 +51,8 @@ export type KanbanItem = {
   label_ids?: number[];
   cycle_id?: number | null;
   state_detail?: { id: string; name: string; group: string; color: string };
+  creator?: { id: number; name: string } | null;
+  last_updated_by?: { id: number; name: string } | null;
 };
 
 type KanbanCycle = { id: number; name: string; start_date: string; end_date: string };
@@ -158,6 +161,25 @@ function CardContent({
         />
         {dragHandle}
       </div>
+
+      {(item.creator || item.last_updated_by) && (
+        <div className="space-y-1 pb-2 border-b border-(--rs-neutral-grey-100)">
+          {item.creator && (
+            <div className="flex items-center gap-1.5 text-[11px] min-w-0" title={`Created by ${item.creator.name}`}>
+              <span className="shrink-0 text-(--rs-neutral-grey-400)">Created by</span>
+              <PersonAvatar name={item.creator.name} size={14} />
+              <span className="truncate text-(--rs-neutral-grey-600) font-medium">{item.creator.name}</span>
+            </div>
+          )}
+          {item.last_updated_by && (
+            <div className="flex items-center gap-1.5 text-[11px] min-w-0" title={`Last updated by ${item.last_updated_by.name}`}>
+              <span className="shrink-0 text-(--rs-neutral-grey-400)">Updated by</span>
+              <PersonAvatar name={item.last_updated_by.name} size={14} />
+              <span className="truncate text-(--rs-neutral-grey-600) font-medium">{item.last_updated_by.name}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
         {item.target_date && (

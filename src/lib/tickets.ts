@@ -50,6 +50,8 @@ export interface PlaneWorkItem {
   labels?: string[];
   label_ids?: number[];
   cycle_id?: number | null;
+  creator?: { id: number; name: string } | null;
+  last_updated_by?: { id: number; name: string } | null;
 }
 
 // Kept for signature compatibility with callers that catch PlaneApiError.
@@ -197,7 +199,7 @@ export async function getWorkItems(
   const sb = createAdminClient();
   const { data, error } = await sb
     .from('work_items')
-    .select('id, sequence_id, name, description, priority, state_id, cycle_id, target_date, completed_at, created_at, updated_at, work_item_assignees(user_id, users(email)), work_item_labels(label_id)')
+    .select('id, sequence_id, name, description, priority, state_id, cycle_id, target_date, completed_at, created_at, updated_at, created_by, work_item_assignees(user_id, users(email)), work_item_labels(label_id)')
     .eq('project_id', Number(projectId))
     .eq('archived', 0)
     // Newest task first (highest sequence_id) — board columns and My Tasks read
@@ -206,7 +208,40 @@ export async function getWorkItems(
 
   if (error) throw new PlaneApiError(500, `work-items/${projectId}`);
 
-  let items: PlaneWorkItem[] = (data ?? []).map((r: Row) => {
+  const rows = data ?? [];
+
+  // Creator names: work_items.created_by has no DB-level FK (back-filled column),
+  // so it can't ride along as a nested select — batch-fetch the distinct users.
+  const creatorIds = [...new Set(rows.map(r => r.created_by).filter((id): id is number => id != null))];
+  const creatorMap = new Map<number, { id: number; name: string }>();
+  if (creatorIds.length > 0) {
+    const { data: creators } = await sb.from('users').select('id, name').in('id', creatorIds);
+    for (const c of (creators ?? []) as Row[]) {
+      creatorMap.set(Number(c.id), { id: Number(c.id), name: String(c.name ?? '') });
+    }
+  }
+
+  // "Last updated by" = actor of the most recent activity entry per item
+  // (falls back to the creator when nothing has happened since creation).
+  const itemIds = rows.map(r => Number(r.id));
+  const lastUpdatedMap = new Map<number, { id: number; name: string }>();
+  if (itemIds.length > 0) {
+    const { data: activity } = await sb
+      .from('work_item_activity')
+      .select('work_item_id, actor_id, created_at, users(name)')
+      .in('work_item_id', itemIds)
+      .order('created_at', { ascending: false });
+    for (const a of (activity ?? []) as Row[]) {
+      const wid = Number(a.work_item_id);
+      if (lastUpdatedMap.has(wid)) continue; // already have the newest for this item
+      lastUpdatedMap.set(wid, {
+        id: Number(a.actor_id),
+        name: String((a.users as Row | null)?.name ?? ''),
+      });
+    }
+  }
+
+  let items: PlaneWorkItem[] = rows.map((r: Row) => {
     // `assignees` is now an array of user emails (the kanban filter + "Mine
     // only" toggle key off email). `assignee_ids` keeps numeric user ids
     // as strings so API filters can take either.
@@ -234,6 +269,8 @@ export async function getWorkItems(
       completed_at: (r.completed_at as string | null) ?? null,
       created_at: String(r.created_at ?? ''),
       updated_at: String(r.updated_at ?? ''),
+      creator: r.created_by != null ? (creatorMap.get(Number(r.created_by)) ?? null) : null,
+      last_updated_by: lastUpdatedMap.get(Number(r.id)) ?? null,
     };
   });
 
