@@ -7,6 +7,7 @@ import { recordAudit, deriveUserPatchAction } from '@/lib/audit';
 import { enforceRateLimit, keyByUser } from '@/lib/rate-limit';
 import { isGateableToolKey, defaultToolAccess, normalizeRole } from '@/lib/rbac';
 import { USERS_LIST_TAG } from '@/lib/cache-tags';
+import { removeUserFromAllProjects } from '@/lib/tickets';
 
 export const runtime = 'nodejs';
 
@@ -484,6 +485,12 @@ export const PATCH = route(async (req: Request) => {
     const otherFieldChanged = body.team !== undefined || body.memberCode !== undefined || body.hourlyRateUsd !== undefined
       || body.dateOfBirth !== undefined || body.startDate !== undefined || body.endDate !== undefined || body.driveUrl !== undefined
       || body.approvedHoursPerWeek !== undefined || body.schedulePhtStart !== undefined || body.schedulePhtEnd !== undefined;
+    // Deactivation removes the user from every project — membership and
+    // any work items they were still assigned to — so they stop showing
+    // up anywhere in ticketing once they're no longer active.
+    if (activeChanged && Number(updated.is_active) === 0) {
+      await removeUserFromAllProjects(body.id);
+    }
     if (roleChanged || activeChanged || otherFieldChanged) {
       const { action, details } = deriveUserPatchAction(
         { role: String(before.role), is_active: Number(before.is_active) },

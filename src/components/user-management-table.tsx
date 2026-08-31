@@ -440,8 +440,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
     }
   };
 
-  const handleImpersonate = async(targetUserId:number) =>{
-    await changeView(targetUserId)
+  const handleImpersonate = async(user:UserRow) =>{
+    await changeView(user.id) 
   }
 
   // Name + Actions are always shown; colSpan for the empty row counts them too.
@@ -673,7 +673,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                         {currentUserId !== user.id &&(
                         <Button size="sm" variant="ghost"
                           className="h-7 px-2.5 text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-900)"
-                          onClick={() => handleImpersonate(user.id)}>
+                          onClick={() => handleImpersonate(user)}>
                           <Eye className="w-3.5 h-3.5 mr-1" />
                           View
                         </Button>
@@ -1022,7 +1022,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
         title="Remove this user?"
         description={
           pendingRemove
-            ? `${pendingRemove.name} will be deactivated — they won't be able to sign in. Their data is preserved, and you can restore them anytime.`
+            ? `${pendingRemove.name} will be deactivated — they won't be able to sign in, and they'll be removed from every project they're a member of or assigned work in. Their other data is preserved, and you can restore them anytime.`
             : ''
         }
         confirmLabel="Remove user"
