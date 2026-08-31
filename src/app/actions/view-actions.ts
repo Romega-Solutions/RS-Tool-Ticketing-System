@@ -2,6 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 
 const SESSION_DURATION_MS = 30 * 60 * 1000 // 30 min — adjust as needed
 
@@ -24,6 +25,7 @@ export async function changeView(targetUserId: number) {
   if (error) throw new Error('Could not start impersonation')
 
   await supabase.auth.refreshSession()
+  redirect("/dashboard")
 }
 
 export async function exitView() {
