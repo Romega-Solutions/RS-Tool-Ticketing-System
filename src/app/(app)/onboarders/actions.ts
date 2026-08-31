@@ -783,9 +783,11 @@ export async function sendWelcomeEmail(onboarderId: number): Promise<void> {
         personal_email:    o.personal_email,
         role_title:        o.role_title         ?? '',
         onboarding_lead:   onboardingLeadName,
-        onboarding_lead_email: onboardingLeadTeamsEmail,
+        // Keep the portal address in onboarding_lead_email for the n8n CC
+        // policy. Teams contact addresses are separate because they can differ.
+        onboarding_lead_teams_email: onboardingLeadTeamsEmail,
         direct_supervisor: directSupervisorName,
-        direct_supervisor_email: directSupervisorTeamsEmail,
+        direct_supervisor_teams_email: directSupervisorTeamsEmail,
         onboarding_session_date: formatSessionForEmail(onboardingSession),
         onboarding_session_starts_at: onboardingSession.starts_at,
         onboarding_form_url: onboardingFormUrl(formToken, o.onboarder_type, onboardingSession),
