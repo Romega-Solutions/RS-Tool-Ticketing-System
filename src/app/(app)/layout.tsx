@@ -1,9 +1,7 @@
 import { ReactNode } from "react";
 import { AppSidebar, MobileNav } from "@/components/app-sidebar";
-import { getSession } from "@/lib/session";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { hasSupabaseAdminConfig, hasSupabaseConfig } from "@/lib/supabase/config";
+import { getSessionResult } from "@/lib/session";
+import { hasSupabaseConfig } from "@/lib/supabase/config";
 import { canAccessPath, defaultLandingPath, canAccessAdmin } from "@/lib/rbac";
 import { getPhotoResolver } from "@/lib/orgchart";
 import { hasIncompleteHardCourse, isPathExemptFromHardEnforcement } from "@/lib/lms-enforcement";
@@ -40,34 +38,29 @@ async function getDailyQuote(seed: number) {
 }
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
-  const session = await getSession();
+  const result = await getSessionResult();
+  const session = result.user;
 
   const isView = session?.isImpersonating
 
   if (!session) {
     if (!hasSupabaseConfig()) redirect('/login');
 
-    // Disambiguate: stale cookie vs. missing DB row vs. deactivated account.
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user?.email) {
-      redirect('/login');
+    // getSessionResult() already disambiguates why the session came back
+    // empty — reusing its (timeout-bounded) result instead of re-running our
+    // own unguarded Supabase calls here avoids hanging a second time on the
+    // same slow auth endpoint just to render this redirect.
+    switch (result.reason) {
+      case 'no_row':
+        // Supabase auth OK but no public.users row — recovery via onboarding.
+        redirect('/onboarding');
+      case 'inactive':
+        redirect('/login?stale=1&reason=inactive');
+      case 'timeout':
+        redirect('/login?stale=1&reason=timeout');
+      default:
+        redirect('/login');
     }
-    if (!hasSupabaseAdminConfig()) {
-      redirect('/login');
-    }
-    const admin = createAdminClient();
-    const { data: dbUser } = await admin
-      .from('users')
-      .select('is_active')
-      .eq('email', user.email)
-      .maybeSingle();
-    if (!dbUser) {
-      // Supabase auth OK but no public.users row — recovery via onboarding.
-      redirect('/onboarding');
-    }
-    // Row exists but is_active=0 → deactivated. Clear cookies on /login.
-    redirect('/login?stale=1&reason=inactive');
   }
 
   const headersList = await headers();
