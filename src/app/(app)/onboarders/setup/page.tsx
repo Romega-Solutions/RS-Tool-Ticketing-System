@@ -8,7 +8,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { LeadToolHeader } from '@/components/lead-tool-header';
 import { getSession } from '@/lib/session';
 import { hasToolAccess } from '@/lib/rbac';
+import { getGlobalOnboardingLeadSetting, listOnboardingLeadOptions } from '@/lib/onboarding-lead';
 import { TestWorkflowButton } from './test-workflow-button';
+import { GlobalOnboardingLeadForm } from './global-onboarding-lead-form';
 
 type WorkflowEntry = {
   envKey:    string;
@@ -154,6 +156,10 @@ export default async function OnboardingSetupPage() {
     redirect('/dashboard');
   }
 
+  const [onboardingLeadOptions, globalLeadSetting] = await Promise.all([
+    listOnboardingLeadOptions(),
+    getGlobalOnboardingLeadSetting(),
+  ]);
   const mvpConfigured = WORKFLOWS.filter(w => w.phase === 'mvp' && isConfigured(w.envKey)).length;
   const mvpTotal      = WORKFLOWS.filter(w => w.phase === 'mvp').length;
 
@@ -172,6 +178,17 @@ export default async function OnboardingSetupPage() {
         title="Setup &amp; workflows"
         description="MVP setup checklist, n8n workflow registry, and the post-MVP roadmap. Reference material — operations live on the main /onboarders page."
       />
+
+      <Card>
+        <CardContent className="p-6">
+          <GlobalOnboardingLeadForm
+            options={onboardingLeadOptions}
+            currentLead={globalLeadSetting.lead}
+            available={globalLeadSetting.available}
+            canManage={session.role === 'admin'}
+          />
+        </CardContent>
+      </Card>
 
       {/* MVP setup */}
       <Card>
@@ -196,8 +213,8 @@ export default async function OnboardingSetupPage() {
             />
             <SetupItem
               n={2}
-              title="Assign an Onboarding Lead"
-              body={<>Choose an active internal user with <strong>Onboarding</strong> access when creating an onboarder, or assign one from the onboarding record&apos;s Quick Facts panel. Recruitment handoffs begin unassigned until HR selects the owner.</>}
+              title="Set the global Onboarding Lead"
+              body={<>Choose the current owner in the <strong>Current Onboarding Lead</strong> card above. New records and recruitment handoffs use that person automatically.</>}
             />
             <SetupItem
               n={3}
