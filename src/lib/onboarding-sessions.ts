@@ -2,6 +2,23 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createAdminClient } from '@/lib/supabase/admin';
 
 export type MeetingAvailability = 'pending' | 'yes' | 'no';
+export type CohortDisposition = 'confirmed' | 'auto_enroll_next' | 'pending_next';
+
+export function classifyCohortMember(args: {
+  availability: MeetingAvailability;
+  formSubmittedAt: string | null;
+}): CohortDisposition {
+  if (args.availability === 'yes' && args.formSubmittedAt) return 'confirmed';
+  if (args.availability === 'no' && args.formSubmittedAt) return 'auto_enroll_next';
+  return 'pending_next';
+}
+
+export function availabilityForAssignedSession(
+  availability: Exclude<MeetingAvailability, 'pending'>,
+  reassignedAfterCutoff: boolean,
+): Exclude<MeetingAvailability, 'pending'> {
+  return reassignedAfterCutoff && availability === 'no' ? 'yes' : availability;
+}
 
 export type OnboardingSession = {
   id: number;
@@ -227,10 +244,11 @@ export async function recordOnboardingAvailability(
   const needsNewSession = !session || session.status !== 'scheduled' || new Date(session.cutoff_at) <= submittedAt;
   if (needsNewSession) session = await assignOnboarderToOpenSession(onboarderId, submittedAt);
   if (!session) throw new Error('Could not assign an onboarding session');
+  const savedAvailability = availabilityForAssignedSession(availability, needsNewSession);
 
   const { error: updateError } = await supabase.from('onboarders').update({
     onboarding_form_submitted_at: submittedAt.toISOString(),
-    meeting_availability: availability,
+    meeting_availability: savedAvailability,
     meeting_availability_submitted_at: submittedAt.toISOString(),
     updated_at: submittedAt.toISOString(),
   }).eq('id', onboarderId);
@@ -239,14 +257,17 @@ export async function recordOnboardingAvailability(
   await writeAutomationHistory(
     onboarderId,
     'meeting_availability',
-    `Onboarding form received: attendance ${availability} for ${formatSessionForEmail(session)}`,
-    availability,
+    needsNewSession && availability === 'no'
+      ? `Onboarding form received after cutoff: moved to ${formatSessionForEmail(session)} as attending`
+      : `Onboarding form received: attendance ${savedAvailability} for ${formatSessionForEmail(session)}`,
+    savedAvailability,
   );
   return {
     onboarderId,
     onboarderType: onboarder.onboarder_type,
     session,
     reassigned: needsNewSession,
+    availability: savedAvailability,
   };
 }
 
@@ -310,21 +331,42 @@ export async function finalizeTodayOnboardingSession(now = new Date()) {
       onboardingLead: toContact(person.onboarding_lead_id, person.onboarding_lead, person.onboarding_lead_teams_email),
       directSupervisor: toContact(person.direct_supervisor_id, person.direct_supervisor, person.direct_supervisor_teams_email),
     }));
-    const confirmed = enrichedCohort.filter(person => person.meeting_availability === 'yes' && !!person.onboarding_form_submitted_at);
-    const deferred = enrichedCohort.filter(person => !confirmed.includes(person));
+    const disposition = (person: typeof enrichedCohort[number]) => classifyCohortMember({
+      availability: person.meeting_availability,
+      formSubmittedAt: person.onboarding_form_submitted_at,
+    });
+    const confirmed = enrichedCohort.filter(person => disposition(person) === 'confirmed');
+    const autoEnrolled = enrichedCohort.filter(person => disposition(person) === 'auto_enroll_next');
+    const pending = enrichedCohort.filter(person => disposition(person) === 'pending_next');
+    const deferred = [...autoEnrolled, ...pending];
     let nextSession: OnboardingSession | null = null;
 
     if (deferred.length) {
       nextSession = await getOrCreateOpenOnboardingSession(now);
-      const deferredIds = deferred.map(person => person.id);
-      const { error: deferError } = await supabase.from('onboarders').update({
-        onboarding_session_id: nextSession.id,
-        meeting_availability: 'pending',
-        meeting_availability_submitted_at: null,
-        updated_at: now.toISOString(),
-      }).in('id', deferredIds);
-      if (deferError) throw new Error(`Failed to defer onboarding cohort: ${deferError.message}`);
-      await Promise.all(deferred.map(person => writeAutomationHistory(
+      if (autoEnrolled.length) {
+        const { error: autoEnrollError } = await supabase.from('onboarders').update({
+          onboarding_session_id: nextSession.id,
+          meeting_availability: 'yes',
+          updated_at: now.toISOString(),
+        }).in('id', autoEnrolled.map(person => person.id));
+        if (autoEnrollError) throw new Error(`Failed to enroll the next onboarding cohort: ${autoEnrollError.message}`);
+      }
+      if (pending.length) {
+        const { error: deferError } = await supabase.from('onboarders').update({
+          onboarding_session_id: nextSession.id,
+          meeting_availability: 'pending',
+          meeting_availability_submitted_at: null,
+          updated_at: now.toISOString(),
+        }).in('id', pending.map(person => person.id));
+        if (deferError) throw new Error(`Failed to defer onboarding cohort: ${deferError.message}`);
+      }
+      await Promise.all(autoEnrolled.map(person => writeAutomationHistory(
+        person.id,
+        'onboarding_session',
+        `Moved to ${formatSessionForEmail(nextSession!)} as attending after declining this week's session`,
+        nextSession!.session_date,
+      )));
+      await Promise.all(pending.map(person => writeAutomationHistory(
         person.id,
         'onboarding_session',
         `Moved to ${formatSessionForEmail(nextSession!)} after the Friday 1 PM cutoff`,
