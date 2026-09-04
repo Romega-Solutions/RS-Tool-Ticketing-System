@@ -10,14 +10,17 @@ import { getSession } from '@/lib/session';
 import { hasToolAccess } from '@/lib/rbac';
 import { APP_DEPARTMENTS } from '@/lib/orgchart';
 import { createOnboarder } from '../actions';
-import { listOnboardingLeadOptions } from '@/lib/onboarding-lead';
+import { getGlobalOnboardingLeadSetting, listOnboardingLeadOptions } from '@/lib/onboarding-lead';
 
 export default async function NewOnboarderPage() {
   const session = await getSession();
   if (!session || !hasToolAccess('onboarding', session.role, session.toolAccess)) {
     redirect('/dashboard');
   }
-  const onboardingLeads = await listOnboardingLeadOptions();
+  const [onboardingLeads, globalLeadSetting] = await Promise.all([
+    listOnboardingLeadOptions(),
+    getGlobalOnboardingLeadSetting(),
+  ]);
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -61,23 +64,9 @@ export default async function NewOnboarderPage() {
               <Field id="roleTitle"         label="Role title"          placeholder="Frontend Engineer" />
 
               <div className="space-y-1.5">
-                <Label htmlFor="onboardingLeadId" className="text-(--rs-neutral-grey-700) font-medium">Onboarding lead *</Label>
-                <div className="relative">
-                  <select
-                    id="onboardingLeadId"
-                    name="onboardingLeadId"
-                    required
-                    defaultValue=""
-                    className="appearance-none flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer"
-                  >
-                    <option value="" disabled style={{ backgroundColor: '#fff', color: '#0f172a' }}>
-                      {onboardingLeads.length ? '— Select onboarding lead —' : 'No eligible users'}
-                    </option>
-                    {onboardingLeads.map(lead => (
-                      <option key={lead.id} value={lead.id} style={{ backgroundColor: '#fff', color: '#0f172a' }}>{lead.name}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-(--rs-neutral-grey-400)" />
+                <Label className="text-(--rs-neutral-grey-700) font-medium">Onboarding lead</Label>
+                <div className="flex h-11 items-center rounded-xl border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-3 text-sm font-medium text-(--rs-neutral-grey-800)">
+                  {globalLeadSetting.lead?.name ?? 'Not configured — use Setup & workflows'}
                 </div>
               </div>
 
@@ -138,6 +127,7 @@ export default async function NewOnboarderPage() {
               </Link>
               <Button
                 type="submit"
+                disabled={!globalLeadSetting.lead}
                 className="h-11 px-8 rounded-xl bg-(--rs-primary-600) hover:bg-(--rs-primary-700) shadow-lg shadow-(--rs-primary-100) gap-2 transition-all active:scale-[0.98]"
               >
                 <UserPlus2 className="w-4 h-4" /> Create onboarder

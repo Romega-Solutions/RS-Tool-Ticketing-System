@@ -8,6 +8,7 @@
 // helper returns the existing id and does NOT insert a duplicate.
 
 import { createAdminClient } from '@/lib/supabase/admin';
+import { getRequiredGlobalOnboardingLead, type OnboardingLeadOption } from '@/lib/onboarding-lead';
 
 export type CreateOnboarderFromCandidateResult =
   | { ok: true;  onboarderId: number; created: boolean }
@@ -52,6 +53,12 @@ export async function createOnboarderFromCandidate(
   // row. Team is left null — the Onboarding Lead fills it on the detail page.
   const roleTitle: string | null = candidate.position ?? null;
   const team:      string | null = null;
+  let onboardingLead: OnboardingLeadOption;
+  try {
+    onboardingLead = await getRequiredGlobalOnboardingLead();
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Global Onboarding Lead is not configured' };
+  }
 
   const { data: inserted, error: insertErr } = await supabase
     .from('onboarders')
@@ -63,8 +70,8 @@ export async function createOnboarderFromCandidate(
       onboarder_type:  'contractor', // Lead can flip to intern on detail page
       role_title:      roleTitle,
       team,
-      onboarding_lead: null,
-      onboarding_lead_id: null,
+      onboarding_lead: onboardingLead.name,
+      onboarding_lead_id: onboardingLead.id,
       status:          'pre_onboarding',
       created_by:      opts.actorUserId ?? null,
     })
@@ -81,7 +88,7 @@ export async function createOnboarderFromCandidate(
     field:        'created',
     old_value:    null,
     new_value:    candidate.full_name,
-    summary:      `Created from ATS hire (candidate #${candidateId}) at stage 'pre_onboarding' — Lead: unassigned`,
+    summary:      `Created from ATS hire (candidate #${candidateId}) at stage 'pre_onboarding' — Lead: ${onboardingLead.name}`,
   });
 
   return { ok: true, onboarderId: inserted.id, created: true };

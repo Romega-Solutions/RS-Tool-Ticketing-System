@@ -55,7 +55,7 @@ const DOC_KINDS = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 type FieldErrors = Partial<Record<
-  'fullName' | 'personalEmail' | 'onboarderType' | 'team' | 'onboardingLeadId' | 'startDate', string
+  'fullName' | 'personalEmail' | 'onboarderType' | 'team' | 'startDate', string
 >>;
 
 function validateCreate(fd: FormData): FieldErrors {
@@ -64,7 +64,6 @@ function validateCreate(fd: FormData): FieldErrors {
   const email = String(fd.get('personalEmail') ?? '').trim();
   const type  = String(fd.get('onboarderType') ?? '');
   const team  = String(fd.get('team') ?? '').trim();
-  const lead  = String(fd.get('onboardingLeadId') ?? '').trim();
   const start = String(fd.get('startDate') ?? '').trim();
 
   if (!name || name.length < 2) {
@@ -81,16 +80,21 @@ function validateCreate(fd: FormData): FieldErrors {
   if (!team) {
     errors.team = 'Department is required';
   }
-  if (!lead) {
-    errors.onboardingLeadId = 'Select an onboarding lead';
-  }
   if (start && !/^\d{4}-\d{2}-\d{2}$/.test(start)) {
     errors.startDate = 'Use the date picker (YYYY-MM-DD)';
   }
   return errors;
 }
 
-export function CreateOnboarderForm({ departments, leads }: { departments: string[]; leads: OnboardingLeadOption[] }) {
+export function CreateOnboarderForm({
+  departments,
+  leads,
+  globalLead,
+}: {
+  departments: string[];
+  leads: OnboardingLeadOption[];
+  globalLead: OnboardingLeadOption | null;
+}) {
   const [open, setOpen]      = useState(false);
   const [isPending, start]   = useTransition();
   const [error, setError]    = useState<string | null>(null);
@@ -154,20 +158,10 @@ export function CreateOnboarderForm({ departments, leads }: { departments: strin
             <Field id="roleTitle" label="Role title" placeholder="Frontend Engineer" />
 
             <div className="space-y-1.5">
-              <Label htmlFor="onboardingLeadId" className="text-(--rs-neutral-grey-700) font-medium">Onboarding lead *</Label>
-              <SelectShell error={!!fieldErrors.onboardingLeadId}>
-                <select
-                  id="onboardingLeadId"
-                  name="onboardingLeadId"
-                  required
-                  defaultValue=""
-                  className={`appearance-none flex h-11 w-full rounded-xl border bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer ${fieldErrors.onboardingLeadId ? 'border-red-300 focus:border-red-400' : 'border-(--rs-neutral-grey-200) focus:border-(--rs-primary-300)'}`}
-                >
-                  <option value="" disabled style={OPTION_STYLE}>{leads.length ? '— Select onboarding lead —' : 'No eligible users'}</option>
-                  {leads.map(lead => <option key={lead.id} value={lead.id} style={OPTION_STYLE}>{lead.name}</option>)}
-                </select>
-              </SelectShell>
-              {fieldErrors.onboardingLeadId && <FieldError text={fieldErrors.onboardingLeadId} />}
+              <Label className="text-(--rs-neutral-grey-700) font-medium">Onboarding lead</Label>
+              <div className="flex h-11 items-center rounded-xl border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-3 text-sm font-medium text-(--rs-neutral-grey-800)">
+                {globalLead?.name ?? 'Not configured — use Setup & workflows'}
+              </div>
             </div>
 
             <div className="space-y-1.5">
@@ -213,7 +207,7 @@ export function CreateOnboarderForm({ departments, leads }: { departments: strin
               className="h-11 px-6 rounded-xl border-(--rs-neutral-grey-200) hover:bg-(--rs-neutral-grey-50)">
               Discard
             </Button>
-            <Button type="submit" disabled={isPending}
+            <Button type="submit" disabled={isPending || !globalLead}
               className="h-11 px-8 rounded-xl bg-(--rs-primary-600) hover:bg-(--rs-primary-700) shadow-lg shadow-(--rs-primary-100) gap-2 transition-all active:scale-[0.98]">
               {isPending
                 ? <Spinner label="Creating…" />

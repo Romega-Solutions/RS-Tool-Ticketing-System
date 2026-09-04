@@ -20,6 +20,7 @@ import { hasToolAccess } from '@/lib/rbac';
 import { toProperName, formatPhoneNumber } from '@/lib/format';
 import { uploadCandidatePreEmploymentDocument, uploadResumeToStorage } from '@/lib/storage';
 import { createOnboarderFromCandidate } from '@/lib/onboarders';
+import { getRequiredGlobalOnboardingLead } from '@/lib/onboarding-lead';
 import {
   buildPreEmploymentFormUrl,
   buildEmploymentVerificationFormUrl,
@@ -260,6 +261,7 @@ async function fireAutoCommunication(
 export async function sendPreEmploymentBgCheckEmail(candidateId: number): Promise<void> {
   const session = await requireSession();
   if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
+  const onboardingLead = await getRequiredGlobalOnboardingLead();
 
   const supabase = createAdminClient();
   const { data: candidate, error } = await supabase
@@ -322,7 +324,7 @@ export async function sendPreEmploymentBgCheckEmail(candidateId: number): Promis
       first_name:     firstName,
       personal_email: candidate.email.trim(),
       role_title:     candidate.position ?? '',
-      onboarding_lead: session.name,
+      onboarding_lead: onboardingLead.name,
       requested_by_email: session.email,
       form_url:       formUrl,
       form_key:       'background_check',
@@ -357,6 +359,7 @@ export async function sendPreEmploymentBgCheckEmail(candidateId: number): Promis
 export async function sendCandidateReferenceEmails(candidateId: number): Promise<void> {
   const session = await requireSession();
   if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
+  const onboardingLead = await getRequiredGlobalOnboardingLead();
 
   const supabase = createAdminClient();
   const { data: candidate, error: candidateError } = await supabase
@@ -455,7 +458,7 @@ export async function sendCandidateReferenceEmails(candidateId: number): Promise
         referee_email: reference.referee_email,
         full_name: candidate.full_name,
         role_title: candidate.position ?? '',
-        onboarding_lead: session.name,
+        onboarding_lead: onboardingLead.name,
         requested_by_email: session.email,
         form_url: formUrl,
         form_key: 'reference_check',
@@ -495,6 +498,7 @@ export async function sendCandidateEmploymentVerificationEmails(candidateId: num
   const session = await requireSession();
   if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
   if (!process.env.JOTFORM_EMPLOYMENT_VERIFICATION_FORM_URL?.trim()) throw new Error('JOTFORM_EMPLOYMENT_VERIFICATION_FORM_URL is not configured');
+  const onboardingLead = await getRequiredGlobalOnboardingLead();
 
   const supabase = createAdminClient();
   const { data: candidate, error: candidateError } = await supabase
@@ -530,7 +534,7 @@ export async function sendCandidateEmploymentVerificationEmails(candidateId: num
     if (requestError) { failures.push(`${verification.company}: could not create secure link`); continue; }
     const result = await notifyOnboardingWebhook({
       onboarderId: candidateId, template: 'employment-verification', event: 'manual_send',
-      context: { candidate_id: candidateId, verification_id: verification.id, company: verification.company, hr_contact_name: verification.hr_contact_name ?? '', hr_email: verification.hr_email, full_name: candidate.full_name, role_title: candidate.position ?? '', onboarding_lead: session.name, requested_by_email: session.email, form_url: formUrl, form_key: 'employment_verification' },
+      context: { candidate_id: candidateId, verification_id: verification.id, company: verification.company, hr_contact_name: verification.hr_contact_name ?? '', hr_email: verification.hr_email, full_name: candidate.full_name, role_title: candidate.position ?? '', onboarding_lead: onboardingLead.name, requested_by_email: session.email, form_url: formUrl, form_key: 'employment_verification' },
     });
     if (!result.ok) { failures.push(`${verification.company}: ${result.error}`); continue; }
     const { error: sentError } = await supabase.from('candidate_employment_verifications').update({ request_sent_at: now }).eq('id', verification.id).is('request_sent_at', null);
@@ -586,11 +590,12 @@ export async function sendCandidateFormReminder(candidateId: number, kind: Recru
       .eq('form_key', 'background_check')
       .is('submitted_at', null)
       .is('invalidated_at', null)
+      .is('last_reminder_sent_at', null)
       .order('sent_at', { ascending: false })
       .limit(1)
       .maybeSingle();
     if (error) throw new Error(`Failed to load background-check request: ${error.message}`);
-    if (!request) throw new Error('There is no unanswered background-check request');
+    if (!request) throw new Error('There is no unreminded background-check request');
     const result = await sendReminder(
       candidate.email.trim(),
       candidate.full_name.trim().split(/\s+/)[0] ?? 'there',
@@ -605,7 +610,8 @@ export async function sendCandidateFormReminder(candidateId: number, kind: Recru
       .select('id, referee_name, referee_email, request_sent_at, responded_at, last_reminder_sent_at')
       .eq('candidate_id', candidateId)
       .not('request_sent_at', 'is', null)
-      .is('responded_at', null);
+      .is('responded_at', null)
+      .is('last_reminder_sent_at', null);
     if (error) throw new Error(`Failed to load reference requests: ${error.message}`);
     const due = data ?? [];
     if (!due.length) throw new Error('No character-reference reminder is due yet');
@@ -622,7 +628,8 @@ export async function sendCandidateFormReminder(candidateId: number, kind: Recru
       .select('id, company, hr_contact_name, hr_email, request_sent_at, responded_at, last_reminder_sent_at')
       .eq('candidate_id', candidateId)
       .not('request_sent_at', 'is', null)
-      .is('responded_at', null);
+      .is('responded_at', null)
+      .is('last_reminder_sent_at', null);
     if (error) throw new Error(`Failed to load employment-verification requests: ${error.message}`);
     const due = data ?? [];
     if (!due.length) throw new Error('No employment-verification reminder is due yet');
@@ -667,6 +674,7 @@ export async function uploadPreEmploymentDocument(candidateId: number, kind: 'so
 export async function sendCandidateDocumentPackage(candidateId: number): Promise<void> {
   const session = await requireSession();
   if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
+  const onboardingLead = await getRequiredGlobalOnboardingLead();
   const supabase = createAdminClient();
   const { data: candidate } = await supabase.from('candidates').select('full_name, email, position, status').eq('id', candidateId).maybeSingle();
   if (!candidate) throw new Error('Candidate not found');
@@ -681,7 +689,7 @@ export async function sendCandidateDocumentPackage(candidateId: number): Promise
   if (missing.length) throw new Error(`Upload all documents before sending: ${missing.map(kind => kind.replace(/_/g, ' ')).join(', ')}`);
   const result = await notifyOnboardingWebhook({
     onboarderId: candidateId, template: 'pre-employment-documents-send', event: 'manual_send',
-    context: { candidate_id: candidateId, full_name: candidate.full_name, personal_email: candidate.email.trim(), role_title: candidate.position ?? '', documents: documents.map(document => ({ kind: document.kind, name: document.file_name, url: document.signed_url })), onboarding_lead: session.name, requested_by_email: session.email },
+    context: { candidate_id: candidateId, full_name: candidate.full_name, personal_email: candidate.email.trim(), role_title: candidate.position ?? '', documents: documents.map(document => ({ kind: document.kind, name: document.file_name, url: document.signed_url })), onboarding_lead: onboardingLead.name, requested_by_email: session.email },
   });
   await writeHistory(supabase, candidateId, session, [result.ok
     ? { field: 'pre_employment_documents_sent', oldValue: null, newValue: candidate.email, summary: 'Pre-employment document package sent to candidate' }

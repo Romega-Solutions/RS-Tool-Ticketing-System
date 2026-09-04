@@ -24,7 +24,7 @@ import {
   type OnboarderStatus,
   type OnboarderType,
 } from './constants';
-import { resolveOnboardingLead } from '@/lib/onboarding-lead';
+import { getRequiredGlobalOnboardingLead, resolveOnboardingLead } from '@/lib/onboarding-lead';
 import {
   getOrAssignOnboarderToOpenSession,
   formatSessionForEmail,
@@ -177,7 +177,6 @@ export async function createOnboarder(formData: FormData): Promise<void> {
   const roleTitle     = String(formData.get('roleTitle')        ?? '').trim() || null;
   const teamRaw       = String(formData.get('team')             ?? '').trim();
   const directSupervisorIdRaw = String(formData.get('directSupervisorId') ?? '').trim();
-  const onboardingLeadIdRaw = String(formData.get('onboardingLeadId') ?? '').trim();
   const startDateRaw  = String(formData.get('startDate')        ?? '').trim() || null;
 
   // ── Guardrails ─────────────────────────────────────────────────────────
@@ -196,10 +195,6 @@ export async function createOnboarder(formData: FormData): Promise<void> {
   if (!teamRaw) {
     throw new Error('Department is required');
   }
-  const onboardingLeadId = Number(onboardingLeadIdRaw);
-  if (!Number.isInteger(onboardingLeadId) || onboardingLeadId <= 0) {
-    throw new Error('Select an onboarding lead');
-  }
   const directSupervisorId = directSupervisorIdRaw ? Number(directSupervisorIdRaw) : null;
   if (directSupervisorIdRaw && (!Number.isInteger(directSupervisorId) || (directSupervisorId ?? 0) <= 0)) {
     throw new Error('Select a valid direct supervisor');
@@ -217,9 +212,8 @@ export async function createOnboarder(formData: FormData): Promise<void> {
   const startDate = startDateRaw && /^\d{4}-\d{2}-\d{2}$/.test(startDateRaw) ? startDateRaw : null;
 
   const supabase = createAdminClient();
-  const onboardingLead = await resolveOnboardingLead(onboardingLeadId);
+  const onboardingLead = await getRequiredGlobalOnboardingLead();
   const directSupervisor = await resolveOnboardingLead(directSupervisorId);
-  if (!onboardingLead) throw new Error('Select an onboarding lead');
   const { data: inserted, error } = await supabase
     .from('onboarders')
     .insert({
@@ -263,51 +257,6 @@ export async function deleteOnboarder(id: number): Promise<void> {
   if (error) throw new Error(`Failed to delete onboarder: ${error.message}`);
 
   revalidatePath('/onboarders');
-}
-
-export async function assignOnboardingLead(
-  onboarderId: number,
-  leadUserId: number | null,
-): Promise<void> {
-  const session = await requireSession();
-  if (!Number.isInteger(onboarderId) || onboarderId <= 0) throw new Error('Invalid onboarder id');
-
-  const supabase = createAdminClient();
-  const { data: before, error: beforeError } = await supabase
-    .from('onboarders')
-    .select('onboarding_lead, onboarding_lead_id')
-    .eq('id', onboarderId)
-    .maybeSingle();
-  if (beforeError) throw new Error(`Failed to load onboarding record: ${beforeError.message}`);
-  if (!before) throw new Error('Onboarder not found');
-
-  const lead = await resolveOnboardingLead(leadUserId);
-  const { error } = await supabase
-    .from('onboarders')
-    .update({
-      onboarding_lead_id: lead?.id ?? null,
-      onboarding_lead: lead?.name ?? null,
-      onboarding_lead_teams_email: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', onboarderId);
-  if (error) throw new Error(`Failed to assign onboarding lead: ${error.message}`);
-
-  const oldName = before.onboarding_lead ?? null;
-  const newName = lead?.name ?? null;
-  if (oldName !== newName) {
-    await writeHistory(supabase, onboarderId, session, [{
-      field: 'onboarding_lead',
-      oldValue: oldName,
-      newValue: newName,
-      summary: newName
-        ? `Onboarding Lead assigned to '${newName}'`
-        : 'Onboarding Lead assignment cleared',
-    }]);
-  }
-
-  revalidatePath('/onboarders');
-  revalidatePath(`/onboarders/${onboarderId}`);
 }
 
 export async function assignDirectSupervisor(
@@ -807,14 +756,20 @@ export async function sendOnboardingFormReminder(onboarderId: number): Promise<v
   const supabase = createAdminClient();
   const { data: onboarder, error } = await supabase
     .from('onboarders')
-    .select('id, full_name, personal_email, onboarding_form_submitted_at, last_email_template, last_email_sent_at, onboarding_form_reminder_sent_at, onboarding_lead_id')
+    .select('id, full_name, personal_email, status, onboarding_form_submitted_at, last_email_template, last_email_sent_at, onboarding_form_reminder_sent_at, onboarding_lead_id')
     .eq('id', onboarderId)
     .maybeSingle();
   if (error) throw new Error(`Failed to load onboarding record: ${error.message}`);
   if (!onboarder) throw new Error('Onboarder not found');
   if (onboarder.onboarding_form_submitted_at) throw new Error('The onboarding form has already been submitted');
+  if (onboarder.status !== 'pre_onboarding') {
+    throw new Error('Form reminders can only be sent during pre-onboarding');
+  }
   if (onboarder.last_email_template !== 'welcome' || !onboarder.last_email_sent_at) {
     throw new Error('Send the welcome email before sending a form reminder');
+  }
+  if (onboarder.onboarding_form_reminder_sent_at) {
+    throw new Error('An onboarding form reminder has already been sent');
   }
   if (!onboarder.personal_email?.trim()) {
     throw new Error('This onboarder does not have a personal email address');

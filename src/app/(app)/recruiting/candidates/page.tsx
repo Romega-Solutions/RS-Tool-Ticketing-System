@@ -138,17 +138,20 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
         .in('candidate_id', candidateIds)
         .eq('form_key', 'background_check')
         .is('submitted_at', null)
-        .is('invalidated_at', null),
+        .is('invalidated_at', null)
+        .is('last_reminder_sent_at', null),
       supabase.from('candidate_references')
         .select('candidate_id, request_sent_at, last_reminder_sent_at')
         .in('candidate_id', candidateIds)
         .not('request_sent_at', 'is', null)
-        .is('responded_at', null),
+        .is('responded_at', null)
+        .is('last_reminder_sent_at', null),
       supabase.from('candidate_employment_verifications')
         .select('candidate_id, request_sent_at, last_reminder_sent_at')
         .in('candidate_id', candidateIds)
         .not('request_sent_at', 'is', null)
-        .is('responded_at', null),
+        .is('responded_at', null)
+        .is('last_reminder_sent_at', null),
     ]);
     for (const request of backgroundResult.data ?? []) addReminder(request.candidate_id, 'background_check');
     for (const reference of referencesResult.data ?? []) addReminder(reference.candidate_id, 'reference_check');

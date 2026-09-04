@@ -5,6 +5,12 @@ export type OnboardingLeadOption = {
   name: string;
 };
 
+export type GlobalOnboardingLeadSetting = {
+  available: boolean;
+  lead: OnboardingLeadOption | null;
+  updatedAt: string | null;
+};
+
 type LeadUserRow = {
   id: number;
   name: string;
@@ -15,7 +21,13 @@ type LeadUserRow = {
 function isEligibleLead(user: LeadUserRow): boolean {
   const active = user.is_active === true || user.is_active === 1;
   const role = String(user.role ?? '').trim().toLowerCase();
-  return active && ['lead', 'admin', 'founder'].includes(role);
+  return active && ['lead', 'admin', 'founder', 'ceo'].includes(role);
+}
+
+function isMissingSettingsTable(message: string | undefined): boolean {
+  const normalized = String(message ?? '').toLowerCase();
+  return normalized.includes('onboarding_settings')
+    && (normalized.includes('does not exist') || normalized.includes('schema cache'));
 }
 
 /** Active Lead, Admin, and Founder users who may be assigned internally. */
@@ -29,6 +41,51 @@ export async function listOnboardingLeadOptions(): Promise<OnboardingLeadOption[
   return ((data ?? []) as LeadUserRow[])
     .filter(isEligibleLead)
     .map(user => ({ id: Number(user.id), name: user.name }));
+}
+
+/** Reads the one lead used for all active onboarding records. */
+export async function getGlobalOnboardingLeadSetting(): Promise<GlobalOnboardingLeadSetting> {
+  const supabase = createAdminClient();
+  const { data: setting, error } = await supabase
+    .from('onboarding_settings')
+    .select('onboarding_lead_user_id, updated_at')
+    .eq('id', 1)
+    .maybeSingle();
+  if (error) {
+    if (isMissingSettingsTable(error.message)) {
+      return { available: false, lead: null, updatedAt: null };
+    }
+    throw new Error(`Failed to load onboarding settings: ${error.message}`);
+  }
+  if (!setting?.onboarding_lead_user_id) {
+    return { available: true, lead: null, updatedAt: setting?.updated_at ?? null };
+  }
+
+  const { data: user, error: userError } = await supabase
+    .from('users')
+    .select('id, name, role, is_active')
+    .eq('id', setting.onboarding_lead_user_id)
+    .maybeSingle();
+  if (userError) throw new Error(`Failed to load the global onboarding lead: ${userError.message}`);
+
+  return {
+    available: true,
+    lead: user && isEligibleLead(user as LeadUserRow)
+      ? { id: Number(user.id), name: user.name }
+      : null,
+    updatedAt: setting.updated_at ?? null,
+  };
+}
+
+export async function getRequiredGlobalOnboardingLead(): Promise<OnboardingLeadOption> {
+  const setting = await getGlobalOnboardingLeadSetting();
+  if (!setting.available) {
+    throw new Error('Apply the global onboarding lead database migration first');
+  }
+  if (!setting.lead) {
+    throw new Error('Configure the global Onboarding Lead in Setup & workflows first');
+  }
+  return setting.lead;
 }
 
 /** Returns an eligible internal lead, or null for an explicit unassignment. */
