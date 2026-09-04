@@ -33,6 +33,7 @@ export interface SheetWorkItem {
   labels: Array<{ id: number; name: string; color: string }>;
   assignee_users: Array<{ id: number; name: string; email: string }>;
   creator: { id: number; name: string; email: string } | null;
+  last_updated_by?: { id: number; name: string } | null;
 }
 
 interface SubIssueRow {
