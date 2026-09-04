@@ -130,8 +130,10 @@ different event for the same Friday cohort.
 
 - Before Friday 1 PM PHT, a completed form marked `yes` keeps the person in
   that Friday's cohort.
-- A `no`, no response, incomplete form, or a response after the cutoff moves
-  the person to the next open Friday and resets their answer to `pending`.
+- A completed form answered `no` moves the person to the next open Friday as
+  `yes`/attending, matching the form's automatic-next-Friday wording.
+- No response or an incomplete form moves the person to the next open Friday
+  with availability reset to `pending`.
 - At Friday 1 PM PHT, n8n calls the finalizer endpoint. It atomically locks the
   cohort, then n8n emails confirmed attendees and deferred people.
 - The session proceeds if at least one person is confirmed. If none are
