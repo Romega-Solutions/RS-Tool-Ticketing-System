@@ -343,6 +343,20 @@ export async function getWorkItemDetail(itemId: string): Promise<WorkItemDetail 
     }
   }
 
+  // Mirrors getWorkItems: last updater = actor of the most recent activity row.
+  let lastUpdatedBy: WorkItemDetail['last_updated_by'] = null;
+  const { data: lastActivity } = await sb
+    .from('work_item_activity')
+    .select('actor_id, users(name)')
+    .eq('work_item_id', id)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (lastActivity) {
+    const a = lastActivity as Row;
+    lastUpdatedBy = { id: Number(a.actor_id), name: String((a.users as Row | null)?.name ?? '') };
+  }
+
   return {
     id: String(r.id),
     project_id: Number(r.project_id),
@@ -359,6 +373,7 @@ export async function getWorkItemDetail(itemId: string): Promise<WorkItemDetail 
     assignee_users: assigneeUsers,
     labels,
     creator,
+    last_updated_by: lastUpdatedBy,
     target_date: (r.target_date as string | null) ?? null,
     completed_at: (r.completed_at as string | null) ?? null,
     created_at: String(r.created_at ?? ''),
