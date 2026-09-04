@@ -30,7 +30,7 @@ import { CreateOnboarderForm } from "./onboarder-forms";
 import { OnboarderFilterBar } from "./onboarder-filter-bar";
 import { OnboardingHelpButton } from "./onboarding-help";
 import { SendOnboardingFormReminderButton } from "./onboarder-actions";
-import { listOnboardingLeadOptions } from "@/lib/onboarding-lead";
+import { getGlobalOnboardingLeadSetting, listOnboardingLeadOptions } from "@/lib/onboarding-lead";
 import { manilaDate } from "@/lib/onboarding-sessions";
 
 // ─── Stage groupings (3 happy lanes + 1 terminal lane) ──────────────────────
@@ -135,7 +135,10 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
     : "all";
 
   const supabase = createAdminClient();
-  const onboardingLeads = await listOnboardingLeadOptions();
+  const [onboardingLeads, globalLeadSetting] = await Promise.all([
+    listOnboardingLeadOptions(),
+    getGlobalOnboardingLeadSetting(),
+  ]);
   const { data, error } = await supabase
     .from("onboarders")
     .select(
@@ -219,6 +222,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
               <CreateOnboarderForm
                 departments={[...APP_DEPARTMENTS]}
                 leads={onboardingLeads}
+                globalLead={globalLeadSetting.lead}
               />
             </div>
           ) : null
@@ -404,6 +408,7 @@ function Card_({
         : { label: "Form pending", className: "bg-(--rs-neutral-grey-50) text-(--rs-neutral-grey-600) border-(--rs-neutral-grey-200)" };
   const needsFormReminder = row.status === "pre_onboarding"
     && !row.onboarding_form_submitted_at
+    && !row.onboarding_form_reminder_sent_at
     && row.last_email_template === "welcome";
   return (
     <li>

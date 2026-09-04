@@ -28,7 +28,6 @@ import {
 import type { OnboarderStatus } from '../constants';
 import { formatPhoneNumber } from '@/lib/format';
 import { listOnboardingLeadOptions, type OnboardingLeadOption } from '@/lib/onboarding-lead';
-import { OnboardingLeadSelect } from '../onboarding-lead-select';
 import { DirectSupervisorSelect } from '../direct-supervisor-select';
 import { TeamsContactEmails } from '../teams-contact-emails';
 
@@ -793,12 +792,10 @@ function QuickFacts({
         />
       } />
       <KvRow label="Onboarding Lead" value={
-        <OnboardingLeadSelect
-          onboarderId={o.id}
-          currentLeadId={o.onboarding_lead_id}
-          currentLeadName={onboardingLeadName}
-          options={onboardingLeadOptions}
-        />
+        <span className="text-right">
+          <span className="block text-xs font-medium text-(--rs-neutral-grey-800)">{onboardingLeadName ?? 'Unassigned'}</span>
+          <Link href="/onboarders/setup" className="text-[10px] text-(--rs-primary-600) hover:underline">Global setting</Link>
+        </span>
       } />
       <TeamsContactEmails
         onboarderId={o.id}
