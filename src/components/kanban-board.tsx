@@ -998,6 +998,8 @@ export function KanbanBoard({
         assignees: updated.assignee_users.map(u => u.email || String(u.id)),
         target_date: updated.target_date,
         state_detail: { id: targetState.id, name: targetState.name, group: targetState.group, color: targetState.color },
+        creator: updated.creator,
+        last_updated_by: updated.last_updated_by ?? null,
       };
       next.set(targetState.id, [...(next.get(targetState.id) ?? []), merged]);
       return next;
