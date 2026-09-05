@@ -199,6 +199,13 @@ export const GET = route(async (req: Request) => {
 // PATCH /api/admin/timesheets — admin-only edit of a specific session's
 // clock-in / clock-out times. Recomputes duration + overtime.
 //
+// SUPERSEDED: the attendance week editor now saves a day's status + sessions
+// together through the atomic PATCH /api/admin/attendance/day, which is the
+// only place that enforces "sessions require a workable (present/wfh) day
+// status" — the gap that let the old per-session/whole-week flow attach
+// sessions to a day with no workable status. Nothing in the app calls this
+// handler anymore; left in place rather than deleted (2026-09-05).
+//
 // Body: { id: number, clockedInAt?: ISO, clockedOutAt?: ISO | null }
 export const PATCH = route(async (req: Request) => {
   const session = await requireAdmin();
@@ -292,6 +299,9 @@ export const PATCH = route(async (req: Request) => {
 // day that has no clock-in record at all (e.g. the user was tagged present
 // but couldn't clock in themselves because they'd hit the weekly hour cap).
 //
+// SUPERSEDED: see the PATCH handler above — session creation now goes through
+// PATCH /api/admin/attendance/day. Left in place rather than deleted (2026-09-05).
+//
 // Body: { userId: number, clockedInAt: ISO, clockedOutAt?: ISO | null }
 export const POST = route(async (req: Request) => {
   const session = await requireAdmin();
@@ -381,6 +391,11 @@ export const POST = route(async (req: Request) => {
 });
 
 // DELETE /api/admin/timesheets?id=N — admin-only removal of a session entry.
+//
+// SUPERSEDED: see the PATCH handler above — session removal now goes through
+// PATCH /api/admin/attendance/day (a day's save sends its full desired session
+// list; anything dropped is deleted server-side). Left in place rather than
+// deleted (2026-09-05).
 export const DELETE = route(async (req: Request) => {
   await requireAdmin();
 
