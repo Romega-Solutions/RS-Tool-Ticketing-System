@@ -55,49 +55,110 @@ export type SessionUser = {
 //   }
 // });
 
-export const getSession = cache(async (): Promise<SessionUser | null> => {
-  try {
-    const supabase = await createClient();
+// Bounds how long a single getSession() call can take. Without this, a slow
+// Supabase auth endpoint (JWKS fetch / user lookup) hangs every route that
+// calls getSession() — which is nearly all of them — up to the platform's
+// max function duration instead of failing fast to a logged-out state.
+const SESSION_TIMEOUT_MS = 8_000;
 
-    const { data, error } = await supabase.auth.getClaims();
-    if (error || !data?.claims) return null;
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('getSession timed out')), ms);
+    promise.then(
+      value => { clearTimeout(timer); resolve(value); },
+      err => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
 
-    const claims = data.claims as {
-      sub: string;
-      email: string;
-      impersonating_subject?: string;
-      effective_user?: { id: string; email: string; full_name: string; role: string };
-    };
+// Why getSession() came back without a user — lets callers that need to
+// explain a logged-out state (e.g. the app layout's redirect to /login) show
+// an accurate reason instead of re-running their own unguarded Supabase calls
+// to guess. 'timeout' specifically means the auth provider didn't respond in
+// time; it is not the same thing as a deactivated account.
+export type SessionFailureReason = 'no_session' | 'no_row' | 'inactive' | 'timeout' | 'error';
 
-    const lookupEmail = claims.effective_user?.email ?? claims.email;
-    if (!lookupEmail) return null;
+export type SessionResult =
+  | { user: SessionUser; reason: null }
+  | { user: null; reason: SessionFailureReason };
 
-    const admin = createAdminClient();
-    const { data: dbUser } = await admin
-      .from('users')
-      .select('id, email, name, username, role, team, job_title, is_active, is_onboarding, tool_access, approved_hours_per_week')
-      .eq('email', lookupEmail)
-      .maybeSingle();
+async function fetchSessionResult(): Promise<SessionResult> {
+  const supabase = await createClient();
 
-    if (!dbUser || !dbUser.is_active) return null;
+  const { data, error } = await supabase.auth.getClaims();
+  if (error || !data?.claims) return { user: null, reason: 'no_session' };
 
+  const claims = data.claims as {
+    sub: string;
+    email: string;
+    impersonating_subject?: string;
+    effective_user?: { id: string; email: string; full_name: string; role: string };
+  };
+
+  const lookupEmail = claims.effective_user?.email ?? claims.email;
+  if (!lookupEmail) return { user: null, reason: 'no_session' };
+
+  const admin = createAdminClient();
+  const { data: dbUser } = await admin
+    .from('users')
+    .select('id, email, name, username, role, team, job_title, is_active, is_onboarding, tool_access, approved_hours_per_week')
+    .eq('email', lookupEmail)
+    .maybeSingle();
+
+  if (!dbUser) return { user: null, reason: 'no_row' };
+  if (!dbUser.is_active) return { user: null, reason: 'inactive' };
+
+  if (normalizeRole(dbUser.role) === "admin") {
     return {
-      isImpersonating:Boolean(claims.effective_user),
-      id: dbUser.id,
-      email: dbUser.email,
-      name: dbUser.name,
-      username: dbUser.username,
-      role: normalizeRole(dbUser.role),
-      team: dbUser.team ?? null,
-      jobTitle: dbUser.job_title ?? null,
-      isOnboarding: Boolean(dbUser.is_onboarding),
-      toolAccess: Array.isArray(dbUser.tool_access)
-        ? (dbUser.tool_access as unknown[]).filter(isGateableToolKey)
-        : [],
-      approvedHours:dbUser.approved_hours_per_week
+      reason: null,
+      user: {
+        isImpersonating: Boolean(claims.effective_user),
+        id: dbUser.id,
+        email: dbUser.email,
+        name: dbUser.name,
+        username: dbUser.username,
+        role: normalizeRole(dbUser.role),
+        team: dbUser.team ?? null,
+        jobTitle: dbUser.job_title ?? null,
+        isOnboarding: Boolean(dbUser.is_onboarding),
+        toolAccess: Array.isArray(dbUser.tool_access)
+          ? (dbUser.tool_access as unknown[]).filter(isGateableToolKey)
+          : [],
+        approvedHours: dbUser.approved_hours_per_week
+      },
     };
-    
-  } catch {
-    return null;
+  } else {
+    return {
+      reason: null,
+      user: {
+        id: dbUser.id,
+        email: dbUser.email,
+        name: dbUser.name,
+        username: dbUser.username,
+        role: normalizeRole(dbUser.role),
+        team: dbUser.team ?? null,
+        jobTitle: dbUser.job_title ?? null,
+        isOnboarding: Boolean(dbUser.is_onboarding),
+        toolAccess: Array.isArray(dbUser.tool_access)
+          ? (dbUser.tool_access as unknown[]).filter(isGateableToolKey)
+          : [],
+        approvedHours: dbUser.approved_hours_per_week
+      },
+    };
   }
+}
+
+// Cached per-request (React.cache) so layout/page/action calls to either
+// getSession() or getSessionResult() share the same single network round-trip.
+export const getSessionResult = cache(async (): Promise<SessionResult> => {
+  try {
+    return await withTimeout(fetchSessionResult(), SESSION_TIMEOUT_MS);
+  } catch (err) {
+    const reason = err instanceof Error && err.message === 'getSession timed out' ? 'timeout' : 'error';
+    return { user: null, reason };
+  }
+});
+
+export const getSession = cache(async (): Promise<SessionUser | null> => {
+  return (await getSessionResult()).user;
 });
