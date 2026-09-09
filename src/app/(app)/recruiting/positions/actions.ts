@@ -88,6 +88,7 @@ export async function updatePosition(id: number, formData: FormData) {
   if (error) throw new Error(`Failed to update position: ${error.message}`);
 
   revalidatePath('/recruiting/positions');
+  revalidatePath(`/apply/${id}`);
   revalidateTag(ATS_POSITIONS_TAG, { expire: 0 });
   revalidateTag(atsPositionTag(id), { expire: 0 });
 }
@@ -104,6 +105,7 @@ export async function updatePositionStatus(id: number, isOpen: boolean) {
   if (error) throw new Error(`Failed to update position: ${error.message}`);
 
   revalidatePath('/recruiting/positions');
+  revalidatePath(`/apply/${id}`);
   revalidateTag(ATS_POSITIONS_TAG, { expire: 0 });
   revalidateTag(atsPositionTag(id), { expire: 0 });
 }
@@ -117,6 +119,7 @@ export async function deletePosition(id: number) {
   if (error) throw new Error(`Failed to delete position: ${error.message}`);
 
   revalidatePath('/recruiting/positions');
+  revalidatePath(`/apply/${id}`);
   revalidateTag(ATS_POSITIONS_TAG, { expire: 0 });
   revalidateTag(atsPositionTag(id), { expire: 0 });
 }
