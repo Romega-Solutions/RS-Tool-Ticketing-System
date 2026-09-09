@@ -3,7 +3,9 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
-import type { Extensions } from '@tiptap/core';
+import { Extension, type Extensions } from '@tiptap/core';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import StarterKit from '@tiptap/starter-kit';
 import { TextStyle, FontSize } from '@tiptap/extension-text-style';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -48,6 +50,44 @@ export interface RichTextEditorProps {
 
 const MIN_FONT_SIZE = 8;
 const MAX_FONT_SIZE = 96;
+
+// Chrome/WebKit stop rendering a contenteditable's native text selection the
+// moment it loses DOM focus, which happens as soon as you click the toolbar's
+// font-size input — so the highlighted text visibly vanishes right as you're
+// about to resize it. This plugin redraws the selection as a decoration
+// whenever the editor is blurred, so it stays visible until you click back in.
+const frozenSelectionKey = new PluginKey('frozenSelection');
+const FrozenSelection = Extension.create({
+  name: 'frozenSelection',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: frozenSelectionKey,
+        state: {
+          init: () => ({ focused: true }),
+          apply(tr, prev) {
+            const meta = tr.getMeta(frozenSelectionKey);
+            return meta ? meta : prev;
+          },
+        },
+        props: {
+          decorations(state) {
+            const { focused } = frozenSelectionKey.getState(state) as { focused: boolean };
+            const { from, to } = state.selection;
+            if (focused || from === to) return null;
+            return DecorationSet.create(state.doc, [
+              Decoration.inline(from, to, { class: 'rs-frozen-selection' }),
+            ]);
+          },
+          handleDOMEvents: {
+            focus: (view) => { view.dispatch(view.state.tr.setMeta(frozenSelectionKey, { focused: true })); return false; },
+            blur: (view) => { view.dispatch(view.state.tr.setMeta(frozenSelectionKey, { focused: false })); return false; },
+          },
+        },
+      }),
+    ];
+  },
+});
 
 // Lightweight curated set — no heavy emoji extension/asset pack.
 const EMOJIS = [
@@ -249,6 +289,7 @@ export function RichTextEditor({
     StarterKit,
     TextStyle,
     FontSize,
+    FrozenSelection,
     Placeholder.configure({ placeholder: placeholder ?? 'Write something…' }),
   ];
   if (enableMentions) {
