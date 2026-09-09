@@ -215,6 +215,9 @@
 
 /* Editor surface (ProseMirror) — same typography + an empty-state placeholder. */
 .rs-richtext-editor .ProseMirror { outline: none; min-height: 9rem; }
+/* Keeps the text selection visible once the editor loses DOM focus (e.g. the
+   font-size input takes focus) — Chrome/WebKit hide native selection on blur. */
+.rs-richtext-editor .rs-frozen-selection { background-color: var(--rs-primary-100); }
 .rs-richtext-editor .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   color: var(--rs-neutral-grey-400);
