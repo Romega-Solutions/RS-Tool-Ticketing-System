@@ -87,10 +87,17 @@ function ToolbarButton({
 }
 
 function Toolbar({ editor, trailing }: { editor: Editor | null; trailing?: React.ReactNode }) {
+  // While the font-size field is focused, its displayed text is driven by
+  // this draft instead of the editor's (clamped) attribute. Without it, every
+  // keystroke re-derives the shown value from the clamped mark, so typing the
+  // first digit of e.g. "24" clamps to the 8px floor and redisplays "8" before
+  // the second keystroke lands — "24" comes out as "84".
+  const [sizeDraft, setSizeDraft] = useState<string | null>(null);
   if (!editor) return null;
   const currentSize =
     (editor.getAttributes('textStyle').fontSize as string | undefined) ?? '';
   const currentSizeInt = currentSize ? parseInt(currentSize, 10) : NaN;
+  const sizeDisplayValue = sizeDraft ?? (Number.isNaN(currentSizeInt) ? '' : String(currentSizeInt));
 
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-2 py-1.5">
@@ -115,14 +122,32 @@ function Toolbar({ editor, trailing }: { editor: Editor | null; trailing?: React
         min={MIN_FONT_SIZE}
         max={MAX_FONT_SIZE}
         step={1}
-        value={Number.isNaN(currentSizeInt) ? '' : currentSizeInt}
+        value={sizeDisplayValue}
+        onFocus={() => setSizeDraft(sizeDisplayValue)}
         onChange={(e) => {
+          // No .focus() here — these commands apply to the editor's tracked
+          // selection regardless of DOM focus. Focusing the editor would
+          // steal focus away from this input on every keystroke, so typed
+          // digits (or a highlighted selection) end up hitting the document
+          // instead of this field.
           const raw = e.target.value;
-          if (!raw) { editor.chain().focus().unsetFontSize().run(); return; }
+          setSizeDraft(raw);
+          if (!raw) { editor.chain().unsetFontSize().run(); return; }
           const n = Math.trunc(Number(raw));
           if (!Number.isFinite(n)) return;
-          const clamped = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, n));
-          editor.chain().focus().setFontSize(`${clamped}px`).run();
+          // Applied live, unclamped, so the preview updates as you type —
+          // clamping happens once on blur instead of on every keystroke.
+          editor.chain().setFontSize(`${n}px`).run();
+        }}
+        onBlur={() => {
+          if (sizeDraft) {
+            const n = Math.trunc(Number(sizeDraft));
+            if (Number.isFinite(n)) {
+              const clamped = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, n));
+              editor.chain().setFontSize(`${clamped}px`).run();
+            }
+          }
+          setSizeDraft(null);
         }}
         className="h-8 w-14 rounded-md border border-(--rs-neutral-grey-200) bg-white px-2 text-xs text-(--rs-neutral-grey-700) focus:border-(--rs-primary-300) focus:outline-none"
       />
