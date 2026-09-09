@@ -15,6 +15,22 @@ function toLocalISO(d: Date): string {
   return `${y}-${m}-${dd}`;
 }
 
+// Fixed PHT offset (Asia/Manila, UTC+8, no DST) — same convention as
+// src/lib/briefing.ts / src/lib/status-drafter.ts. Deriving a calendar date
+// from an ISO instant must NOT use the server process's ambient timezone
+// (Vercel/Node run in UTC): 8:00 AM PHT is exactly UTC midnight, so any
+// earlier PHT clock-in falls on the *previous* UTC calendar date and was
+// being wrongly rejected as "not on the day you're editing."
+const PHT_OFFSET_MS = 8 * 3600 * 1000;
+
+function phtDateOf(d: Date): string {
+  const shifted = new Date(d.getTime() + PHT_OFFSET_MS);
+  const y  = shifted.getUTCFullYear();
+  const m  = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(shifted.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
 function getMondayOfWeek(dateStr: string): string | null {
   const d = new Date(dateStr + 'T00:00:00');
   if (isNaN(d.getTime())) return null;
@@ -130,8 +146,9 @@ export const PATCH = route(async (req: Request) => {
       }
     }
     // Sessions can only be edited from the day they're keyed to (their
-    // clock-in date) — a cross-midnight session belongs to the day it starts.
-    if (toLocalISO(inDate) !== date) {
+    // clock-in date, in PHT) — a cross-midnight session belongs to the day
+    // it starts.
+    if (phtDateOf(inDate) !== date) {
       return NextResponse.json({ error: "A session must start on the day you're editing." }, { status: 400 });
     }
     normalized.push({ id: s.id, inIso: inDate.toISOString(), outIso: outDate ? outDate.toISOString() : null });

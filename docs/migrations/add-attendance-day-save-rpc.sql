@@ -88,7 +88,13 @@ BEGIN
   IF EXISTS (SELECT 1 FROM tmp_attendance_day_sessions WHERE out_ts IS NOT NULL AND out_ts <= in_ts) THEN
     RAISE EXCEPTION 'Clock-out must be after clock-in.';
   END IF;
-  IF EXISTS (SELECT 1 FROM tmp_attendance_day_sessions WHERE in_ts::date <> p_date::date) THEN
+  -- Attendance days are anchored to PHT (Asia/Manila, UTC+8, no DST — the
+  -- app's operating timezone, see src/lib/briefing.ts). Casting a timestamptz
+  -- straight to ::date uses the session's timezone GUC (UTC on Supabase by
+  -- default), so 8:00 AM PHT — exactly UTC midnight — would otherwise put any
+  -- earlier PHT clock-in on the *previous* UTC calendar date and wrongly trip
+  -- this check.
+  IF EXISTS (SELECT 1 FROM tmp_attendance_day_sessions WHERE (in_ts AT TIME ZONE 'Asia/Manila')::date <> p_date::date) THEN
     RAISE EXCEPTION 'A session must start on the day you''re editing.';
   END IF;
 
@@ -127,7 +133,11 @@ BEGIN
   FOR r IN
     SELECT DISTINCT d::date AS dt
     FROM tmp_attendance_day_sessions s,
-         generate_series(date_trunc('day', s.in_ts)::date, date_trunc('day', COALESCE(s.out_ts, s.in_ts))::date, interval '1 day') d
+         generate_series(
+           (s.in_ts AT TIME ZONE 'Asia/Manila')::date,
+           (COALESCE(s.out_ts, s.in_ts) AT TIME ZONE 'Asia/Manila')::date,
+           interval '1 day'
+         ) d
     WHERE d::date <> p_date::date
   LOOP
     v_other_dow := extract(dow FROM r.dt)::integer;
