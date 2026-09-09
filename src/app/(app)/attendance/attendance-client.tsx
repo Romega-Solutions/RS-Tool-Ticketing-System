@@ -130,6 +130,18 @@ function crossesDay(clockedInAt: string, clockedOutAt: string | null): boolean {
   return !!clockedOutAt && localDateOf(clockedInAt) !== localDateOf(clockedOutAt);
 }
 
+// Only a day's LAST (latest clock-in) session can plausibly cross into the
+// next calendar day — an earlier session in a multi-shift day always ends
+// same-day. Returns -1 if no session has a clock-in time yet.
+function lastSessionIndex(sessions: { inTime: string }[]): number {
+  let idx = -1;
+  for (let i = 0; i < sessions.length; i++) {
+    if (!sessions[i].inTime) continue;
+    if (idx === -1 || sessions[i].inTime > sessions[idx].inTime) idx = i;
+  }
+  return idx;
+}
+
 // ── Avatar / today helpers ─────────────────────────────────────────────────────
 
 function MemberAvatar({ name, photoUrl, size = 'md' }: { name: string; photoUrl?: string | null; size?: 'sm' | 'md' }) {
@@ -158,6 +170,19 @@ function toLocalISO(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${dd}`;
+}
+
+function addDays(dateStr: string, n: number): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return toLocalISO(d);
+}
+
+// Combines a "YYYY-MM-DD" date with an "HH:mm" <input type="time"> value into
+// a local Date — no timezone suffix, so this parses as local time (matching
+// how <input type="datetime-local"> values used to be handled here).
+function combineDateTime(dateStr: string, timeStr: string): Date {
+  return new Date(`${dateStr}T${timeStr}:00`);
 }
 
 function fmtDate(d: Date): string {
@@ -207,7 +232,11 @@ function TimesheetDetailPanel({
   // the atomic PATCH /api/admin/attendance/day.
   const [editingDay, setEditingDay] = useState<DetailDay | null>(null);
   const [draftStatus, setDraftStatus] = useState('');
-  const [draftSessions, setDraftSessions] = useState<{ id?: number; in: string; out: string }[]>([]);
+  // Clock-in is always on the day being edited, so it only needs a time.
+  // Clock-out is usually the same day too, but an overnight shift clocks out
+  // on the following calendar day — outNextDay carries that as an explicit
+  // boolean instead of asking admins to pick a clock-out date.
+  const [draftSessions, setDraftSessions] = useState<{ id?: number; inTime: string; outTime: string; outNextDay: boolean }[]>([]);
   const [dayModalError, setDayModalError] = useState('');
   const dayModalBodyRef = useRef<HTMLDivElement>(null);
 
@@ -243,15 +272,12 @@ function TimesheetDetailPanel({
     return () => { cancelled = true; };
   }, [userId, weekStart, reloadKey]);
 
-  function toLocalInputValue(iso: string): string {
-    // <input type="datetime-local"> wants "YYYY-MM-DDTHH:mm" in *local* time.
+  function toLocalTimeValue(iso: string): string {
+    // <input type="time"> wants "HH:mm" in *local* time.
     const d = new Date(iso);
-    const y  = d.getFullYear();
-    const m  = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
     const hh = String(d.getHours()).padStart(2, '0');
     const mi = String(d.getMinutes()).padStart(2, '0');
-    return `${y}-${m}-${dd}T${hh}:${mi}`;
+    return `${hh}:${mi}`;
   }
 
   // Opens a single day's edit modal, seeding drafts from that day's current
@@ -260,9 +286,10 @@ function TimesheetDetailPanel({
   function openDayModal(day: DetailDay) {
     const daySessions = entries.filter(e => e.date === day.date);
     setDraftSessions(daySessions.map(s => ({
-      id:  s.id,
-      in:  toLocalInputValue(s.clockedInAt),
-      out: s.clockedOutAt ? toLocalInputValue(s.clockedOutAt) : '',
+      id:         s.id,
+      inTime:     toLocalTimeValue(s.clockedInAt),
+      outTime:    s.clockedOutAt ? toLocalTimeValue(s.clockedOutAt) : '',
+      outNextDay: crossesDay(s.clockedInAt, s.clockedOutAt),
     })));
     setDraftStatus(day.status ?? '');
     setDayModalError('');
@@ -275,34 +302,50 @@ function TimesheetDetailPanel({
   }
 
   function addDraftSession() {
-    setDraftSessions(prev => [...prev, { in: '', out: '' }]);
+    setDraftSessions(prev => [...prev, { inTime: '', outTime: '', outNextDay: false }]);
   }
 
   function removeDraftSession(idx: number) {
     setDraftSessions(prev => prev.filter((_, i) => i !== idx));
   }
 
-  function updateDraftSession(idx: number, field: 'in' | 'out', value: string) {
+  function updateDraftSession(idx: number, field: 'inTime' | 'outTime', value: string) {
     setDraftSessions(prev => prev.map((d, i) => (i === idx ? { ...d, [field]: value } : d)));
+  }
+
+  function setDraftSessionNextDay(idx: number, value: boolean) {
+    setDraftSessions(prev => prev.map((d, i) => (i === idx ? { ...d, outNextDay: value } : d)));
   }
 
   // Validates only this day's staged sessions: required clock-in, clock-out
   // after clock-in, and no two sessions overlapping each other. Cross-day
   // overlap and the Absent/Leave-day check are re-verified server-side.
   function validateDraftSessions(): string | null {
+    if (!editingDay) return null;
+    const day = editingDay.date;
+    // Only the last (latest clock-in) session's outNextDay is honored — an
+    // earlier session can't plausibly cross into the next day.
+    const lastIdx = lastSessionIndex(draftSessions);
     for (const d of draftSessions) {
-      if (!d.in) return 'Clock-in time is required for every session.';
-      if (d.out && new Date(d.out).getTime() <= new Date(d.in).getTime()) {
-        return 'Clock-out must be after clock-in.';
-      }
+      if (!d.inTime) return 'Clock-in time is required for every session.';
+    }
+    for (let i = 0; i < draftSessions.length; i++) {
+      const d = draftSessions[i];
+      if (!d.outTime) continue;
+      const nextDay = i === lastIdx && d.outNextDay;
+      const inMs  = combineDateTime(day, d.inTime).getTime();
+      const outMs = combineDateTime(nextDay ? addDays(day, 1) : day, d.outTime).getTime();
+      if (outMs <= inMs) return 'Clock-out must be after clock-in.';
     }
     for (let i = 0; i < draftSessions.length; i++) {
       for (let j = i + 1; j < draftSessions.length; j++) {
         const a = draftSessions[i], b = draftSessions[j];
-        const aOut = a.out ? new Date(a.out).getTime() : Infinity;
-        const bOut = b.out ? new Date(b.out).getTime() : Infinity;
-        const aIn  = new Date(a.in).getTime();
-        const bIn  = new Date(b.in).getTime();
+        const aNextDay = i === lastIdx && a.outNextDay;
+        const bNextDay = j === lastIdx && b.outNextDay;
+        const aIn  = combineDateTime(day, a.inTime).getTime();
+        const bIn  = combineDateTime(day, b.inTime).getTime();
+        const aOut = a.outTime ? combineDateTime(aNextDay ? addDays(day, 1) : day, a.outTime).getTime() : Infinity;
+        const bOut = b.outTime ? combineDateTime(bNextDay ? addDays(day, 1) : day, b.outTime).getTime() : Infinity;
         if (aIn < bOut && bIn < aOut) return 'Two sessions on this day overlap in time.';
       }
     }
@@ -318,12 +361,20 @@ function TimesheetDetailPanel({
     setAdminBusy(true);
     try {
       const workable = draftStatus === 'present' || draftStatus === 'wfh';
+      // Only the last (latest clock-in) session's outNextDay is honored — an
+      // earlier session can't plausibly cross into the next day.
+      const lastIdx = lastSessionIndex(draftSessions);
       const sessionsPayload = workable
-        ? draftSessions.filter(d => d.in).map(d => ({
-            id:           d.id,
-            clockedInAt:  new Date(d.in).toISOString(),
-            clockedOutAt: d.out ? new Date(d.out).toISOString() : null,
-          }))
+        ? draftSessions
+            .map((d, i) => ({ d, i }))
+            .filter(({ d }) => d.inTime)
+            .map(({ d, i }) => ({
+              id:           d.id,
+              clockedInAt:  combineDateTime(editingDay.date, d.inTime).toISOString(),
+              clockedOutAt: d.outTime
+                ? combineDateTime(i === lastIdx && d.outNextDay ? addDays(editingDay.date, 1) : editingDay.date, d.outTime).toISOString()
+                : null,
+            }))
         : [];
       const res = await fetch('/api/admin/attendance/day', {
         method:  'PATCH',
@@ -677,7 +728,11 @@ function TimesheetDetailPanel({
                 Clock-in / clock-out sessions
               </label>
               <div className="space-y-2">
-                {draftSessions.map((d, idx) => {
+                {(() => {
+                  // Only the day's last (latest clock-in) session can plausibly
+                  // cross into the next day — earlier sessions always end same-day.
+                  const lastIdx = lastSessionIndex(draftSessions);
+                  return draftSessions.map((d, idx) => {
                   const original = d.id != null ? entries.find(e => e.id === d.id) : undefined;
                   return (
                     <div key={d.id ?? `new-${idx}`} className="rounded border border-(--rs-neutral-grey-200) px-2.5 py-2 space-y-1.5">
@@ -685,9 +740,9 @@ function TimesheetDetailPanel({
                         <label className="block text-[10px] text-(--rs-neutral-grey-500) font-semibold">
                           Clock-in
                           <input
-                            type="datetime-local"
-                            value={d.in}
-                            onChange={e => updateDraftSession(idx, 'in', e.target.value)}
+                            type="time"
+                            value={d.inTime}
+                            onChange={e => updateDraftSession(idx, 'inTime', e.target.value)}
                             disabled={adminBusy}
                             className="mt-0.5 block w-full rounded border border-(--rs-neutral-grey-200) px-1.5 py-1 text-xs"
                           />
@@ -695,14 +750,26 @@ function TimesheetDetailPanel({
                         <label className="block text-[10px] text-(--rs-neutral-grey-500) font-semibold">
                           Clock-out
                           <input
-                            type="datetime-local"
-                            value={d.out}
-                            onChange={e => updateDraftSession(idx, 'out', e.target.value)}
+                            type="time"
+                            value={d.outTime}
+                            onChange={e => updateDraftSession(idx, 'outTime', e.target.value)}
                             disabled={adminBusy}
                             className="mt-0.5 block w-full rounded border border-(--rs-neutral-grey-200) px-1.5 py-1 text-xs"
                           />
                         </label>
                       </div>
+                      {idx === lastIdx && (
+                        <label className="flex items-center gap-1.5 text-[10px] text-(--rs-neutral-grey-500) font-medium cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={d.outNextDay}
+                            onChange={e => setDraftSessionNextDay(idx, e.target.checked)}
+                            disabled={adminBusy}
+                            className="w-3 h-3 rounded accent-(--rs-primary-500)"
+                          />
+                          Clocks out the next day
+                        </label>
+                      )}
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 min-w-0">
                           {original && !original.clockedOutAt && (
@@ -749,7 +816,8 @@ function TimesheetDetailPanel({
                       </div>
                     </div>
                   );
-                })}
+                  });
+                })()}
 
                 <button
                   type="button"
