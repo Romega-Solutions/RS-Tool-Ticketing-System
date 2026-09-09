@@ -114,7 +114,7 @@ BEGIN
     SELECT 1
     FROM timesheets t, tmp_attendance_day_sessions s
     WHERE t.user_id = p_user_id
-      AND t.date BETWEEN (p_date::date - 1) AND (p_date::date + 1)
+      AND t.date::date BETWEEN (p_date::date - 1) AND (p_date::date + 1)
       AND t.id <> ALL (COALESCE(v_existing_ids, ARRAY[]::integer[]))
       AND s.in_ts < COALESCE(t.clocked_out_at::timestamptz, 'infinity'::timestamptz)
       AND t.clocked_in_at::timestamptz < COALESCE(s.out_ts, 'infinity'::timestamptz)
