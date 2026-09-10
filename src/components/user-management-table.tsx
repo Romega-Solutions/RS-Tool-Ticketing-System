@@ -775,8 +775,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                     {ROLE_OPTIONS.map(r => <option key={r} value={r}>{roleDisplayLabel(r)}</option>)}
                   </select>
                 </Field>
-                <Field label="Department">
-                  <select value={newForm.team} onChange={e => setNewForm(f => ({ ...f, team: e.target.value }))}
+                <Field label="Department" required>
+                  <select required value={newForm.team} onChange={e => setNewForm(f => ({ ...f, team: e.target.value }))}
                     className={inputCls}>
                     <option value="">— Select —</option>
                     {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -785,8 +785,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Job Title">
-                  <input value={newForm.jobTitle} onChange={e => setNewForm(f => ({ ...f, jobTitle: e.target.value }))}
+                <Field label="Job Title" required>
+                  <input required value={newForm.jobTitle} onChange={e => setNewForm(f => ({ ...f, jobTitle: e.target.value }))}
                     className={inputCls} placeholder="e.g. Software Engineer" />
                 </Field>
                 <Field label="Member Code">
@@ -796,8 +796,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Approved Hours / week">
-                  <input type="number" min={1} max={60} inputMode="numeric"
+                <Field label="Approved Hours / week" required>
+                  <input required type="number" min={1} max={60} inputMode="numeric"
                     value={newForm.approvedHoursPerWeek} onChange={e => setNewForm(f => ({ ...f, approvedHoursPerWeek: e.target.value }))}
                     className={`${inputCls} tabular-nums`} placeholder="15" />
                 </Field>
@@ -812,12 +812,12 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Schedule start (PHT)">
-                  <input type="time" value={newForm.schedulePhtStart}
+                <Field label="Schedule start (PHT)" required>
+                  <input required type="time" value={newForm.schedulePhtStart}
                     onChange={e => setNewForm(f => ({ ...f, schedulePhtStart: e.target.value }))} className={inputCls} />
                 </Field>
-                <Field label="Schedule end (PHT)">
-                  <input type="time" value={newForm.schedulePhtEnd}
+                <Field label="Schedule end (PHT)" required>
+                  <input required type="time" value={newForm.schedulePhtEnd}
                     onChange={e => setNewForm(f => ({ ...f, schedulePhtEnd: e.target.value }))} className={inputCls} />
                 </Field>
               </div>
@@ -837,8 +837,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                 </Field>
               </div>
 
-              <Field label="Google Drive File (link)">
-                <input type="url" value={newForm.driveUrl}
+              <Field label="Google Drive File (link)" required>
+                <input required type="url" value={newForm.driveUrl}
                   onChange={e => setNewForm(f => ({ ...f, driveUrl: e.target.value }))}
                   className={inputCls} placeholder="https://drive.google.com/…" />
               </Field>
