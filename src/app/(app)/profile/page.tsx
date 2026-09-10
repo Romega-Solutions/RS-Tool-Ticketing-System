@@ -59,6 +59,23 @@ function InfoRow({ label, value }: { label: string; value: string | null | undef
   );
 }
 
+function EditableRow({ label, value, onChange, type = 'text', placeholder }: {
+  label: string; value: string; onChange: (value: string) => void; type?: string; placeholder?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-1.5">
+      <label className="text-xs font-medium text-(--rs-neutral-grey-500) shrink-0">{label}</label>
+      <input
+        type={type}
+        value={value}
+        placeholder={placeholder ?? 'Not set'}
+        onChange={e => onChange(e.target.value)}
+        className="min-w-0 flex-1 rounded px-1.5 py-1 text-right text-sm font-medium text-(--rs-neutral-grey-900) outline-none transition-colors placeholder:font-normal placeholder:italic placeholder:text-(--rs-neutral-grey-400) hover:bg-white focus:bg-white focus:text-left focus:ring-2 focus:ring-(--rs-primary-100)"
+      />
+    </div>
+  );
+}
+
 function OrgAvatar({ person, size = 80 }: { person: OrgPerson; size?: number }) {
   const initials = person.name
     .split(' ').filter(Boolean).slice(0, 2)
@@ -102,12 +119,16 @@ export default function ProfilePage() {
   const [orgProfile, setOrgProfile] = useState<OrgPerson | null>(null);
   const [orgLoading, setOrgLoading] = useState(false);
   const [fx, setFx] = useState<FxRate | null>(null);
-  // Identity is read-only and sourced from the org chart; only password +
-  // reminder settings remain editable here.
+  // Full Name and Email are always self-editable; Job Title is self-editable
+  // only for leads/admins (see canEditJobTitle below) — everything else
+  // (Department, Reports To, Username, Role) stays read-only/org-chart-sourced.
   const [form, setForm] = useState({
+    name: '', email: '', jobTitle: '',
     password: '', reminderEnabled: true, reminderIntervalMinutes: 120,
     notificationPrefs: DEFAULT_NOTIFICATION_PREFS,
   });
+
+  const canEditJobTitle = user?.role === 'lead' || user?.role === 'admin';
 
   useEffect(() => {
     const load = async () => {
@@ -117,12 +138,16 @@ export default function ProfilePage() {
         const data = await res.json() as { user?: ProfileUser; error?: string };
         if (!res.ok || !data.user) { setError(data.error || 'Failed to load profile'); return; }
         setUser(data.user);
-        setForm({
+        setForm(p => ({
+          ...p,
+          name: data.user!.name ?? '',
+          email: data.user!.email ?? '',
+          jobTitle: data.user!.jobTitle ?? '',
           password: '',
-          reminderEnabled: data.user.reminderEnabled ?? true,
-          reminderIntervalMinutes: data.user.reminderIntervalMinutes ?? 120,
-          notificationPrefs: { ...DEFAULT_NOTIFICATION_PREFS, ...(data.user.notificationPrefs ?? {}) },
-        });
+          reminderEnabled: data.user!.reminderEnabled ?? true,
+          reminderIntervalMinutes: data.user!.reminderIntervalMinutes ?? 120,
+          notificationPrefs: { ...DEFAULT_NOTIFICATION_PREFS, ...(data.user!.notificationPrefs ?? {}) },
+        }));
 
         if (data.user.email || data.user.name) {
           setOrgLoading(true);
@@ -159,15 +184,14 @@ export default function ProfilePage() {
     return () => { active = false; clearInterval(id); };
   }, [user?.hourlyRateUsd]);
 
-  // Single read-only identity, sourced from the org chart with a graceful
-  // fallback to the stored account values when there is no org chart match.
+  // Department and Reports To stay read-only and org-chart-sourced (with a
+  // graceful fallback to the stored account values when there's no org chart
+  // match). Full Name, Email, and Job Title are edited directly via `form`
+  // below instead — see canEditJobTitle for who may touch Job Title.
   const identity = {
     linked:     Boolean(orgProfile),
-    name:       orgProfile?.name          ?? user?.name      ?? '',
-    title:      orgProfile?.title         ?? user?.jobTitle  ?? null,
-    department: orgProfile?.department    ?? user?.team      ?? null,
+    department: orgProfile?.department    ?? user?.team ?? null,
     reportsTo:  orgProfile?.reportsToName ?? null,
-    email:      orgProfile?.email         ?? user?.email     ?? '',
   };
 
   const handleOrgSync = async () => {
@@ -192,23 +216,27 @@ export default function ProfilePage() {
     e.preventDefault();
     setSaving(true); setError(''); setSuccess('');
     try {
-      // Identity is read-only; we still send it so the DB stays in sync with
-      // the org chart. The API requires a non-empty name.
-      const payload = {
-        name:     identity.name || user?.name || '',
-        team:     identity.department,
-        jobTitle: identity.title,
+      const payload: Record<string, unknown> = {
+        name:     form.name.trim(),
+        email:    form.email.trim(),
         password: form.password,
         reminderEnabled: form.reminderEnabled,
         reminderIntervalMinutes: form.reminderIntervalMinutes,
         notificationPrefs: form.notificationPrefs,
       };
+      // Only leads/admins may change their own job title — omit the field
+      // entirely for everyone else so the API never has to reject a no-op.
+      if (canEditJobTitle) payload.jobTitle = form.jobTitle.trim() || null;
+
       const res  = await fetch('/api/profile/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const data = await res.json() as { user?: ProfileUser; error?: string };
       if (!res.ok || !data.user) { setError(data.error || 'Failed to update profile'); return; }
       setUser(data.user);
       setForm(prev => ({
         ...prev,
+        name: data.user!.name ?? '',
+        email: data.user!.email ?? '',
+        jobTitle: data.user!.jobTitle ?? '',
         password: '',
         notificationPrefs: { ...DEFAULT_NOTIFICATION_PREFS, ...(data.user!.notificationPrefs ?? {}) },
       }));
@@ -312,7 +340,9 @@ export default function ProfilePage() {
           {/* Scrollable fields */}
           <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
 
-            {/* Identity — read-only, sourced from the Org Chart */}
+            {/* Identity — Full Name/Email are always yours to edit; Job Title
+                only if you're a lead/admin. Department/Reports To stay
+                read-only and org-chart-sourced. */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className={labelCls + ' mb-0'}>Identity</span>
@@ -322,28 +352,35 @@ export default function ProfilePage() {
                   </span>
                 ) : identity.linked ? (
                   <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600">
-                    <CheckCircle2 className="w-3 h-3" /> Synced from Org Chart
+                    <CheckCircle2 className="w-3 h-3" /> Matched on Org Chart
                   </span>
                 ) : (
                   <span className="text-[11px] text-(--rs-neutral-grey-400)">
-                    From your account · not linked to org chart
+                    Not linked to org chart
                   </span>
                 )}
               </div>
 
               <div className="rounded-lg border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) divide-y divide-(--rs-neutral-grey-100)">
-                <InfoRow label="Full Name"  value={identity.name} />
-                <InfoRow label="Job Title"  value={identity.title} />
+                <EditableRow label="Full Name" value={form.name} onChange={v => setForm(p => ({ ...p, name: v }))} />
+                {canEditJobTitle ? (
+                  <EditableRow label="Job Title" value={form.jobTitle} onChange={v => setForm(p => ({ ...p, jobTitle: v }))} />
+                ) : (
+                  <InfoRow label="Job Title" value={user?.jobTitle} />
+                )}
                 <InfoRow label="Department" value={identity.department} />
                 <InfoRow label="Reports To" value={identity.reportsTo} />
-                <InfoRow label="Email"      value={identity.email} />
+                <EditableRow label="Email" type="email" value={form.email} onChange={v => setForm(p => ({ ...p, email: v }))} />
                 <InfoRow label="Username"   value={user?.username ?? null} />
                 <InfoRow label="Role"       value={user?.role ?? null} />
               </div>
 
+              <p className="mt-1.5 text-[11px] text-(--rs-neutral-grey-400)">
+                Full Name and Email are yours to update{canEditJobTitle ? ' — as a lead/admin, you can also update Job Title' : ''}. Changing Email updates your sign-in address too.
+              </p>
               {!identity.linked && !orgLoading && (
-                <p className="mt-1.5 text-[11px] text-(--rs-neutral-grey-400)">
-                  Showing your stored account details. Use <span className="font-medium text-(--rs-neutral-grey-600)">Sync from Org Chart</span> on the left to link your profile.
+                <p className="mt-1 text-[11px] text-(--rs-neutral-grey-400)">
+                  Department shown here is from your stored account. Use <span className="font-medium text-(--rs-neutral-grey-600)">Sync from Org Chart</span> on the left to link your profile.
                 </p>
               )}
             </div>

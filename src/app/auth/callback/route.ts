@@ -88,10 +88,12 @@ export async function GET(request: NextRequest) {
     }
     isNewUser = true;
   } else if (orgProfile) {
+    // name and job_title are now user/lead-editable on the Profile page — don't
+    // silently stomp a manual edit on every sign-in. team stays org-chart-driven
+    // since it isn't user-editable and other gating (tool access, lead-tool
+    // visibility) depends on it staying current.
     await admin.from('users').update({
-      name:       orgProfile.name,
       team:       orgProfile.team,
-      job_title:  orgProfile.jobTitle,
       updated_at: new Date().toISOString(),
     }).eq('email', email);
   }
