@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { unstable_cache, revalidateTag } from 'next/cache';
-import { createAdminClient } from '@/lib/supabase/admin';
+import { createAdminClient, findAuthUserByEmail } from '@/lib/supabase/admin';
 import { hash } from 'bcryptjs';
 import { route, requireAdmin } from '@/lib/api';
 import { recordAudit, deriveUserPatchAction } from '@/lib/audit';
@@ -85,24 +85,6 @@ function parseHhmm(raw: unknown): { ok: true; value: string | null } | { ok: fal
   const s = String(raw).trim();
   if (!HHMM_RE.test(s)) return { ok: false, error: 'Schedule time must be HH:MM (24-hour)' };
   return { ok: true, value: s };
-}
-
-// Find a Supabase Auth user by email. supabase-js admin has no direct email
-// lookup, so we paginate listUsers. Used to recover orphaned auth accounts
-// (in auth.users but with no public.users profile row).
-async function findAuthUserByEmail(
-  admin: ReturnType<typeof createAdminClient>,
-  email: string,
-): Promise<{ id: string } | null> {
-  const target = email.toLowerCase();
-  for (let page = 1; page <= 25; page++) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
-    if (error || !data.users.length) return null;
-    const hit = data.users.find((u) => (u.email ?? '').toLowerCase() === target);
-    if (hit) return { id: hit.id };
-    if (data.users.length < 200) return null;
-  }
-  return null;
 }
 
 const getCachedUserRows = unstable_cache(
