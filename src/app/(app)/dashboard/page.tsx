@@ -70,6 +70,18 @@ const OPEN_GROUPS = new Set(['backlog', 'unstarted', 'started', 'in_progress', '
 
 export default async function DashboardPage() {
   const sessionUser = await getSession();
+
+  const userId = sessionUser?.id
+  const admin = createAdminClient();
+
+  const { data, error } = await admin
+    .from('users')
+    .select('approved_hours_per_week')
+    .eq('id', userId)
+    .single();
+  
+  const approvedHoursPerWeek = data?.approved_hours_per_week;
+
   const isFriday = new Date().getDay() === 5;
 
   return (
@@ -104,7 +116,7 @@ export default async function DashboardPage() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr]">
         <FxRateWidget />
-        <WeeklyHoursCard />
+        <WeeklyHoursCard approvedHoursPerWeek={approvedHoursPerWeek} />
       </div>
 
       <Suspense fallback={<SummarySkeleton />}>

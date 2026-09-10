@@ -9,7 +9,7 @@ import { formatDuration, weeklyBudget } from '@/lib/utils';
 // of the 15h Mon–Sun cap that every role can see (the Attendance page itself is
 // lead/admin-only). Reuses /api/presence, which returns the user's completed
 // week seconds plus any open session, and live-ticks while clocked in.
-export function WeeklyHoursCard() {
+export function WeeklyHoursCard({approvedHoursPerWeek}:{approvedHoursPerWeek:number}) {
   const [loading, setLoading] = useState(true);
   const [weekSecondsBefore, setWeekSecondsBefore] = useState(0);
   const [clockedInAt, setClockedInAt] = useState<string | null>(null);
@@ -52,8 +52,10 @@ export function WeeklyHoursCard() {
     ? Math.max(0, Math.round((nowMs - new Date(clockedInAt).getTime()) / 1000))
     : 0;
 
+  const approvedSecondsPerWeek = approvedHoursPerWeek * 60 * 60
+
   const { usedSeconds, remainingSeconds, capSeconds, percentUsed, isOvertime } =
-    weeklyBudget(weekSecondsBefore, elapsed);
+    weeklyBudget(weekSecondsBefore, elapsed, approvedSecondsPerWeek);
   const usedH = (usedSeconds / 3600).toFixed(usedSeconds % 3600 === 0 ? 0 : 1);
   const capH = Math.round(capSeconds / 3600);
   const fillColor = isOvertime ? 'bg-amber-500' : percentUsed >= 80 ? 'bg-amber-400' : 'bg-(--rs-primary-500)';
