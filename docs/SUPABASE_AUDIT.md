@@ -136,7 +136,7 @@ order by au.last_sign_in_at desc nulls last;
 
 ## 6. Local helper script
 
-`scripts/fix-my-account.ts` does the same probe from the terminal using `SUPABASE_SERVICE_ROLE_KEY` — handy when SQL Editor isn't open.
+`scripts/fix-my-account.ts` does the same probe from the terminal using `SUPABASE_SECRET_KEY` — handy when SQL Editor isn't open.
 
 ```bash
 # Check
