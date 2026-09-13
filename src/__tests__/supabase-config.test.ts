@@ -8,36 +8,36 @@ describe('hasSupabaseConfig', () => {
 
   it('returns false when either public Supabase env is missing', () => {
     expect(hasSupabaseConfig({ NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co' })).toBe(false);
-    expect(hasSupabaseConfig({ NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key' })).toBe(false);
+    expect(hasSupabaseConfig({ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'publishable-key' })).toBe(false);
   });
 
   it('returns true when both public Supabase envs are present', () => {
     expect(hasSupabaseConfig({
       NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key',
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'publishable-key',
     })).toBe(true);
   });
 
-  it('returns false when service role key is missing', () => {
+  it('returns false when secret key is missing', () => {
     expect(hasSupabaseAdminConfig({
       NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key',
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'publishable-key',
     })).toBe(false);
   });
 
-  it('returns false when service role key is placeholder', () => {
+  it('returns false when secret key is placeholder', () => {
     expect(hasSupabaseAdminConfig({
       NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key',
-      SUPABASE_SERVICE_ROLE_KEY: 'your-service-role-key-here',
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'publishable-key',
+      SUPABASE_SECRET_KEY: 'your-secret-key-here',
     })).toBe(false);
   });
 
-  it('returns true when service role key is present', () => {
+  it('returns true when secret key is present', () => {
     expect(hasSupabaseAdminConfig({
       NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key',
-      SUPABASE_SERVICE_ROLE_KEY: 'service-role-key',
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'publishable-key',
+      SUPABASE_SECRET_KEY: 'secret-key',
     })).toBe(true);
   });
 });
