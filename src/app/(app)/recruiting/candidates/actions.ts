@@ -590,12 +590,11 @@ export async function sendCandidateFormReminder(candidateId: number, kind: Recru
       .eq('form_key', 'background_check')
       .is('submitted_at', null)
       .is('invalidated_at', null)
-      .is('last_reminder_sent_at', null)
       .order('sent_at', { ascending: false })
       .limit(1)
       .maybeSingle();
     if (error) throw new Error(`Failed to load background-check request: ${error.message}`);
-    if (!request) throw new Error('There is no unreminded background-check request');
+    if (!request) throw new Error('There is no outstanding background-check request');
     const result = await sendReminder(
       candidate.email.trim(),
       candidate.full_name.trim().split(/\s+/)[0] ?? 'there',
@@ -610,8 +609,7 @@ export async function sendCandidateFormReminder(candidateId: number, kind: Recru
       .select('id, referee_name, referee_email, request_sent_at, responded_at, last_reminder_sent_at')
       .eq('candidate_id', candidateId)
       .not('request_sent_at', 'is', null)
-      .is('responded_at', null)
-      .is('last_reminder_sent_at', null);
+      .is('responded_at', null);
     if (error) throw new Error(`Failed to load reference requests: ${error.message}`);
     const due = data ?? [];
     if (!due.length) throw new Error('No character-reference reminder is due yet');
@@ -628,8 +626,7 @@ export async function sendCandidateFormReminder(candidateId: number, kind: Recru
       .select('id, company, hr_contact_name, hr_email, request_sent_at, responded_at, last_reminder_sent_at')
       .eq('candidate_id', candidateId)
       .not('request_sent_at', 'is', null)
-      .is('responded_at', null)
-      .is('last_reminder_sent_at', null);
+      .is('responded_at', null);
     if (error) throw new Error(`Failed to load employment-verification requests: ${error.message}`);
     const due = data ?? [];
     if (!due.length) throw new Error('No employment-verification reminder is due yet');

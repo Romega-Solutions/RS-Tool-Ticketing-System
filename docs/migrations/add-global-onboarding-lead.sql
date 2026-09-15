@@ -61,7 +61,6 @@ BEGIN
   UPDATE onboarders
   SET onboarding_lead_id = p_lead_user_id,
       onboarding_lead = v_lead_name,
-      onboarding_lead_teams_email = NULL,
       updated_at = NOW()
   WHERE status IN ('pre_onboarding', 'day_one', 'thirty_day', 'ninety_day')
     AND onboarding_lead_id IS DISTINCT FROM p_lead_user_id;

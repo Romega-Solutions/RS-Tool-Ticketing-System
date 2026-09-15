@@ -328,19 +328,33 @@ export async function updateOnboardingTeamsEmails(
     throw new Error('Assign a Direct Supervisor before setting their Teams email');
   }
 
-  const { error } = await supabase.from('onboarders').update({
-    onboarding_lead_teams_email: onboardingLeadTeamsEmail,
-    direct_supervisor_teams_email: directSupervisorTeamsEmail,
-    updated_at: new Date().toISOString(),
-  }).eq('id', onboarderId);
-  if (error) throw new Error(`Failed to save Teams email overrides: ${error.message}`);
+  const emailsByUserId = new Map<number, string | null>();
+  const addUserEmail = (userId: number | null, teamsEmail: string | null) => {
+    if (!userId) return;
+    const existing = emailsByUserId.get(userId);
+    if (existing !== undefined && existing?.toLowerCase() !== teamsEmail?.toLowerCase()) {
+      throw new Error('The same user is assigned to both roles, so both Teams emails must match');
+    }
+    emailsByUserId.set(userId, teamsEmail);
+  };
+  addUserEmail(onboarder.onboarding_lead_id, onboardingLeadTeamsEmail);
+  addUserEmail(onboarder.direct_supervisor_id, directSupervisorTeamsEmail);
+
+  for (const [userId, teamsEmail] of emailsByUserId) {
+    const { error } = await supabase.from('users').update({
+      teams_email: teamsEmail,
+      updated_at: new Date().toISOString(),
+    }).eq('id', userId);
+    if (error) throw new Error(`Failed to save the user's Teams email: ${error.message}`);
+  }
 
   await writeHistory(supabase, onboarderId, session, [{
     field: 'teams_contact_emails',
     oldValue: null,
     newValue: null,
-    summary: 'Updated Microsoft Teams contact email overrides',
+    summary: 'Updated Microsoft Teams emails on the assigned user profiles',
   }]);
+  revalidatePath('/onboarders');
   revalidatePath(`/onboarders/${onboarderId}`);
 }
 
@@ -681,7 +695,7 @@ export async function sendWelcomeEmail(onboarderId: number): Promise<void> {
   const supabase = createAdminClient();
   const { data: o } = await supabase
     .from('onboarders')
-    .select('id, full_name, personal_email, onboarder_type, role_title, onboarding_lead, onboarding_lead_id, onboarding_lead_teams_email, direct_supervisor, direct_supervisor_id, direct_supervisor_teams_email, onboarding_form_submitted_at')
+    .select('id, full_name, personal_email, onboarder_type, role_title, onboarding_lead, onboarding_lead_id, direct_supervisor, direct_supervisor_id, onboarding_form_submitted_at')
     .eq('id', onboarderId)
     .maybeSingle();
   if (!o) throw new Error('Onboarder not found');
@@ -696,8 +710,8 @@ export async function sendWelcomeEmail(onboarderId: number): Promise<void> {
   }
 
   const [leadResult, supervisorResult] = await Promise.all([
-    supabase.from('users').select('name, email').eq('id', o.onboarding_lead_id).maybeSingle(),
-    supabase.from('users').select('name, email').eq('id', o.direct_supervisor_id).maybeSingle(),
+    supabase.from('users').select('name, email, teams_email').eq('id', o.onboarding_lead_id).maybeSingle(),
+    supabase.from('users').select('name, email, teams_email').eq('id', o.direct_supervisor_id).maybeSingle(),
   ]);
   if (leadResult.error || !leadResult.data) {
     throw new Error('Could not load the assigned Onboarding Lead');
@@ -707,8 +721,8 @@ export async function sendWelcomeEmail(onboarderId: number): Promise<void> {
   }
   const onboardingLeadName = leadResult.data.name?.trim() || o.onboarding_lead;
   const directSupervisorName = supervisorResult.data.name?.trim() || o.direct_supervisor;
-  const onboardingLeadTeamsEmail = o.onboarding_lead_teams_email?.trim() || leadResult.data.email?.trim();
-  const directSupervisorTeamsEmail = o.direct_supervisor_teams_email?.trim() || supervisorResult.data.email?.trim();
+  const onboardingLeadTeamsEmail = leadResult.data.teams_email?.trim() || leadResult.data.email?.trim();
+  const directSupervisorTeamsEmail = supervisorResult.data.teams_email?.trim() || supervisorResult.data.email?.trim();
   if (!onboardingLeadTeamsEmail) {
     throw new Error('Set an Onboarding Lead Teams email before sending the welcome email');
   }
@@ -756,7 +770,7 @@ export async function sendOnboardingFormReminder(onboarderId: number): Promise<v
   const supabase = createAdminClient();
   const { data: onboarder, error } = await supabase
     .from('onboarders')
-    .select('id, full_name, personal_email, status, onboarding_form_submitted_at, last_email_template, last_email_sent_at, onboarding_form_reminder_sent_at, onboarding_lead_id')
+    .select('id, full_name, personal_email, status, onboarding_form_submitted_at, onboarding_form_token_hash, onboarding_form_reminder_sent_at, onboarding_lead_id')
     .eq('id', onboarderId)
     .maybeSingle();
   if (error) throw new Error(`Failed to load onboarding record: ${error.message}`);
@@ -765,11 +779,8 @@ export async function sendOnboardingFormReminder(onboarderId: number): Promise<v
   if (onboarder.status !== 'pre_onboarding') {
     throw new Error('Form reminders can only be sent during pre-onboarding');
   }
-  if (onboarder.last_email_template !== 'welcome' || !onboarder.last_email_sent_at) {
+  if (!onboarder.onboarding_form_token_hash) {
     throw new Error('Send the welcome email before sending a form reminder');
-  }
-  if (onboarder.onboarding_form_reminder_sent_at) {
-    throw new Error('An onboarding form reminder has already been sent');
   }
   if (!onboarder.personal_email?.trim()) {
     throw new Error('This onboarder does not have a personal email address');

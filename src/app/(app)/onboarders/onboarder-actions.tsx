@@ -3,8 +3,9 @@
 import { useState, useTransition } from 'react';
 import {
   Mail, Send, FileSignature, CheckCircle2, RefreshCw, MailWarning,
-  MessageSquare, PenSquare, Bell,
+  MessageSquare, PenSquare, Bell, Clock,
 } from 'lucide-react';
+import { formatReminderSentAt } from '@/lib/format';
 import {
   sendBgCheckEmail,
   sendWelcomeEmail,
@@ -135,15 +136,35 @@ export function SendWelcomeButton({
   );
 }
 
-export function SendOnboardingFormReminderButton({ id }: { id: number }) {
+export function SendOnboardingFormReminderButton({
+  id,
+  initialSentAt,
+  lastSentAt,
+}: {
+  id: number;
+  initialSentAt: string | null;
+  lastSentAt: string | null;
+}) {
+  const mostRecentSentAt = [initialSentAt, lastSentAt]
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
+  const formattedLastSentAt = formatReminderSentAt(mostRecentSentAt);
   return (
-    <ActionButton
-      onClick={() => sendOnboardingFormReminder(id)}
-      label="Send form reminder"
-      icon={<Bell className="w-3.5 h-3.5" />}
-      variant="outline"
-      confirm="Send a reminder without changing the original onboarding-form link?"
-    />
+    <div className="flex flex-col items-end gap-1">
+      <ActionButton
+        onClick={() => sendOnboardingFormReminder(id)}
+        label={lastSentAt ? 'Send reminder again' : 'Send form reminder'}
+        icon={<Bell className="w-3.5 h-3.5" />}
+        variant="outline"
+        confirm="Send a reminder without changing the original onboarding-form link?"
+      />
+      {formattedLastSentAt && (
+        <span className="inline-flex items-center gap-1 text-[10px] text-(--rs-neutral-grey-500)">
+          <Clock className="h-3 w-3" /> Last sent {formattedLastSentAt}
+        </span>
+      )}
+    </div>
   );
 }
 

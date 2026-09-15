@@ -33,9 +33,10 @@ webhook, its `context` includes:
   `onboarding_form_token`, `onboarder_type`, and `onboarding_session_date`
   prefilled
 
-The two `*_email` values use the Microsoft Teams email overrides saved on the
-onboarder record. When an override is blank, the assigned user's normal email
-is used instead.
+The two `*_email` values use the Microsoft Teams email saved once on each
+assigned user's profile. That address is reused for every onboarding record
+where the user is the lead or supervisor. When it is blank, the user's normal
+email is used instead.
 
 For attendance only, your form-submission workflow can call:
 
@@ -104,8 +105,8 @@ Authorization: Bearer <CRON_ONBOARDER_SECRET>
 The response contains `sessions`, with `confirmed`, `deferred`, and
 `nextSession` lists for your invitation and reschedule emails. Each attendee
 also includes `onboardingLead` and `directSupervisor` (`id`, `name`, and the
-Microsoft Teams email override when saved; otherwise the assigned user's
-email). The finalizer is idempotent: a finalized Friday session is not
+Microsoft Teams email saved on the assigned user's profile when present;
+otherwise the assigned user's normal email). The finalizer is idempotent: a finalized Friday session is not
 processed again.
 
 After n8n creates the Google Calendar event with its Google Meet link for a

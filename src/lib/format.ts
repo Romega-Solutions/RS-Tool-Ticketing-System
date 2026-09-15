@@ -80,3 +80,18 @@ export function formatPhoneNumber(input: string | null | undefined): string {
   if (digits.length <= 6) return `${prefix}${digits.slice(0, 3)} ${digits.slice(3)}`;
   return `${prefix}${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
 }
+
+/** Compact, timezone-stable timestamp for manual email reminders. */
+export function formatReminderSentAt(input: string | null | undefined): string | null {
+  if (!input) return null;
+  const date = new Date(input);
+  if (Number.isNaN(date.getTime())) return input;
+  return `${date.toLocaleString('en-PH', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Manila',
+  })} PHT`;
+}

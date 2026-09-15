@@ -37,6 +37,8 @@ type PositionOptionRow = {
 type CandidateReminder = {
   kind: 'background_check' | 'reference_check' | 'employment_verification';
   count: number;
+  lastSentAt: string | null;
+  hasBeenReminded: boolean;
 };
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -124,11 +126,31 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
     .filter(candidate => candidate.status === 'offered')
     .map(candidate => candidate.id);
   const remindersByCandidate = new Map<number, CandidateReminder[]>();
-  const addReminder = (candidateId: number, kind: CandidateReminder['kind'], count = 1) => {
+  const addReminder = (
+    candidateId: number,
+    kind: CandidateReminder['kind'],
+    initialSentAt: string | null,
+    reminderSentAt: string | null,
+    count = 1,
+  ) => {
+    const rowLastSentAt = [initialSentAt, reminderSentAt]
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1) ?? null;
     const existing = remindersByCandidate.get(candidateId) ?? [];
     const prior = existing.find(reminder => reminder.kind === kind);
-    if (prior) prior.count += count;
-    else existing.push({ kind, count });
+    if (prior) {
+      prior.count += count;
+      prior.hasBeenReminded ||= Boolean(reminderSentAt);
+      if (rowLastSentAt && (!prior.lastSentAt || rowLastSentAt > prior.lastSentAt)) {
+        prior.lastSentAt = rowLastSentAt;
+      }
+    } else existing.push({
+      kind,
+      count,
+      lastSentAt: rowLastSentAt,
+      hasBeenReminded: Boolean(reminderSentAt),
+    });
     remindersByCandidate.set(candidateId, existing);
   };
   if (candidateIds.length) {
@@ -138,24 +160,27 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
         .in('candidate_id', candidateIds)
         .eq('form_key', 'background_check')
         .is('submitted_at', null)
-        .is('invalidated_at', null)
-        .is('last_reminder_sent_at', null),
+        .is('invalidated_at', null),
       supabase.from('candidate_references')
         .select('candidate_id, request_sent_at, last_reminder_sent_at')
         .in('candidate_id', candidateIds)
         .not('request_sent_at', 'is', null)
-        .is('responded_at', null)
-        .is('last_reminder_sent_at', null),
+        .is('responded_at', null),
       supabase.from('candidate_employment_verifications')
         .select('candidate_id, request_sent_at, last_reminder_sent_at')
         .in('candidate_id', candidateIds)
         .not('request_sent_at', 'is', null)
-        .is('responded_at', null)
-        .is('last_reminder_sent_at', null),
+        .is('responded_at', null),
     ]);
-    for (const request of backgroundResult.data ?? []) addReminder(request.candidate_id, 'background_check');
-    for (const reference of referencesResult.data ?? []) addReminder(reference.candidate_id, 'reference_check');
-    for (const verification of verificationsResult.data ?? []) addReminder(verification.candidate_id, 'employment_verification');
+    for (const request of backgroundResult.data ?? []) {
+      addReminder(request.candidate_id, 'background_check', request.sent_at, request.last_reminder_sent_at);
+    }
+    for (const reference of referencesResult.data ?? []) {
+      addReminder(reference.candidate_id, 'reference_check', reference.request_sent_at, reference.last_reminder_sent_at);
+    }
+    for (const verification of verificationsResult.data ?? []) {
+      addReminder(verification.candidate_id, 'employment_verification', verification.request_sent_at, verification.last_reminder_sent_at);
+    }
   }
   const candidates = allCandidates.filter(candidate => {
     const matchesQuery = !query || [
@@ -313,7 +338,7 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
                         <th className="px-4 py-3 font-semibold">Rating</th>
                         <th className="px-4 py-3 font-semibold">Applied</th>
                         <th className="px-4 py-3 font-semibold">Status</th>
-                        <th className="px-4 py-3 font-semibold">Needs reminder</th>
+                        <th className="px-4 py-3 font-semibold">Form reminders</th>
                         <th className="px-4 py-3 font-semibold w-10" />
                       </tr>
                     </thead>
@@ -361,6 +386,8 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
                                   candidateId={c.id}
                                   kind={reminder.kind}
                                   count={reminder.count}
+                                  lastSentAt={reminder.lastSentAt}
+                                  hasBeenReminded={reminder.hasBeenReminded}
                                 />
                               ))}
                             </div>

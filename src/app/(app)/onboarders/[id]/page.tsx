@@ -14,18 +14,17 @@ import { refreshOnboarderSignedUrl } from '@/lib/storage';
 import {
   OnboarderStatusSelect,
   OnboarderDelete,
-  STATUS_LABEL,
 } from '../onboarder-row';
 import { UploadDocumentForm } from '../onboarder-forms';
 import {
   SendWelcomeButton,
+  SendOnboardingFormReminderButton,
   ResendLastEmailButton,
   SendGmailNudgeButton,
   SendGroupChatButton,
   ChecklistToggle,
   NotesEditor,
 } from '../onboarder-actions';
-import type { OnboarderStatus } from '../constants';
 import { formatPhoneNumber } from '@/lib/format';
 import { listOnboardingLeadOptions, type OnboardingLeadOption } from '@/lib/onboarding-lead';
 import { DirectSupervisorSelect } from '../direct-supervisor-select';
@@ -47,16 +46,16 @@ type Onboarder = {
   chief_of_staff:    string | null;
   onboarding_lead:   string | null;
   onboarding_lead_id: number | null;
-  onboarding_lead_teams_email: string | null;
   onboarding_session_id: number | null;
   meeting_availability: 'pending' | 'yes' | 'no';
   onboarding_form_submitted_at: string | null;
+  onboarding_form_token_hash: string | null;
+  onboarding_form_reminder_sent_at: string | null;
   hrbp:              string | null;
   status:            string;
   sow_sent_at:       string | null;
   sow_signed_at:     string | null;
   w8_uploaded_at:    string | null;
-  direct_supervisor_teams_email: string | null;
   start_date:        string | null;
   notes:             string | null;
   last_email_template: string | null;
@@ -220,10 +219,10 @@ export default async function OnboarderDetailPage({
       ? supabase.from('users').select('name').eq('id', o.created_by).maybeSingle()
       : Promise.resolve({ data: null }),
     o.onboarding_lead_id
-      ? supabase.from('users').select('name').eq('id', o.onboarding_lead_id).maybeSingle()
+      ? supabase.from('users').select('name, teams_email').eq('id', o.onboarding_lead_id).maybeSingle()
       : Promise.resolve({ data: null }),
     o.direct_supervisor_id
-      ? supabase.from('users').select('name').eq('id', o.direct_supervisor_id).maybeSingle()
+      ? supabase.from('users').select('name, teams_email').eq('id', o.direct_supervisor_id).maybeSingle()
       : Promise.resolve({ data: null }),
     o.onboarding_session_id
       ? supabase.from('onboarding_sessions').select('id, session_date, starts_at, status, google_meet_url').eq('id', o.onboarding_session_id).maybeSingle()
@@ -239,8 +238,10 @@ export default async function OnboarderDetailPage({
   const documents:     DocumentRow[]     = (docsRes.data as DocumentRow[] | null) ?? [];
   const history:       HistoryRow[]      = (histRes.data as HistoryRow[]      | null) ?? [];
   const createdByName  = (creatorRes?.data as { name?: string } | null)?.name ?? null;
-  const onboardingLeadName = (leadRes?.data as { name?: string } | null)?.name ?? o.onboarding_lead;
-  const directSupervisorName = (supervisorRes?.data as { name?: string } | null)?.name ?? o.direct_supervisor;
+  const onboardingLeadUser = leadRes?.data as { name?: string; teams_email?: string | null } | null;
+  const directSupervisorUser = supervisorRes?.data as { name?: string; teams_email?: string | null } | null;
+  const onboardingLeadName = onboardingLeadUser?.name ?? o.onboarding_lead;
+  const directSupervisorName = directSupervisorUser?.name ?? o.direct_supervisor;
   const onboardingSession = (sessionRes?.data as OnboardingSessionRow | null) ?? null;
   // Before the updated migration is deployed, this query simply has no data.
   const contractorPaymentDetails = (paymentRes?.data as ContractorPaymentDetails | null) ?? null;
@@ -358,7 +359,9 @@ export default async function OnboarderDetailPage({
           <QuickFacts
             o={o}
             onboardingLeadName={onboardingLeadName}
+            onboardingLeadTeamsEmail={onboardingLeadUser?.teams_email ?? null}
             directSupervisorName={directSupervisorName}
+            directSupervisorTeamsEmail={directSupervisorUser?.teams_email ?? null}
             onboardingLeadOptions={onboardingLeadOptions}
             onboardingSession={onboardingSession}
             contractorPaymentDetails={contractorPaymentDetails}
@@ -422,6 +425,9 @@ function OverviewTab({
   onLastFailedTemplate: string | null;
   onboardingSession: OnboardingSessionRow | null;
 }) {
+  const canSendFormReminder = o.status === 'pre_onboarding'
+    && !o.onboarding_form_submitted_at
+    && Boolean(o.onboarding_form_token_hash);
   return (
     <>
       <OnboardingNextAction o={o} onboardingSession={onboardingSession} />
@@ -437,11 +443,20 @@ function OverviewTab({
                 Sends the {o.onboarder_type === 'intern' ? 'intern' : 'contractor'} variant with Teams + onboarding form{o.onboarder_type === 'contractor' && ' + W-8'} instructions.
               </p>
             </div>
-            <SendWelcomeButton
-              id={o.id}
-              type={o.onboarder_type}
-              alreadySubmitted={Boolean(o.onboarding_form_submitted_at)}
-            />
+            <div className="flex flex-col items-end gap-2">
+              <SendWelcomeButton
+                id={o.id}
+                type={o.onboarder_type}
+                alreadySubmitted={Boolean(o.onboarding_form_submitted_at)}
+              />
+              {canSendFormReminder && (
+                <SendOnboardingFormReminderButton
+                  id={o.id}
+                  initialSentAt={o.last_email_sent_at}
+                  lastSentAt={o.onboarding_form_reminder_sent_at}
+                />
+              )}
+            </div>
           </div>
         </div>
 
@@ -760,14 +775,18 @@ function NotesTab({ o }: { o: Onboarder }) {
 function QuickFacts({
   o,
   onboardingLeadName,
+  onboardingLeadTeamsEmail,
   directSupervisorName,
+  directSupervisorTeamsEmail,
   onboardingLeadOptions,
   onboardingSession,
   contractorPaymentDetails,
 }: {
   o: Onboarder;
   onboardingLeadName: string | null;
+  onboardingLeadTeamsEmail: string | null;
   directSupervisorName: string | null;
+  directSupervisorTeamsEmail: string | null;
   onboardingLeadOptions: OnboardingLeadOption[];
   onboardingSession: OnboardingSessionRow | null;
   contractorPaymentDetails: ContractorPaymentDetails | null;
@@ -798,11 +817,14 @@ function QuickFacts({
         </span>
       } />
       <TeamsContactEmails
+        key={`${o.onboarding_lead_id ?? 'none'}:${onboardingLeadTeamsEmail ?? ''}:${o.direct_supervisor_id ?? 'none'}:${directSupervisorTeamsEmail ?? ''}`}
         onboarderId={o.id}
-        leadAssigned={Boolean(o.onboarding_lead_id)}
-        supervisorAssigned={Boolean(o.direct_supervisor_id)}
-        onboardingLeadTeamsEmail={o.onboarding_lead_teams_email}
-        directSupervisorTeamsEmail={o.direct_supervisor_teams_email}
+        leadUserId={o.onboarding_lead_id}
+        leadName={onboardingLeadName}
+        supervisorUserId={o.direct_supervisor_id}
+        supervisorName={directSupervisorName}
+        onboardingLeadTeamsEmail={onboardingLeadTeamsEmail}
+        directSupervisorTeamsEmail={directSupervisorTeamsEmail}
       />
       <KvRow label="Start date" value={o.start_date ? formatDate(o.start_date) : <Dim />} />
       <KvRow label="W-8"        value={o.w8_uploaded_at ? formatDate(o.w8_uploaded_at) : <Dim />} />

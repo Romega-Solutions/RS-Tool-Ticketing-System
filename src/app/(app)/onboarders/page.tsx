@@ -72,6 +72,7 @@ type Row = {
   onboarding_session_id: number | null;
   meeting_availability: "pending" | "yes" | "no";
   onboarding_form_submitted_at: string | null;
+  onboarding_form_token_hash: string | null;
   onboarding_form_reminder_sent_at: string | null;
   last_email_template: string | null;
   last_email_sent_at: string | null;
@@ -142,7 +143,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
   const { data, error } = await supabase
     .from("onboarders")
     .select(
-      "id, full_name, personal_email, onboarder_type, role_title, team, direct_supervisor, onboarding_session_id, meeting_availability, onboarding_form_submitted_at, onboarding_form_reminder_sent_at, last_email_template, last_email_sent_at, status, start_date, sow_signed_at, created_at",
+      "id, full_name, personal_email, onboarder_type, role_title, team, direct_supervisor, onboarding_session_id, meeting_availability, onboarding_form_submitted_at, onboarding_form_token_hash, onboarding_form_reminder_sent_at, last_email_template, last_email_sent_at, status, start_date, sow_signed_at, created_at",
     )
     .order("created_at", { ascending: false })
     .limit(300);
@@ -406,10 +407,9 @@ function Card_({
       : row.meeting_availability === "no"
         ? { label: "Can’t attend", className: "bg-amber-50 text-amber-700 border-amber-200" }
         : { label: "Form pending", className: "bg-(--rs-neutral-grey-50) text-(--rs-neutral-grey-600) border-(--rs-neutral-grey-200)" };
-  const needsFormReminder = row.status === "pre_onboarding"
+  const canSendFormReminder = row.status === "pre_onboarding"
     && !row.onboarding_form_submitted_at
-    && !row.onboarding_form_reminder_sent_at
-    && row.last_email_template === "welcome";
+    && Boolean(row.onboarding_form_token_hash);
   return (
     <li>
       <Link
@@ -460,9 +460,13 @@ function Card_({
           Open record
         </div>
       </Link>
-      {needsFormReminder && (
+      {canSendFormReminder && (
         <div className="mt-1 flex justify-end">
-          <SendOnboardingFormReminderButton id={row.id} />
+          <SendOnboardingFormReminderButton
+            id={row.id}
+            initialSentAt={row.last_email_sent_at}
+            lastSentAt={row.onboarding_form_reminder_sent_at}
+          />
         </div>
       )}
     </li>

@@ -27,11 +27,13 @@ import {
   Eye,
   ShieldCheck,
   Building2,
+  Clock,
 } from "lucide-react";
 import {
   CandidateStatus,
   CandidateRating,
   CandidateDelete,
+  CandidateReminderButton,
 } from "../candidate-row";
 import { TalentConsentPanel } from "../talent-consent-panel";
 import { ResumeUploadCard, UploadResumeButton } from "../resume-upload";
@@ -51,7 +53,7 @@ import {
   SendCandidateDocumentPackageButton,
 } from "../pre-employment-document-upload";
 import { ResendEmailButton } from "./resend-email-button";
-import { formatPhoneNumber } from "@/lib/format";
+import { formatPhoneNumber, formatReminderSentAt } from "@/lib/format";
 
 type Candidate = {
   id: number;
@@ -113,6 +115,7 @@ type PreEmploymentRequestRow = {
   expires_at: string;
   submitted_at: string | null;
   invalidated_at: string | null;
+  last_reminder_sent_at: string | null;
 };
 
 type PreEmploymentSubmissionRow = {
@@ -131,6 +134,7 @@ type CharacterReference = {
   relationship: string;
   bestTimeToCall: string;
   requestSentAt?: string | null;
+  lastReminderSentAt?: string | null;
   respondedAt?: string | null;
   responsePayload?: unknown;
 };
@@ -146,6 +150,7 @@ type CandidateReferenceRow = {
   relationship: string | null;
   best_time_to_call: string | null;
   request_sent_at: string | null;
+  last_reminder_sent_at: string | null;
   responded_at: string | null;
 };
 
@@ -163,6 +168,7 @@ type EmploymentVerification = {
   phone: string;
   bestTimeToCall: string;
   requestSentAt?: string | null;
+  lastReminderSentAt?: string | null;
   respondedAt?: string | null;
   responsePayload?: unknown;
 };
@@ -175,6 +181,7 @@ type CandidateEmploymentVerificationRow = {
   hr_phone: string | null;
   best_time_to_call: string | null;
   request_sent_at: string | null;
+  last_reminder_sent_at: string | null;
   responded_at: string | null;
 };
 
@@ -412,7 +419,7 @@ export default async function CandidateDetailPage({
     const [requestResult, submissionResult] = await Promise.all([
       supabase
         .from("candidate_pre_employment_requests")
-        .select("id, sent_at, expires_at, submitted_at, invalidated_at")
+        .select("id, sent_at, expires_at, submitted_at, invalidated_at, last_reminder_sent_at")
         .eq("candidate_id", id)
         .eq("form_key", "background_check")
         .order("created_at", { ascending: false })
@@ -443,7 +450,7 @@ export default async function CandidateDetailPage({
     const { data: referencesData, error: referencesError } = await supabase
       .from("candidate_references")
       .select(
-        "id, reference_number, referee_name, referee_email, referee_phone, referee_company, referee_job_title, relationship, best_time_to_call, request_sent_at, responded_at",
+        "id, reference_number, referee_name, referee_email, referee_phone, referee_company, referee_job_title, relationship, best_time_to_call, request_sent_at, last_reminder_sent_at, responded_at",
       )
       .eq("candidate_id", id)
       .order("reference_number", { ascending: true });
@@ -470,7 +477,7 @@ export default async function CandidateDetailPage({
     const { data: employmentData, error: employmentError } = await supabase
       .from("candidate_employment_verifications")
       .select(
-        "id, company, hr_contact_name, hr_email, hr_phone, best_time_to_call, request_sent_at, responded_at",
+        "id, company, hr_contact_name, hr_email, hr_phone, best_time_to_call, request_sent_at, last_reminder_sent_at, responded_at",
       )
       .eq("candidate_id", id)
       .order("verification_number", { ascending: true });
@@ -837,6 +844,7 @@ export default async function CandidateDetailPage({
                 <PreEmploymentBackgroundCheckTab
                   candidateId={c.id}
                   canSend={c.status === "offered"}
+                  request={backgroundCheckRequest}
                   submission={backgroundCheckSubmission}
                   candidateReferences={candidateReferences}
                   candidateReferenceSubmissions={candidateReferenceSubmissions}
@@ -999,6 +1007,7 @@ function Section({
 function PreEmploymentBackgroundCheckTab({
   candidateId,
   canSend,
+  request,
   submission,
   candidateReferences,
   candidateReferenceSubmissions,
@@ -1007,6 +1016,7 @@ function PreEmploymentBackgroundCheckTab({
 }: {
   candidateId: number;
   canSend: boolean;
+  request: PreEmploymentRequestRow | null;
   submission: PreEmploymentSubmissionRow | null;
   candidateReferences: CandidateReferenceRow[];
   candidateReferenceSubmissions: CandidateReferenceSubmissionRow[];
@@ -1039,6 +1049,7 @@ function PreEmploymentBackgroundCheckTab({
           relationship: reference.relationship ?? "",
           bestTimeToCall: reference.best_time_to_call ?? "",
           requestSentAt: reference.request_sent_at,
+          lastReminderSentAt: reference.last_reminder_sent_at,
           respondedAt: reference.responded_at,
           responsePayload: submissionsByReferenceId.get(reference.id)?.payload,
         }))
@@ -1069,6 +1080,7 @@ function PreEmploymentBackgroundCheckTab({
           phone: verification.hr_phone ?? "",
           bestTimeToCall: verification.best_time_to_call ?? "",
           requestSentAt: verification.request_sent_at,
+          lastReminderSentAt: verification.last_reminder_sent_at,
           respondedAt: verification.responded_at,
           responsePayload: employmentSubmissionsByVerificationId.get(
             verification.id,
@@ -1089,6 +1101,24 @@ function PreEmploymentBackgroundCheckTab({
     candidateEmploymentVerifications.filter(
       (verification) => !verification.request_sent_at,
     ).length;
+  const pendingReferenceCount = references.filter(
+    (reference) => !!reference.requestSentAt && !reference.respondedAt,
+  ).length;
+  const pendingEmploymentVerificationCount = verifications.filter(
+    (verification) => !!verification.requestSentAt && !verification.respondedAt,
+  ).length;
+  const latestReminder = (timestamps: Array<string | null | undefined>) =>
+    timestamps.filter((value): value is string => Boolean(value)).sort().at(-1) ?? null;
+  const referenceLastSentAt = latestReminder(
+    references
+      .filter(reference => !reference.respondedAt)
+      .flatMap(reference => [reference.requestSentAt, reference.lastReminderSentAt]),
+  );
+  const employmentLastSentAt = latestReminder(
+    verifications
+      .filter(verification => !verification.respondedAt)
+      .flatMap(verification => [verification.requestSentAt, verification.lastReminderSentAt]),
+  );
 
   return (
     <div className="space-y-6">
@@ -1096,13 +1126,35 @@ function PreEmploymentBackgroundCheckTab({
         title={`Character references · ${references.length}`}
         icon={<Mail className="w-4 h-4" />}
         action={
-          canSend && !submitted ? (
-            <SendPreEmploymentBgCheckButton candidateId={candidateId} />
-          ) : canSend && allThreeReferencesReady && unsentReferenceCount > 0 ? (
-            <SendCandidateReferenceEmailsButton
-              candidateId={candidateId}
-              remainingCount={unsentReferenceCount}
-            />
+          canSend ? (
+            <div className="flex flex-wrap justify-end gap-2">
+              {!submitted && (!request || request.invalidated_at) && (
+                <SendPreEmploymentBgCheckButton candidateId={candidateId} />
+              )}
+              {!submitted && request && !request.invalidated_at && (
+                <CandidateReminderButton
+                  candidateId={candidateId}
+                  kind="background_check"
+                  lastSentAt={latestReminder([request.sent_at, request.last_reminder_sent_at])}
+                  hasBeenReminded={Boolean(request.last_reminder_sent_at)}
+                />
+              )}
+              {submitted && allThreeReferencesReady && unsentReferenceCount > 0 && (
+                <SendCandidateReferenceEmailsButton
+                  candidateId={candidateId}
+                  remainingCount={unsentReferenceCount}
+                />
+              )}
+              {submitted && pendingReferenceCount > 0 && (
+                <CandidateReminderButton
+                  candidateId={candidateId}
+                  kind="reference_check"
+                  count={pendingReferenceCount}
+                  lastSentAt={referenceLastSentAt}
+                  hasBeenReminded={references.some(reference => !reference.respondedAt && Boolean(reference.lastReminderSentAt))}
+                />
+              )}
+            </div>
           ) : undefined
         }
       >
@@ -1131,11 +1183,24 @@ function PreEmploymentBackgroundCheckTab({
         title={`Employment verifications · ${verifications.length}`}
         icon={<Building2 className="w-4 h-4" />}
         action={
-          canSend && submitted && unsentEmploymentVerificationCount > 0 ? (
-            <SendCandidateEmploymentVerificationEmailsButton
-              candidateId={candidateId}
-              remainingCount={unsentEmploymentVerificationCount}
-            />
+          canSend && submitted ? (
+            <div className="flex flex-wrap justify-end gap-2">
+              {unsentEmploymentVerificationCount > 0 && (
+                <SendCandidateEmploymentVerificationEmailsButton
+                  candidateId={candidateId}
+                  remainingCount={unsentEmploymentVerificationCount}
+                />
+              )}
+              {pendingEmploymentVerificationCount > 0 && (
+                <CandidateReminderButton
+                  candidateId={candidateId}
+                  kind="employment_verification"
+                  count={pendingEmploymentVerificationCount}
+                  lastSentAt={employmentLastSentAt}
+                  hasBeenReminded={verifications.some(verification => !verification.respondedAt && Boolean(verification.lastReminderSentAt))}
+                />
+              )}
+            </div>
           ) : undefined
         }
       >
@@ -1455,6 +1520,11 @@ function ReferenceSubmissionCard({
           Reference request sent {formatDate(reference.requestSentAt)}
         </p>
       )}
+      {reference.lastReminderSentAt && (
+        <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-(--rs-accent-800)">
+          <Clock className="h-3 w-3" /> Last reminder {formatReminderSentAt(reference.lastReminderSentAt)}
+        </p>
+      )}
       {reference.respondedAt && (
         <p className="mt-1 text-[11px] font-medium text-green-700">
           Reference form submitted {formatDate(reference.respondedAt)}
@@ -1505,6 +1575,11 @@ function EmploymentVerificationCard({
         <p className="mt-1 text-[11px] font-medium text-green-700">
           Employment-verification request sent{" "}
           {formatDate(verification.requestSentAt)}
+        </p>
+      )}
+      {verification.lastReminderSentAt && (
+        <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-(--rs-accent-800)">
+          <Clock className="h-3 w-3" /> Last reminder {formatReminderSentAt(verification.lastReminderSentAt)}
         </p>
       )}
       {verification.respondedAt && (

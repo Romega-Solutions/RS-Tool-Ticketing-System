@@ -285,7 +285,7 @@ export async function finalizeTodayOnboardingSession(now = new Date()) {
     if (new Date(session.cutoff_at) > now) continue;
 
     const { data: members, error: memberError } = await supabase.from('onboarders')
-      .select('id, full_name, personal_email, meeting_availability, onboarding_form_submitted_at, onboarding_lead_id, onboarding_lead, onboarding_lead_teams_email, direct_supervisor_id, direct_supervisor, direct_supervisor_teams_email')
+      .select('id, full_name, personal_email, meeting_availability, onboarding_form_submitted_at, onboarding_lead_id, onboarding_lead, direct_supervisor_id, direct_supervisor')
       .eq('onboarding_session_id', session.id);
     if (memberError) throw new Error(`Failed to load cohort members: ${memberError.message}`);
     const cohort = (members ?? []) as Array<{
@@ -296,30 +296,28 @@ export async function finalizeTodayOnboardingSession(now = new Date()) {
       onboarding_form_submitted_at: string | null;
       onboarding_lead_id: number | null;
       onboarding_lead: string | null;
-      onboarding_lead_teams_email: string | null;
       direct_supervisor_id: number | null;
       direct_supervisor: string | null;
-      direct_supervisor_teams_email: string | null;
     }>;
     const contactIds = Array.from(new Set(cohort.flatMap(person =>
       [person.onboarding_lead_id, person.direct_supervisor_id].filter((id): id is number => typeof id === 'number'),
     )));
-    const contactsById = new Map<number, { name: string | null; email: string | null }>();
+    const contactsById = new Map<number, { name: string | null; email: string | null; teams_email: string | null }>();
     if (contactIds.length) {
       const { data: contacts, error: contactsError } = await supabase.from('users')
-        .select('id, name, email')
+        .select('id, name, email, teams_email')
         .in('id', contactIds);
       if (contactsError) throw new Error(`Failed to load onboarding contacts: ${contactsError.message}`);
       for (const contact of contacts ?? []) {
-        contactsById.set(contact.id, { name: contact.name, email: contact.email });
+        contactsById.set(contact.id, { name: contact.name, email: contact.email, teams_email: contact.teams_email });
       }
     }
-    const toContact = (id: number | null, fallbackName: string | null, teamsEmail: string | null): OnboardingContact => {
+    const toContact = (id: number | null, fallbackName: string | null): OnboardingContact => {
       const contact = id ? contactsById.get(id) : undefined;
       return {
         id,
         name: contact?.name?.trim() || fallbackName?.trim() || null,
-        email: teamsEmail?.trim() || contact?.email?.trim() || null,
+        email: contact?.teams_email?.trim() || contact?.email?.trim() || null,
       };
     };
     const enrichedCohort = cohort.map(person => ({
@@ -328,8 +326,8 @@ export async function finalizeTodayOnboardingSession(now = new Date()) {
       personal_email: person.personal_email,
       meeting_availability: person.meeting_availability,
       onboarding_form_submitted_at: person.onboarding_form_submitted_at,
-      onboardingLead: toContact(person.onboarding_lead_id, person.onboarding_lead, person.onboarding_lead_teams_email),
-      directSupervisor: toContact(person.direct_supervisor_id, person.direct_supervisor, person.direct_supervisor_teams_email),
+      onboardingLead: toContact(person.onboarding_lead_id, person.onboarding_lead),
+      directSupervisor: toContact(person.direct_supervisor_id, person.direct_supervisor),
     }));
     const disposition = (person: typeof enrichedCohort[number]) => classifyCohortMember({
       availability: person.meeting_availability,
