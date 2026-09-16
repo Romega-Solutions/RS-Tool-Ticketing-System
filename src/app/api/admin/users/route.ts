@@ -176,6 +176,18 @@ export const POST = route(async (req: Request) => {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
+  // These fields are optional on PATCH (partial edits) but required when
+  // creating a brand-new user — enforce presence before the shared parsers,
+  // which otherwise treat an empty value as "clear"/"default".
+  if (!body.jobTitle?.trim()) return NextResponse.json({ error: 'Job title is required' }, { status: 400 });
+  if (!body.team?.trim()) return NextResponse.json({ error: 'Department is required' }, { status: 400 });
+  if (body.approvedHoursPerWeek === undefined || body.approvedHoursPerWeek === null || body.approvedHoursPerWeek === '') {
+    return NextResponse.json({ error: 'Approved hours per week is required' }, { status: 400 });
+  }
+  if (!body.schedulePhtStart?.trim()) return NextResponse.json({ error: 'Schedule start is required' }, { status: 400 });
+  if (!body.schedulePhtEnd?.trim()) return NextResponse.json({ error: 'Schedule end is required' }, { status: 400 });
+  if (!body.driveUrl?.trim()) return NextResponse.json({ error: 'Google Drive link is required' }, { status: 400 });
+
   const rate = parseHourlyRate(body.hourlyRateUsd);
   if (!rate.ok) return NextResponse.json({ error: rate.error }, { status: 400 });
   const dob = parseDate(body.dateOfBirth);
