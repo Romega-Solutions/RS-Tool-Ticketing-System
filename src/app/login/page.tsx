@@ -27,6 +27,9 @@ function LoginContent() {
     if (isStale && staleReason === 'inactive') {
       return 'Your account is inactive. Please contact your admin to re-activate it.';
     }
+    if (isStale && staleReason === 'timeout') {
+      return "We couldn't verify your session in time. Please try signing in again.";
+    }
     if (isStale) return 'Your session expired. Please sign in again.';
     return '';
   });
