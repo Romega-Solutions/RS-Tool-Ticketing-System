@@ -1,4 +1,5 @@
 import { cache } from 'react';
+import { unstable_rethrow } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { normalizeRole, isGateableToolKey, type AppRole } from '@/lib/rbac';
@@ -81,6 +82,12 @@ export const getSessionResult = cache(async (): Promise<SessionResult> => {
   try {
     return await withTimeout(fetchSessionResult(), SESSION_TIMEOUT_MS);
   } catch (err) {
+    // fetchSessionResult() calls cookies() under the hood — during static
+    // generation Next signals "this route needs per-request rendering" by
+    // throwing through that call. A bare catch here would swallow that
+    // signal along with real errors, silently defeating Next's automatic
+    // dynamic-rendering detection for every page that calls getSession().
+    unstable_rethrow(err);
     const reason = err instanceof Error && err.message === 'getSession timed out' ? 'timeout' : 'error';
     return { user: null, reason };
   }
