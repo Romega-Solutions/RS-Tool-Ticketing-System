@@ -21,6 +21,8 @@ import { CreateOnboarderForm } from './onboarder-forms';
 import { OnboarderFilterBar } from './onboarder-filter-bar';
 import { OnboardingHelpButton } from './onboarding-help';
 
+export const dynamic = 'force-dynamic';
+
 // ─── Stage groupings (3 happy lanes + 1 terminal lane) ──────────────────────
 
 const LANES: { id: string; title: string; hint: string; statuses: OnboarderStatus[] }[] = [
