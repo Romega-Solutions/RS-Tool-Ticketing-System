@@ -45,3 +45,14 @@ export function getKanbanDragAnnouncement(args: KanbanDragAnnouncement): string 
       return `Cancelled moving ${taskName(args.task)}.`;
   }
 }
+
+// 'default' = board order (as returned by the API); 'number' = ascending by task number.
+export type KanbanSortMode = 'default' | 'number';
+
+export function sortKanbanItemsBySequence<T extends { sequence_id: number }>(
+  items: T[],
+  mode: KanbanSortMode,
+): T[] {
+  if (mode !== 'number') return items;
+  return [...items].sort((a, b) => a.sequence_id - b.sequence_id);
+}
