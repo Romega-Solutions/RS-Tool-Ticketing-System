@@ -19,15 +19,18 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, GripVertical, Plus, Loader2, X, Archive } from 'lucide-react';
+import { AlertTriangle, Archive, GripVertical, Hash, Loader2, Plus, X } from 'lucide-react';
 import { ProjectArchiveDrawer } from '@/components/project-archive-drawer';
 import { PersonAvatar } from '@/components/person-avatar';
 import { TaskDetailSheet, type SheetWorkItem } from '@/components/task-detail-sheet';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { ProjectCaps } from '@/lib/permissions';
 import {
   getKanbanDragAnnouncement,
   getKanbanDragHandleLabel,
   getKanbanTaskAriaLabel,
+  sortKanbanItemsBySequence,
+  type KanbanSortMode,
   type KanbanTaskDescriptor,
 } from '@/lib/kanban-board-ui';
 
@@ -375,10 +378,12 @@ function KanbanColumn({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: state.id });
   const [showAll, setShowAll] = useState(false);
+  const [sortMode, setSortMode] = useState<KanbanSortMode>('default');
 
   const isCompleted = state.group.toLowerCase() === 'completed';
-  const overCap = items.length > DONE_VISIBLE_CAP;
-  const visibleItems = showAll ? items : items.slice(0, DONE_VISIBLE_CAP);
+  const sortedItems = sortKanbanItemsBySequence(items, sortMode);
+  const overCap = sortedItems.length > DONE_VISIBLE_CAP;
+  const visibleItems = showAll ? sortedItems : sortedItems.slice(0, DONE_VISIBLE_CAP);
 
   return (
     <div
@@ -398,6 +403,28 @@ function KanbanColumn({
         <span className="bg-white/25 rounded-full px-1.5 py-0.5 text-xs font-bold shrink-0 leading-none">
           {items.length}
         </span>
+        {items.length > 1 && (
+          <Tooltip>
+            <TooltipTrigger
+              type="button"
+              onClick={() => setSortMode(m => m === 'number' ? 'default' : 'number')}
+              aria-pressed={sortMode === 'number'}
+              aria-label={
+                sortMode === 'number'
+                  ? 'Sorted by task number. Click to use default order.'
+                  : 'Sort by task number.'
+              }
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-white/20 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70 cursor-pointer ${
+                sortMode === 'number' ? 'bg-white/25 text-white' : 'text-white/80'
+              }`}
+            >
+              <Hash className="h-3.5 w-3.5" aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipContent>
+              {sortMode === 'number' ? 'Sorted by task number' : 'Sort by task number'}
+            </TooltipContent>
+          </Tooltip>
+        )}
         {isCompleted && canArchive && items.length > 0 && (
           <button
             type="button"
