@@ -952,7 +952,7 @@ export function TaskDetailSheet({
           )}
 
           {!loading && item && tab === 'activity' && (
-            <div ref={commentsListRef} className="space-y-1">
+            <div ref={commentsListRef} className="space-y-2.5">
               {timeline.length === 0 && (
                 <p className="text-sm text-(--rs-neutral-grey-400) italic">No activity yet.</p>
               )}
@@ -961,30 +961,34 @@ export function TaskDetailSheet({
                   <div
                     key={entry.id}
                     data-comment-id={entry.comment.id}
-                    className={`flex gap-2 rounded-lg px-2 py-1.5 transition-colors duration-500 ${
+                    className={`overflow-hidden rounded-md border transition-colors duration-500 ${
                       highlightCommentId === String(entry.comment.id)
-                        ? 'border border-(--rs-accent-300) bg-(--rs-accent-50) ring-2 ring-(--rs-accent-200)'
-                        : 'border border-transparent hover:bg-(--rs-neutral-grey-50)'
+                        ? 'border-(--rs-accent-300) ring-2 ring-(--rs-accent-200)'
+                        : 'border-(--rs-neutral-grey-200)'
                     }`}
                   >
-                    <PersonAvatar name={entry.comment.author_name} size={22} className="mt-0.5" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline justify-between gap-2 text-xs text-(--rs-neutral-grey-500)">
-                        <span className="font-medium text-(--rs-neutral-grey-800)">
+                    <div className="flex items-center justify-between gap-2 border-b border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-3 py-1.5">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <PersonAvatar name={entry.comment.author_name} size={20} />
+                        <span className="truncate text-sm font-semibold text-(--rs-neutral-grey-900)">
                           {entry.comment.author_name}
-                          <span className="ml-1.5 font-normal text-(--rs-neutral-grey-400)">{fmt(entry.comment.created_at)}</span>
                         </span>
-                        {(entry.comment.author_id === currentUserId || isAdmin) && (
-                          <button
-                            onClick={() => handleDeleteComment(entry.comment.id)}
-                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-(--rs-neutral-grey-400) hover:bg-red-50 hover:text-red-500"
-                            title="Delete"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        )}
+                        <span className="shrink-0 text-xs text-(--rs-neutral-grey-500)">
+                          commented on {fmt(entry.comment.created_at)}
+                        </span>
                       </div>
-                      <RichText html={entry.comment.body} className="text-sm leading-snug text-(--rs-neutral-grey-800)" />
+                      {(entry.comment.author_id === currentUserId || isAdmin) && (
+                        <button
+                          onClick={() => handleDeleteComment(entry.comment.id)}
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-(--rs-neutral-grey-400) hover:bg-red-50 hover:text-red-500"
+                          title="Delete"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="bg-white px-3 py-2.5">
+                      <RichText html={entry.comment.body} className="text-sm leading-relaxed text-(--rs-neutral-grey-800)" />
                     </div>
                   </div>
                 ) : (
