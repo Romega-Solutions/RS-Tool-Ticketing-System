@@ -368,15 +368,24 @@ export async function updateOnboarderStatus(id: number, status: string): Promise
   if (!isStatus(status)) throw new Error('Invalid status');
 
   const supabase = createAdminClient();
-  const { data: before } = await supabase
+  const { data: before, error: readError } = await supabase
     .from('onboarders')
-    .select('status, full_name, personal_email, role_title, team, direct_supervisor, onboarding_lead, onboarder_type, chief_of_staff')
+    .select('status, start_date, full_name, personal_email, role_title, team, direct_supervisor, onboarding_lead, onboarder_type, chief_of_staff')
     .eq('id', id)
     .maybeSingle();
+  if (readError) throw new Error(`Failed to read onboarder: ${readError.message}`);
+  if (!before) throw new Error('Onboarder not found');
+
+  const now = new Date();
+  const startDate = status === 'day_one' && before.status !== status
+    ? new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(now)
+    : undefined;
 
   const { error } = await supabase
     .from('onboarders')
-    .update({ status, updated_at: new Date().toISOString() })
+    .update({ status, updated_at: now.toISOString(), ...(startDate ? { start_date: startDate } : {}) })
     .eq('id', id);
   if (error) throw new Error(`Failed to update status: ${error.message}`);
 
@@ -386,7 +395,12 @@ export async function updateOnboarderStatus(id: number, status: string): Promise
       oldValue: before.status,
       newValue: status,
       summary:  `Stage changed from '${before.status}' to '${status}'`,
-    }]);
+    }, ...(startDate && startDate !== before.start_date ? [{
+      field: 'start_date',
+      oldValue: before.start_date,
+      newValue: startDate,
+      summary: 'Start date set on Day 1 stage entry',
+    }] : [])]);
 
     // Auto-fire probation milestone emails on transition. Failures are
     // recorded as 'email_failed' rows but never block the status change.

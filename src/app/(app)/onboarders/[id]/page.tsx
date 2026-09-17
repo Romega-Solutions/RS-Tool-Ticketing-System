@@ -823,7 +823,6 @@ function QuickFacts({
         directSupervisorTeamsEmail={directSupervisorTeamsEmail}
       />
       <KvRow label="Start date" value={o.start_date ? formatDate(o.start_date) : <Dim />} />
-      <KvRow label="W-8"        value={o.w8_uploaded_at ? formatDate(o.w8_uploaded_at) : <Dim />} />
       <KvRow label="Friday cohort" value={
         onboardingSession
           ? <span className="text-right"><span>{formatDate(onboardingSession.session_date)}</span><span className="block text-[10px] text-(--rs-neutral-grey-500)">6:00 PM PHT · {o.meeting_availability}</span></span>
