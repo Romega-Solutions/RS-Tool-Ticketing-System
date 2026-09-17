@@ -1002,34 +1002,36 @@ export function TaskDetailSheet({
                   </div>
                 ),
               )}
-
-              <div className="flex items-end gap-2 pt-2">
-                <div className="min-w-0 flex-1">
-                  <RichTextEditor
-                    value={newComment}
-                    onChange={setNewComment}
-                    placeholder="Message…"
-                    bodyClassName="max-h-32 overflow-y-auto"
-                    enableMentions
-                    enableEmoji
-                    hideToolbar
-                    mentionUsers={members.map(m => ({ id: m.user_id, name: m.name }))}
-                  />
-                </div>
-                <button
-                  onClick={handlePostComment}
-                  disabled={postingComment || isRichTextEmpty(newComment)}
-                  aria-label="Post comment"
-                  title="Post comment"
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-40"
-                  style={{ background: 'var(--rs-primary-500)' }}
-                >
-                  {postingComment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                </button>
-              </div>
             </div>
           )}
         </div>
+
+        {!loading && item && tab === 'activity' && (
+          <div className="flex items-end gap-2 border-t border-(--rs-neutral-grey-100) bg-white px-4 py-3 sm:px-5">
+            <div className="min-w-0 flex-1">
+              <RichTextEditor
+                value={newComment}
+                onChange={setNewComment}
+                placeholder="Message…"
+                bodyClassName="max-h-32 overflow-y-auto"
+                enableMentions
+                enableEmoji
+                hideToolbar
+                mentionUsers={members.map(m => ({ id: m.user_id, name: m.name }))}
+              />
+            </div>
+            <button
+              onClick={handlePostComment}
+              disabled={postingComment || isRichTextEmpty(newComment)}
+              aria-label="Post comment"
+              title="Post comment"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-40"
+              style={{ background: 'var(--rs-primary-500)' }}
+            >
+              {postingComment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </button>
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   );
