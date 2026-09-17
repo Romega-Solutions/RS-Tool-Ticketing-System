@@ -208,6 +208,10 @@ export function TaskDetailSheet({
       .map((activity): TimelineEntry => ({ kind: 'activity', id: `a${activity.id}`, ts: activity.created_at, activity })),
   ].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
 
+  // Activity rows store raw state/user ids — resolve them to readable names.
+  const stateNameById = new Map(states.map(s => [s.id, s.name]));
+  const userNameById = new Map(members.map(m => [String(m.user_id), m.name]));
+
   function imageAltFromFilename(filename: string): string {
     return filename
       .replace(/\.[^.]+$/, '')
@@ -996,7 +1000,7 @@ export function TaskDetailSheet({
                     <ActivityIcon className="h-3 w-3 shrink-0 text-(--rs-neutral-grey-300)" aria-hidden="true" />
                     <span>
                       <span className="font-medium text-(--rs-neutral-grey-700)">{entry.activity.actor_name}</span>{' '}
-                      {describeActivity(entry.activity)}
+                      {describeActivity(entry.activity, stateNameById, userNameById)}
                     </span>
                     <span className="ml-auto shrink-0 text-(--rs-neutral-grey-400)">{fmt(entry.activity.created_at)}</span>
                   </div>
@@ -1046,13 +1050,15 @@ function Field({ label, children }: { label: React.ReactNode; children: React.Re
   );
 }
 
-function describeActivity(a: ActivityEntry): string {
+function describeActivity(a: ActivityEntry, stateNameById: Map<string, string>, userNameById: Map<string, string>): string {
+  const stateName = (id: string | null) => (id != null ? (stateNameById.get(id) ?? id) : '—');
+  const userName = (id: string | null) => (id != null ? (userNameById.get(id) ?? `user ${id}`) : 'someone');
   switch (a.action) {
     case 'created':       return `created this task`;
-    case 'state_changed': return `moved state ${a.from_value ?? '—'} → ${a.to_value ?? '—'}`;
+    case 'state_changed': return `moved from ${stateName(a.from_value)} to ${stateName(a.to_value)}`;
     case 'edited':        return `edited ${a.to_value ?? a.from_value ?? 'field'}`;
-    case 'assigned':      return `assigned user ${a.to_value}`;
-    case 'unassigned':    return `unassigned user ${a.from_value}`;
+    case 'assigned':      return `assigned ${userName(a.to_value)}`;
+    case 'unassigned':    return `unassigned ${userName(a.from_value)}`;
     case 'commented':     return `commented: "${(a.to_value ?? '').slice(0, 60)}${(a.to_value?.length ?? 0) > 60 ? '…' : ''}"`;
     case 'archived':      return `archived this task`;
     case 'restored':      return `restored this task`;
