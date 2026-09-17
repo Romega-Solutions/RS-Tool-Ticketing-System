@@ -55,7 +55,7 @@ function LoginContent() {
     }
   };
 
-  const [devEmail, setDevEmail]       = useState('ken@romega-solutions.com');
+  const [devEmail, setDevEmail]       = useState('rowan.okonkwo@romega-solutions.com');
   const [devPassword, setDevPassword] = useState('Demo@1234');
   const [devSigningIn, setDevSigningIn] = useState(false);
 
