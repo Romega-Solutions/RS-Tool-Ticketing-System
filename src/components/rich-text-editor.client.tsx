@@ -44,11 +44,12 @@ export interface RichTextEditorProps {
   /** Enables the @mention autocomplete (structured nodes carrying the user id). */
   enableMentions?: boolean;
   mentionUsers?: RichTextMentionUser[];
-  /** Adds an emoji-picker button to the toolbar. */
+  /** Adds an emoji-picker button. */
   enableEmoji?: boolean;
-  /** Drops formatting controls that don't make sense for a short chat-style
-   *  message (currently: the font-size picker), for comment composers. */
-  compact?: boolean;
+  /** Chat-style mode for comment composers: hides the formatting toolbar
+   *  entirely, tightens padding, and floats the emoji button inside the
+   *  input instead of in a toolbar row. */
+  hideToolbar?: boolean;
 }
 
 const MIN_FONT_SIZE = 8;
@@ -129,7 +130,7 @@ function ToolbarButton({
   );
 }
 
-function Toolbar({ editor, trailing, compact }: { editor: Editor | null; trailing?: React.ReactNode; compact?: boolean }) {
+function Toolbar({ editor, trailing }: { editor: Editor | null; trailing?: React.ReactNode }) {
   // While the font-size field is focused, its displayed text is driven by
   // this draft instead of the editor's (clamped) attribute. Without it, every
   // keystroke re-derives the shown value from the clamped mark, so typing the
@@ -154,50 +155,46 @@ function Toolbar({ editor, trailing, compact }: { editor: Editor | null; trailin
       <ToolbarButton label="Bullet list"   active={editor.isActive('bulletList')}  onClick={() => editor.chain().focus().toggleBulletList().run()}><List className="h-4 w-4" /></ToolbarButton>
       <ToolbarButton label="Numbered list" active={editor.isActive('orderedList')} onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered className="h-4 w-4" /></ToolbarButton>
 
-      {!compact && (
-        <>
-          <span className="mx-1 h-5 w-px bg-(--rs-neutral-grey-200)" />
+      <span className="mx-1 h-5 w-px bg-(--rs-neutral-grey-200)" />
 
-          <input
-            type="number"
-            inputMode="numeric"
-            aria-label="Font size (px)"
-            title="Font size (px)"
-            placeholder="16"
-            min={MIN_FONT_SIZE}
-            max={MAX_FONT_SIZE}
-            step={1}
-            value={sizeDisplayValue}
-            onFocus={() => setSizeDraft(sizeDisplayValue)}
-            onChange={(e) => {
-              // No .focus() here — these commands apply to the editor's tracked
-              // selection regardless of DOM focus. Focusing the editor would
-              // steal focus away from this input on every keystroke, so typed
-              // digits (or a highlighted selection) end up hitting the document
-              // instead of this field.
-              const raw = e.target.value;
-              setSizeDraft(raw);
-              if (!raw) { editor.chain().unsetFontSize().run(); return; }
-              const n = Math.trunc(Number(raw));
-              if (!Number.isFinite(n)) return;
-              // Applied live, unclamped, so the preview updates as you type —
-              // clamping happens once on blur instead of on every keystroke.
-              editor.chain().setFontSize(`${n}px`).run();
-            }}
-            onBlur={() => {
-              if (sizeDraft) {
-                const n = Math.trunc(Number(sizeDraft));
-                if (Number.isFinite(n)) {
-                  const clamped = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, n));
-                  editor.chain().setFontSize(`${clamped}px`).run();
-                }
-              }
-              setSizeDraft(null);
-            }}
-            className="h-8 w-14 rounded-md border border-(--rs-neutral-grey-200) bg-white px-2 text-xs text-(--rs-neutral-grey-700) focus:border-(--rs-primary-300) focus:outline-none"
-          />
-        </>
-      )}
+      <input
+        type="number"
+        inputMode="numeric"
+        aria-label="Font size (px)"
+        title="Font size (px)"
+        placeholder="16"
+        min={MIN_FONT_SIZE}
+        max={MAX_FONT_SIZE}
+        step={1}
+        value={sizeDisplayValue}
+        onFocus={() => setSizeDraft(sizeDisplayValue)}
+        onChange={(e) => {
+          // No .focus() here — these commands apply to the editor's tracked
+          // selection regardless of DOM focus. Focusing the editor would
+          // steal focus away from this input on every keystroke, so typed
+          // digits (or a highlighted selection) end up hitting the document
+          // instead of this field.
+          const raw = e.target.value;
+          setSizeDraft(raw);
+          if (!raw) { editor.chain().unsetFontSize().run(); return; }
+          const n = Math.trunc(Number(raw));
+          if (!Number.isFinite(n)) return;
+          // Applied live, unclamped, so the preview updates as you type —
+          // clamping happens once on blur instead of on every keystroke.
+          editor.chain().setFontSize(`${n}px`).run();
+        }}
+        onBlur={() => {
+          if (sizeDraft) {
+            const n = Math.trunc(Number(sizeDraft));
+            if (Number.isFinite(n)) {
+              const clamped = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, n));
+              editor.chain().setFontSize(`${clamped}px`).run();
+            }
+          }
+          setSizeDraft(null);
+        }}
+        className="h-8 w-14 rounded-md border border-(--rs-neutral-grey-200) bg-white px-2 text-xs text-(--rs-neutral-grey-700) focus:border-(--rs-primary-300) focus:outline-none"
+      />
 
       {trailing}
     </div>
@@ -229,7 +226,7 @@ export function RichTextEditor({
   enableMentions = false,
   mentionUsers = [],
   enableEmoji = false,
-  compact = false,
+  hideToolbar = false,
 }: RichTextEditorProps) {
   const initial = value ?? defaultValue ?? '';
   const [html, setHtml] = useState(initial);
@@ -325,7 +322,11 @@ export function RichTextEditor({
     extensions,
     content: initial,
     editorProps: {
-      attributes: { class: 'rs-richtext px-4 py-3 text-sm text-(--rs-neutral-grey-800)' },
+      attributes: {
+        class: hideToolbar
+          ? `rs-richtext py-2 pl-3 text-sm text-(--rs-neutral-grey-800) ${enableEmoji ? 'pr-9' : 'pr-3'}`
+          : 'rs-richtext px-4 py-3 text-sm text-(--rs-neutral-grey-800)',
+      },
     },
     onUpdate: ({ editor }) => {
       const next = editor.getHTML();
@@ -353,24 +354,37 @@ export function RichTextEditor({
 
   return (
     <div>
-      <div className="rs-richtext-editor flex flex-col overflow-hidden rounded-xl border border-(--rs-neutral-grey-200) bg-white focus-within:border-(--rs-primary-300) focus-within:ring-4 focus-within:ring-(--rs-primary-100)">
-        <Toolbar
-          editor={editor}
-          compact={compact}
-          trailing={enableEmoji ? (
-            <>
-              <span className="mx-1 h-5 w-px bg-(--rs-neutral-grey-200)" />
-              <ToolbarButton
-                label="Insert emoji"
-                active={emojiOpen}
-                buttonRef={emojiBtnRef}
-                onClick={toggleEmoji}
-              >
-                <Smile className="h-4 w-4" />
-              </ToolbarButton>
-            </>
-          ) : null}
-        />
+      <div className={`rs-richtext-editor relative flex flex-col overflow-hidden border border-(--rs-neutral-grey-200) bg-white focus-within:border-(--rs-primary-300) focus-within:ring-4 focus-within:ring-(--rs-primary-100) ${hideToolbar ? 'rs-richtext-chat rounded-2xl' : 'rounded-xl'}`}>
+        {!hideToolbar && (
+          <Toolbar
+            editor={editor}
+            trailing={enableEmoji ? (
+              <>
+                <span className="mx-1 h-5 w-px bg-(--rs-neutral-grey-200)" />
+                <ToolbarButton
+                  label="Insert emoji"
+                  active={emojiOpen}
+                  buttonRef={emojiBtnRef}
+                  onClick={toggleEmoji}
+                >
+                  <Smile className="h-4 w-4" />
+                </ToolbarButton>
+              </>
+            ) : null}
+          />
+        )}
+        {hideToolbar && enableEmoji && (
+          <div className="absolute right-1 top-1">
+            <ToolbarButton
+              label="Insert emoji"
+              active={emojiOpen}
+              buttonRef={emojiBtnRef}
+              onClick={toggleEmoji}
+            >
+              <Smile className="h-4 w-4" />
+            </ToolbarButton>
+          </div>
+        )}
         <div className={bodyClassName ?? ''}>
           <EditorContent editor={editor} />
         </div>

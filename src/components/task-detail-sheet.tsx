@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Loader2, MessageSquare, Activity as ActivityIcon, FileText, ImagePlus, Save, Trash2, X, Maximize2, Minimize2, Eye, Lock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Activity as ActivityIcon, FileText, ImagePlus, Save, Send, Trash2, X, Maximize2, Minimize2, Eye, Lock } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { extractTaskDescriptionImageUrls } from '@/lib/task-description-images';
 import {
@@ -952,7 +952,7 @@ export function TaskDetailSheet({
           )}
 
           {!loading && item && tab === 'activity' && (
-            <div ref={commentsListRef} className="space-y-3">
+            <div ref={commentsListRef} className="space-y-1">
               {timeline.length === 0 && (
                 <p className="text-sm text-(--rs-neutral-grey-400) italic">No activity yet.</p>
               )}
@@ -961,38 +961,35 @@ export function TaskDetailSheet({
                   <div
                     key={entry.id}
                     data-comment-id={entry.comment.id}
-                    className={`flex gap-2.5 rounded-lg p-3 transition-colors duration-500 ${
+                    className={`flex gap-2 rounded-lg px-2 py-1.5 transition-colors duration-500 ${
                       highlightCommentId === String(entry.comment.id)
                         ? 'border border-(--rs-accent-300) bg-(--rs-accent-50) ring-2 ring-(--rs-accent-200)'
-                        : 'border border-(--rs-neutral-grey-100) bg-white'
+                        : 'border border-transparent hover:bg-(--rs-neutral-grey-50)'
                     }`}
                   >
-                    <PersonAvatar name={entry.comment.author_name} size={28} className="mt-0.5" />
+                    <PersonAvatar name={entry.comment.author_name} size={22} className="mt-0.5" />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2 text-xs text-(--rs-neutral-grey-500) mb-1.5">
-                        <span className="flex items-center gap-1.5 font-medium text-(--rs-neutral-grey-800)">
-                          <MessageSquare className="h-3 w-3 text-(--rs-neutral-grey-300)" aria-hidden="true" />
+                      <div className="flex items-baseline justify-between gap-2 text-xs text-(--rs-neutral-grey-500)">
+                        <span className="font-medium text-(--rs-neutral-grey-800)">
                           {entry.comment.author_name}
+                          <span className="ml-1.5 font-normal text-(--rs-neutral-grey-400)">{fmt(entry.comment.created_at)}</span>
                         </span>
-                        <div className="flex items-center gap-2">
-                          <span>{fmt(entry.comment.created_at)}</span>
-                          {(entry.comment.author_id === currentUserId || isAdmin) && (
-                            <button
-                              onClick={() => handleDeleteComment(entry.comment.id)}
-                              className="flex h-8 w-8 items-center justify-center rounded-md text-(--rs-neutral-grey-400) hover:bg-red-50 hover:text-red-500"
-                              title="Delete"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
+                        {(entry.comment.author_id === currentUserId || isAdmin) && (
+                          <button
+                            onClick={() => handleDeleteComment(entry.comment.id)}
+                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-(--rs-neutral-grey-400) hover:bg-red-50 hover:text-red-500"
+                            title="Delete"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
                       </div>
-                      <RichText html={entry.comment.body} className="text-sm text-(--rs-neutral-grey-800)" />
+                      <RichText html={entry.comment.body} className="text-sm leading-snug text-(--rs-neutral-grey-800)" />
                     </div>
                   </div>
                 ) : (
-                  <div key={entry.id} className="flex items-start gap-2.5 py-1 pl-1 text-xs text-(--rs-neutral-grey-500)">
-                    <ActivityIcon className="mt-0.5 h-3 w-3 shrink-0 text-(--rs-neutral-grey-300)" aria-hidden="true" />
+                  <div key={entry.id} className="flex items-center gap-2 px-2 py-0.5 text-xs text-(--rs-neutral-grey-500)">
+                    <ActivityIcon className="h-3 w-3 shrink-0 text-(--rs-neutral-grey-300)" aria-hidden="true" />
                     <span>
                       <span className="font-medium text-(--rs-neutral-grey-700)">{entry.activity.actor_name}</span>{' '}
                       {describeActivity(entry.activity)}
@@ -1002,25 +999,28 @@ export function TaskDetailSheet({
                 ),
               )}
 
-              <div className="pt-2 space-y-2">
-                <RichTextEditor
-                  value={newComment}
-                  onChange={setNewComment}
-                  placeholder="Write a comment… use @ to tag a teammate"
-                  bodyClassName="min-h-[84px] overflow-y-auto"
-                  enableMentions
-                  enableEmoji
-                  compact
-                  mentionUsers={members.map(m => ({ id: m.user_id, name: m.name }))}
-                />
+              <div className="flex items-end gap-2 pt-2">
+                <div className="min-w-0 flex-1">
+                  <RichTextEditor
+                    value={newComment}
+                    onChange={setNewComment}
+                    placeholder="Message…"
+                    bodyClassName="max-h-32 overflow-y-auto"
+                    enableMentions
+                    enableEmoji
+                    hideToolbar
+                    mentionUsers={members.map(m => ({ id: m.user_id, name: m.name }))}
+                  />
+                </div>
                 <button
                   onClick={handlePostComment}
                   disabled={postingComment || isRichTextEmpty(newComment)}
-                  className="flex min-h-10 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  aria-label="Post comment"
+                  title="Post comment"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-40"
                   style={{ background: 'var(--rs-primary-500)' }}
                 >
-                  {postingComment && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  Post comment
+                  {postingComment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </button>
               </div>
             </div>
