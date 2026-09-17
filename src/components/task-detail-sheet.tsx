@@ -56,6 +56,9 @@ interface ProjectMember {
   id: number; user_id: number; name: string; email: string; role: string;
 }
 type StateOption = { id: string; name: string; color: string };
+type TimelineEntry =
+  | { kind: 'comment'; id: string; ts: string; comment: Comment }
+  | { kind: 'activity'; id: string; ts: string; activity: ActivityEntry };
 
 const PRIORITIES: Array<{ value: SheetWorkItem['priority']; label: string }> = [
   { value: 'urgent', label: 'Urgent' },
@@ -105,7 +108,7 @@ export function TaskDetailSheet({
   const canEdit = caps.canEditItem;            // member+ : general fields
   const canEditDates = caps.canEditDates;      // lead    : due date
   const canEditAssignees = caps.canEditAssignees; // lead : assignees
-  const [tab, setTab] = useState<'details' | 'comments' | 'activity'>('details');
+  const [tab, setTab] = useState<'details' | 'activity'>('details');
 
   // Deep-link to a specific comment (from a "tagged you" notification): jump to
   // the Comments tab, scroll the comment into view, and flash a highlight.
@@ -194,6 +197,16 @@ export function TaskDetailSheet({
 
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const descriptionImageUrls = extractTaskDescriptionImageUrls(description);
+
+  // Comments + activity, merged into one GitHub-style chronological timeline.
+  // 'commented' activity rows are dropped — the comment itself already
+  // represents that event, so keeping both would show it twice.
+  const timeline: TimelineEntry[] = [
+    ...comments.map((comment): TimelineEntry => ({ kind: 'comment', id: `c${comment.id}`, ts: comment.created_at, comment })),
+    ...activity
+      .filter(a => a.action !== 'commented')
+      .map((activity): TimelineEntry => ({ kind: 'activity', id: `a${activity.id}`, ts: activity.created_at, activity })),
+  ].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
 
   function imageAltFromFilename(filename: string): string {
     return filename
@@ -288,8 +301,8 @@ export function TaskDetailSheet({
 
     let innerRaf = 0;
     const raf = window.requestAnimationFrame(() => {
-      setTab('comments');
-      // Scroll on the next frame, after the Comments tab has painted.
+      setTab('activity');
+      // Scroll on the next frame, after the Activity tab has painted.
       innerRaf = window.requestAnimationFrame(() => {
         commentsListRef.current
           ?.querySelector(`[data-comment-id="${focusCommentId}"]`)
@@ -573,8 +586,7 @@ export function TaskDetailSheet({
         <div className="flex overflow-x-auto border-b border-(--rs-neutral-grey-100) px-4 sm:px-5">
           {[
             { key: 'details',  label: 'Details',  icon: FileText },
-            { key: 'comments', label: 'Comments', icon: MessageSquare },
-            { key: 'activity', label: 'Activity', icon: ActivityIcon },
+            { key: 'activity', label: 'Activity',  icon: ActivityIcon },
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
@@ -587,7 +599,7 @@ export function TaskDetailSheet({
             >
               <Icon className="w-3.5 h-3.5" />
               {label}
-              {key === 'comments' && comments.length > 0 && (
+              {key === 'activity' && comments.length > 0 && (
                 <span className="text-xs bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-600) px-1.5 py-0.5 rounded-full ml-1">
                   {comments.length}
                 </span>
@@ -939,39 +951,56 @@ export function TaskDetailSheet({
             </div>
           )}
 
-          {!loading && item && tab === 'comments' && (
+          {!loading && item && tab === 'activity' && (
             <div ref={commentsListRef} className="space-y-3">
-              {comments.length === 0 && (
-                <p className="text-sm text-(--rs-neutral-grey-400) italic">No comments yet.</p>
+              {timeline.length === 0 && (
+                <p className="text-sm text-(--rs-neutral-grey-400) italic">No activity yet.</p>
               )}
-              {comments.map(c => (
-                <div
-                  key={c.id}
-                  data-comment-id={c.id}
-                  className={`rounded-lg p-3 transition-colors duration-500 ${
-                    highlightCommentId === String(c.id)
-                      ? 'border border-(--rs-accent-300) bg-(--rs-accent-50) ring-2 ring-(--rs-accent-200)'
-                      : 'border border-(--rs-neutral-grey-100) bg-white'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-xs text-(--rs-neutral-grey-500) mb-1.5">
-                    <span className="font-medium text-(--rs-neutral-grey-800)">{c.author_name}</span>
-                    <div className="flex items-center gap-2">
-                      <span>{fmt(c.created_at)}</span>
-                      {(c.author_id === currentUserId || isAdmin) && (
-                        <button
-                          onClick={() => handleDeleteComment(c.id)}
-                          className="flex h-8 w-8 items-center justify-center rounded-md text-(--rs-neutral-grey-400) hover:bg-red-50 hover:text-red-500"
-                          title="Delete"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      )}
+              {timeline.map(entry =>
+                entry.kind === 'comment' ? (
+                  <div
+                    key={entry.id}
+                    data-comment-id={entry.comment.id}
+                    className={`flex gap-2.5 rounded-lg p-3 transition-colors duration-500 ${
+                      highlightCommentId === String(entry.comment.id)
+                        ? 'border border-(--rs-accent-300) bg-(--rs-accent-50) ring-2 ring-(--rs-accent-200)'
+                        : 'border border-(--rs-neutral-grey-100) bg-white'
+                    }`}
+                  >
+                    <PersonAvatar name={entry.comment.author_name} size={28} className="mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2 text-xs text-(--rs-neutral-grey-500) mb-1.5">
+                        <span className="flex items-center gap-1.5 font-medium text-(--rs-neutral-grey-800)">
+                          <MessageSquare className="h-3 w-3 text-(--rs-neutral-grey-300)" aria-hidden="true" />
+                          {entry.comment.author_name}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span>{fmt(entry.comment.created_at)}</span>
+                          {(entry.comment.author_id === currentUserId || isAdmin) && (
+                            <button
+                              onClick={() => handleDeleteComment(entry.comment.id)}
+                              className="flex h-8 w-8 items-center justify-center rounded-md text-(--rs-neutral-grey-400) hover:bg-red-50 hover:text-red-500"
+                              title="Delete"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <RichText html={entry.comment.body} className="text-sm text-(--rs-neutral-grey-800)" />
                     </div>
                   </div>
-                  <RichText html={c.body} className="text-sm text-(--rs-neutral-grey-800)" />
-                </div>
-              ))}
+                ) : (
+                  <div key={entry.id} className="flex items-start gap-2.5 py-1 pl-1 text-xs text-(--rs-neutral-grey-500)">
+                    <ActivityIcon className="mt-0.5 h-3 w-3 shrink-0 text-(--rs-neutral-grey-300)" aria-hidden="true" />
+                    <span>
+                      <span className="font-medium text-(--rs-neutral-grey-700)">{entry.activity.actor_name}</span>{' '}
+                      {describeActivity(entry.activity)}
+                    </span>
+                    <span className="ml-auto shrink-0 text-(--rs-neutral-grey-400)">{fmt(entry.activity.created_at)}</span>
+                  </div>
+                ),
+              )}
 
               <div className="pt-2 space-y-2">
                 <RichTextEditor
@@ -981,6 +1010,7 @@ export function TaskDetailSheet({
                   bodyClassName="min-h-[84px] overflow-y-auto"
                   enableMentions
                   enableEmoji
+                  compact
                   mentionUsers={members.map(m => ({ id: m.user_id, name: m.name }))}
                 />
                 <button
@@ -993,23 +1023,6 @@ export function TaskDetailSheet({
                   Post comment
                 </button>
               </div>
-            </div>
-          )}
-
-          {!loading && item && tab === 'activity' && (
-            <div className="space-y-2">
-              {activity.length === 0 && (
-                <p className="text-sm text-(--rs-neutral-grey-400) italic">No activity yet.</p>
-              )}
-              {activity.map(a => (
-                <div key={a.id} className="grid gap-1 py-2 text-xs text-(--rs-neutral-grey-600) sm:flex sm:items-start sm:gap-2 sm:py-1">
-                  <span className="text-(--rs-neutral-grey-400) sm:w-24 sm:shrink-0">{fmt(a.created_at)}</span>
-                  <span className="font-medium text-(--rs-neutral-grey-800) sm:shrink-0">{a.actor_name}</span>
-                  <span className="text-(--rs-neutral-grey-500)">
-                    {describeActivity(a)}
-                  </span>
-                </div>
-              ))}
             </div>
           )}
         </div>
