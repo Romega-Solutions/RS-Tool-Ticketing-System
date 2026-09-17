@@ -357,6 +357,7 @@ export const candidatePreEmploymentDocuments = pgTable('candidate_pre_employment
   uploadedAt:  text('uploaded_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   sentAt:      text('sent_at'),
   signedAt:    text('signed_at'),
+  lastReminderSentAt: text('last_reminder_sent_at'),
 }, (t) => [
   unique('candidate_pre_employment_documents_candidate_kind_unique').on(t.candidateId, t.kind),
 ]);

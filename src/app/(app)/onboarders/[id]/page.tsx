@@ -18,14 +18,13 @@ import {
 import { UploadDocumentForm } from '../onboarder-forms';
 import {
   SendWelcomeButton,
-  SendOnboardingFormReminderButton,
   ResendLastEmailButton,
   SendGmailNudgeButton,
   SendGroupChatButton,
   ChecklistToggle,
   NotesEditor,
 } from '../onboarder-actions';
-import { formatPhoneNumber } from '@/lib/format';
+import { formatPhoneNumber, formatReminderSentAt } from '@/lib/format';
 import { listOnboardingLeadOptions, type OnboardingLeadOption } from '@/lib/onboarding-lead';
 import { DirectSupervisorSelect } from '../direct-supervisor-select';
 import { TeamsContactEmails } from '../teams-contact-emails';
@@ -425,9 +424,8 @@ function OverviewTab({
   onLastFailedTemplate: string | null;
   onboardingSession: OnboardingSessionRow | null;
 }) {
-  const canSendFormReminder = o.status === 'pre_onboarding'
-    && !o.onboarding_form_submitted_at
-    && Boolean(o.onboarding_form_token_hash);
+  const lastSentAt = [o.last_email_sent_at, o.onboarding_form_reminder_sent_at]
+    .filter((value): value is string => Boolean(value)).sort().at(-1) ?? null;
   return (
     <>
       <OnboardingNextAction o={o} onboardingSession={onboardingSession} />
@@ -449,12 +447,10 @@ function OverviewTab({
                 type={o.onboarder_type}
                 alreadySubmitted={Boolean(o.onboarding_form_submitted_at)}
               />
-              {canSendFormReminder && (
-                <SendOnboardingFormReminderButton
-                  id={o.id}
-                  initialSentAt={o.last_email_sent_at}
-                  lastSentAt={o.onboarding_form_reminder_sent_at}
-                />
+              {lastSentAt && (
+                <span className="inline-flex items-center gap-1 text-[10px] text-(--rs-neutral-grey-500)">
+                  <Clock className="h-3 w-3" /> Last sent {formatReminderSentAt(lastSentAt)}
+                </span>
               )}
             </div>
           </div>

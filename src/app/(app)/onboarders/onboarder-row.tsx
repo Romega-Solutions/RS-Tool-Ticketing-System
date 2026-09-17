@@ -1,6 +1,7 @@
 'use client';
 
 import { useTransition } from 'react';
+import { StatusConfirmation } from '@/components/status-confirmation';
 import { ChevronDown, Trash2 } from 'lucide-react';
 import { ALLOWED_STATUSES, type OnboarderStatus } from './constants';
 import { updateOnboarderStatus, deleteOnboarder } from './actions';
@@ -26,33 +27,17 @@ export const STATUS_COLOR: Record<OnboarderStatus, string> = {
 };
 
 export function OnboarderStatusSelect({ id, status }: { id: number; status: string }) {
-  const [isPending, start] = useTransition();
   const color = STATUS_COLOR[status as OnboarderStatus] ?? 'bg-slate-100 text-slate-700';
-  // Inline option styles override the colored-pill inheritance in Chrome /
-  // Safari so the dropdown list stays readable when opened.
-  const OPTION_STYLE: React.CSSProperties = { backgroundColor: '#ffffff', color: '#0f172a' };
-  return (
-    <div className="relative inline-flex items-center">
-      <select
-        defaultValue={status}
-        disabled={isPending}
-        onChange={(e) => {
-          const next = e.target.value;
-          start(async () => {
-            try { await updateOnboarderStatus(id, next); }
-            catch (err) { console.error(err); alert(err instanceof Error ? err.message : 'Update failed'); }
-          });
-        }}
+  return <StatusConfirmation status={status} label={value => STATUS_LABEL[value as OnboarderStatus] ?? value} onConfirm={next => updateOnboarderStatus(id, next)}>
+    {(select, pending) => <div className="relative inline-flex items-center">
+      <select value={status} disabled={pending} onChange={event => select(event.target.value)}
         className={`appearance-none rounded-full pl-3 pr-7 py-1 text-xs font-semibold border-0 cursor-pointer outline-none focus:ring-3 focus:ring-(--rs-primary-100) ${color} disabled:opacity-60`}
-        aria-label="Change stage"
-      >
-        {ALLOWED_STATUSES.map(s => (
-          <option key={s} value={s} style={OPTION_STYLE}>{STATUS_LABEL[s]}</option>
-        ))}
+        aria-label="Change stage">
+        {ALLOWED_STATUSES.map(value => <option key={value} value={value} style={{ backgroundColor: '#ffffff', color: '#0f172a' }}>{STATUS_LABEL[value]}</option>)}
       </select>
       <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 opacity-70" />
-    </div>
-  );
+    </div>}
+  </StatusConfirmation>;
 }
 
 export function OnboarderDelete({ id }: { id: number }) {

@@ -33,7 +33,6 @@ import {
   CandidateStatus,
   CandidateRating,
   CandidateDelete,
-  CandidateReminderButton,
 } from "../candidate-row";
 import { TalentConsentPanel } from "../talent-consent-panel";
 import { ResumeUploadCard, UploadResumeButton } from "../resume-upload";
@@ -197,6 +196,7 @@ type CandidatePreEmploymentDocumentRow = {
   uploaded_at: string;
   sent_at: string | null;
   signed_at: string | null;
+  last_reminder_sent_at?: string | null;
 };
 
 const VALID_PRE_EMPLOYMENT_TABS = [
@@ -506,7 +506,7 @@ export default async function CandidateDetailPage({
     }
     const { data: documentsData, error: documentsError } = await supabase
       .from("candidate_pre_employment_documents")
-      .select("kind, file_name, signed_url, uploaded_at, sent_at, signed_at")
+      .select("kind, file_name, signed_url, uploaded_at, sent_at, signed_at, last_reminder_sent_at")
       .eq("candidate_id", id);
     if (!documentsError && documentsData) {
       candidateDocuments = documentsData as CandidatePreEmploymentDocumentRow[];
@@ -1101,22 +1101,14 @@ function PreEmploymentBackgroundCheckTab({
     candidateEmploymentVerifications.filter(
       (verification) => !verification.request_sent_at,
     ).length;
-  const pendingReferenceCount = references.filter(
-    (reference) => !!reference.requestSentAt && !reference.respondedAt,
-  ).length;
-  const pendingEmploymentVerificationCount = verifications.filter(
-    (verification) => !!verification.requestSentAt && !verification.respondedAt,
-  ).length;
   const latestReminder = (timestamps: Array<string | null | undefined>) =>
     timestamps.filter((value): value is string => Boolean(value)).sort().at(-1) ?? null;
   const referenceLastSentAt = latestReminder(
     references
-      .filter(reference => !reference.respondedAt)
       .flatMap(reference => [reference.requestSentAt, reference.lastReminderSentAt]),
   );
   const employmentLastSentAt = latestReminder(
     verifications
-      .filter(verification => !verification.respondedAt)
       .flatMap(verification => [verification.requestSentAt, verification.lastReminderSentAt]),
   );
 
@@ -1126,36 +1118,25 @@ function PreEmploymentBackgroundCheckTab({
         title={`Character references · ${references.length}`}
         icon={<Mail className="w-4 h-4" />}
         action={
-          canSend ? (
-            <div className="flex flex-wrap justify-end gap-2">
-              {!submitted && (!request || request.invalidated_at) && (
-                <SendPreEmploymentBgCheckButton candidateId={candidateId} />
-              )}
-              {!submitted && request && !request.invalidated_at && (
-                <CandidateReminderButton
-                  candidateId={candidateId}
-                  kind="background_check"
-                  lastSentAt={latestReminder([request.sent_at, request.last_reminder_sent_at])}
-                  hasBeenReminded={Boolean(request.last_reminder_sent_at)}
-                />
-              )}
-              {submitted && allThreeReferencesReady && unsentReferenceCount > 0 && (
-                <SendCandidateReferenceEmailsButton
-                  candidateId={candidateId}
-                  remainingCount={unsentReferenceCount}
-                />
-              )}
-              {submitted && pendingReferenceCount > 0 && (
-                <CandidateReminderButton
-                  candidateId={candidateId}
-                  kind="reference_check"
-                  count={pendingReferenceCount}
-                  lastSentAt={referenceLastSentAt}
-                  hasBeenReminded={references.some(reference => !reference.respondedAt && Boolean(reference.lastReminderSentAt))}
-                />
-              )}
-            </div>
-          ) : undefined
+          <div className="flex flex-col items-end gap-1">
+            {!submitted ? (
+              <SendPreEmploymentBgCheckButton candidateId={candidateId} disabled={!canSend} />
+            ) : (
+              <SendCandidateReferenceEmailsButton
+                candidateId={candidateId}
+                remainingCount={unsentReferenceCount}
+                reminder={unsentReferenceCount === 0}
+                disabled={!canSend || (unsentReferenceCount > 0
+                  ? !allThreeReferencesReady
+                  : !references.some(reference => !!reference.requestSentAt && !reference.respondedAt))}
+              />
+            )}
+            {(submitted ? referenceLastSentAt : request?.sent_at) && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-(--rs-neutral-grey-500)">
+                <Clock className="h-3 w-3" /> Last sent {formatReminderSentAt(submitted ? referenceLastSentAt : latestReminder([request?.sent_at, request?.last_reminder_sent_at]))}
+              </span>
+            )}
+          </div>
         }
       >
         {references.length === 0 ? (
@@ -1183,25 +1164,20 @@ function PreEmploymentBackgroundCheckTab({
         title={`Employment verifications · ${verifications.length}`}
         icon={<Building2 className="w-4 h-4" />}
         action={
-          canSend && submitted ? (
-            <div className="flex flex-wrap justify-end gap-2">
-              {unsentEmploymentVerificationCount > 0 && (
-                <SendCandidateEmploymentVerificationEmailsButton
-                  candidateId={candidateId}
-                  remainingCount={unsentEmploymentVerificationCount}
-                />
-              )}
-              {pendingEmploymentVerificationCount > 0 && (
-                <CandidateReminderButton
-                  candidateId={candidateId}
-                  kind="employment_verification"
-                  count={pendingEmploymentVerificationCount}
-                  lastSentAt={employmentLastSentAt}
-                  hasBeenReminded={verifications.some(verification => !verification.respondedAt && Boolean(verification.lastReminderSentAt))}
-                />
-              )}
-            </div>
-          ) : undefined
+          <div className="flex flex-col items-end gap-1">
+            <SendCandidateEmploymentVerificationEmailsButton
+              candidateId={candidateId}
+              remainingCount={unsentEmploymentVerificationCount}
+              reminder={unsentEmploymentVerificationCount === 0}
+              disabled={!canSend || !submitted || (unsentEmploymentVerificationCount === 0
+                && !verifications.some(verification => !!verification.requestSentAt && !verification.respondedAt))}
+            />
+            {employmentLastSentAt && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-(--rs-neutral-grey-500)">
+                <Clock className="h-3 w-3" /> Last sent {formatReminderSentAt(employmentLastSentAt)}
+              </span>
+            )}
+          </div>
         }
       >
         {verifications.length === 0 ? (
@@ -1616,10 +1592,17 @@ function PreEmploymentDocumentsTab({
       icon={<FileText className="w-4 h-4" />}
       action={
         documents.length === 4 && canUpload ? (
-          <SendCandidateDocumentPackageButton
-            candidateId={candidateId}
-            alreadySent={documents.every((document) => !!document.sent_at)}
-          />
+          <div className="flex flex-col items-end gap-1">
+            <SendCandidateDocumentPackageButton
+              candidateId={candidateId}
+              alreadySent={documents.every((document) => !!document.sent_at)}
+            />
+            {documents.some(document => !!document.sent_at) && (
+              <span className="text-[10px] text-(--rs-neutral-grey-500)">
+                Last sent {formatReminderSentAt(documents.map(document => document.sent_at).filter((value): value is string => Boolean(value)).sort().at(-1))}
+              </span>
+            )}
+          </div>
         ) : undefined
       }
     >

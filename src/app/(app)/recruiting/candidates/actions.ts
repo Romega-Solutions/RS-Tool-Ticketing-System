@@ -85,7 +85,7 @@ type HistoryEntry = {
   summary:  string;
 };
 
-export type RecruitmentReminderKind = 'background_check' | 'reference_check' | 'employment_verification';
+export type RecruitmentReminderKind = 'background_check' | 'reference_check' | 'employment_verification' | 'sow';
 
 async function writeHistory(
   supabase: AdminClient,
@@ -554,7 +554,7 @@ export async function sendCandidateEmploymentVerificationEmails(candidateId: num
 export async function sendCandidateFormReminder(candidateId: number, kind: RecruitmentReminderKind): Promise<void> {
   const session = await requireSession();
   if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
-  if (!['background_check', 'reference_check', 'employment_verification'].includes(kind)) {
+  if (!['background_check', 'reference_check', 'employment_verification', 'sow'].includes(kind)) {
     throw new Error('Invalid reminder type');
   }
 
@@ -581,7 +581,20 @@ export async function sendCandidateFormReminder(candidateId: number, kind: Recru
     requestedByEmail: session.email,
   });
 
-  if (kind === 'background_check') {
+  if (kind === 'sow') {
+    if (!candidate.email?.trim()) throw new Error('Candidate has no email address');
+    const { data: sow, error } = await supabase.from('candidate_pre_employment_documents')
+      .select('id, sent_at, signed_at')
+      .eq('candidate_id', candidateId).eq('kind', 'sow').maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!sow?.sent_at) throw new Error('Send the SOW document package first');
+    if (sow.signed_at) throw new Error('The SOW is already marked signed');
+    const result = await sendReminder(candidate.email.trim(), candidate.full_name.trim().split(/\s+/)[0] || 'there');
+    if (!result.ok) throw new Error(result.error);
+    const { error: markError } = await supabase.from('candidate_pre_employment_documents')
+      .update({ last_reminder_sent_at: sentAt }).eq('id', sow.id);
+    if (markError) throw new Error('Reminder sent but its timestamp could not be saved: ' + markError.message);
+  } else if (kind === 'background_check') {
     if (!candidate.email?.trim()) throw new Error('Candidate has no email address');
     const { data: request, error } = await supabase
       .from('candidate_pre_employment_requests')
@@ -640,7 +653,7 @@ export async function sendCandidateFormReminder(candidateId: number, kind: Recru
     }
   }
 
-  const label = kind === 'background_check' ? 'background-check form' : kind === 'reference_check' ? 'character-reference form' : 'employment-verification form';
+  const label = kind === 'sow' ? 'signed SOW return' : kind === 'background_check' ? 'background-check form' : kind === 'reference_check' ? 'character-reference form' : 'employment-verification form';
   await writeHistory(supabase, candidateId, session, [{
     field: 'pre_employment_reminder_sent', oldValue: null, newValue: kind,
     summary: `Manual reminder sent for the existing ${label} link`,

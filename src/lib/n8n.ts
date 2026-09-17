@@ -303,7 +303,7 @@ export async function notifyOnboardingWebhook(
 // initial Jotform-request workflows so it can send a short, linkless nudge.
 export type FormReminderEvent = {
   source: 'recruitment' | 'onboarding';
-  reminderType: 'background_check' | 'reference_check' | 'employment_verification' | 'onboarding_form';
+  reminderType: 'background_check' | 'reference_check' | 'employment_verification' | 'onboarding_form' | 'sow';
   candidateId?: number;
   onboarderId?: number;
   recipientEmail: string;

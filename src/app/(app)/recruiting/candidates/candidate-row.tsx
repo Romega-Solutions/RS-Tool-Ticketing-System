@@ -1,6 +1,7 @@
 'use client';
 
 import { useTransition } from 'react';
+import { StatusConfirmation } from '@/components/status-confirmation';
 import { Star, Trash2, Eye, EyeOff, Bell, Clock } from 'lucide-react';
 import { formatReminderSentAt } from '@/lib/format';
 import {
@@ -49,23 +50,12 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export function CandidateStatus({ id, status }: { id: number; status: string }) {
-  const [isPending, start] = useTransition();
-  return (
-    <select
-      defaultValue={status}
-      disabled={isPending}
-      onChange={(e) => {
-        const next = e.target.value;
-        start(async () => {
-          try { await updateCandidateStatus(id, next); }
-          catch (err) { console.error(err); alert(err instanceof Error ? err.message : 'Update failed'); }
-        });
-      }}
-      className={`rounded-full px-3 py-1 text-xs font-semibold capitalize border-0 cursor-pointer ${STATUS_COLOR[status] ?? 'bg-slate-100 text-slate-700'}`}
-    >
-      {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-    </select>
-  );
+  return <StatusConfirmation status={status} hiring label={value => STATUSES.find(option => option.value === value)?.label ?? value} onConfirm={next => updateCandidateStatus(id, next)}>
+    {(select, pending) => <select value={status} disabled={pending} onChange={event => select(event.target.value)} aria-label="Change candidate status"
+      className={`rounded-full px-3 py-1 text-xs font-semibold capitalize border-0 cursor-pointer ${STATUS_COLOR[status] ?? 'bg-slate-100 text-slate-700'}`}>
+      {STATUSES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+    </select>}
+  </StatusConfirmation>;
 }
 
 export function CandidateRating({ id, rating }: { id: number; rating: number | null }) {
@@ -156,7 +146,6 @@ export function CandidateReminderButton({
   kind,
   count = 1,
   lastSentAt = null,
-  hasBeenReminded = false,
 }: {
   candidateId: number;
   kind: RecruitmentReminderKind;
@@ -187,7 +176,7 @@ export function CandidateReminderButton({
         className="inline-flex items-center gap-1 rounded-md border border-(--rs-accent-200) bg-(--rs-accent-50) px-2 py-1 text-[11px] font-semibold text-(--rs-accent-800) hover:bg-(--rs-accent-100) disabled:cursor-not-allowed disabled:opacity-50"
       >
         {isPending ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-current/30 border-t-current" /> : <Bell className="h-3 w-3" />}
-        {isPending ? 'Sending…' : hasBeenReminded ? 'Remind again' : 'Remind'}
+        {isPending ? 'Sending…' : 'Remind'}
       </button>
       {formattedLastSentAt && (
         <span className="inline-flex items-center gap-1 whitespace-nowrap text-[10px] text-(--rs-neutral-grey-500)">

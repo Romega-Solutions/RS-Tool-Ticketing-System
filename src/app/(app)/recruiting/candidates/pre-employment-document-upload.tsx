@@ -1,8 +1,8 @@
 'use client';
 
 import { useRef, useState, useTransition } from 'react';
-import { CheckCircle2, Upload } from 'lucide-react';
-import { markCandidateSowSigned, sendCandidateDocumentPackage, uploadPreEmploymentDocument } from './actions';
+import { CheckCircle2, Send, Upload } from 'lucide-react';
+import { sendCandidateFormReminder, markCandidateSowSigned, sendCandidateDocumentPackage, uploadPreEmploymentDocument } from './actions';
 
 export function PreEmploymentDocumentUpload({ candidateId, kind, canUpload }: { candidateId: number; kind: 'sow' | 'job_description' | 'ai_policy' | 'nda'; canUpload: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -33,7 +33,10 @@ export function SendCandidateDocumentPackageButton({ candidateId, alreadySent }:
   return <button type="button" disabled={pending} onClick={() => {
     if (!window.confirm(`${alreadySent ? 'Resend' : 'Send'} all pre-employment documents to the candidate?`)) return;
     start(async () => { try { await sendCandidateDocumentPackage(candidateId); } catch (err) { alert(err instanceof Error ? err.message : 'Could not send the document package'); } });
-  }} className="inline-flex items-center gap-1 rounded-lg bg-(--rs-primary-600) px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-(--rs-primary-700) disabled:opacity-50">
+  }} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-(--rs-primary-600) px-3 text-xs font-semibold text-white transition-colors hover:bg-(--rs-primary-700) disabled:cursor-not-allowed disabled:opacity-50">
+    {pending
+      ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+      : <Send className="h-3.5 w-3.5" />}
     {pending ? 'Sending…' : alreadySent ? 'Resend package' : 'Send document package'}
   </button>;
 }
@@ -45,5 +48,17 @@ export function MarkCandidateSowSignedButton({ candidateId }: { candidateId: num
     start(async () => { try { await markCandidateSowSigned(candidateId); } catch (err) { alert(err instanceof Error ? err.message : 'Could not mark the SOW signed'); } });
   }} className="inline-flex items-center gap-1 rounded-lg bg-green-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-green-700 disabled:opacity-50">
     <CheckCircle2 className="h-3.5 w-3.5" /> {pending ? 'Completing…' : 'Mark SOW signed'}
+  </button>;
+}
+export function SendSowReminderButton({ candidateId, disabled }: { candidateId: number; disabled: boolean }) {
+  const [pending, start] = useTransition();
+  return <button type="button" disabled={disabled || pending} onClick={() => {
+    if (!window.confirm('Check the inbox for a signed SOW first. Send a reminder to return the signed attachment by email?')) return;
+    start(async () => {
+      try { await sendCandidateFormReminder(candidateId, 'sow'); }
+      catch (error) { alert(error instanceof Error ? error.message : 'Could not send SOW reminder'); }
+    });
+  }} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-(--rs-primary-600) px-3 text-xs font-semibold text-white transition-colors hover:bg-(--rs-primary-700) disabled:cursor-not-allowed disabled:opacity-50">
+    <Send className="h-3.5 w-3.5" /> {pending ? 'Sending…' : 'Send SOW reminder'}
   </button>;
 }

@@ -154,7 +154,7 @@ export function SendOnboardingFormReminderButton({
     <div className="flex flex-col items-end gap-1">
       <ActionButton
         onClick={() => sendOnboardingFormReminder(id)}
-        label={lastSentAt ? 'Send reminder again' : 'Send form reminder'}
+        label="Send form reminder"
         icon={<Bell className="w-3.5 h-3.5" />}
         variant="outline"
         confirm="Send a reminder without changing the original onboarding-form link?"
