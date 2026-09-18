@@ -956,53 +956,27 @@ export function TaskDetailSheet({
           )}
 
           {!loading && item && tab === 'activity' && (
-            <div ref={commentsListRef} className="space-y-2.5">
+            <div ref={commentsListRef} className="space-y-1.5">
               {timeline.length === 0 && (
                 <p className="text-sm text-(--rs-neutral-grey-400) italic">No activity yet.</p>
               )}
               {timeline.map(entry =>
                 entry.kind === 'comment' ? (
-                  <div
+                  <CommentBubble
                     key={entry.id}
-                    data-comment-id={entry.comment.id}
-                    className={`overflow-hidden rounded-md border transition-colors duration-500 ${
-                      highlightCommentId === String(entry.comment.id)
-                        ? 'border-(--rs-accent-300) ring-2 ring-(--rs-accent-200)'
-                        : 'border-(--rs-neutral-grey-200)'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2 border-b border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-3 py-1.5">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <PersonAvatar name={entry.comment.author_name} size={20} />
-                        <span className="truncate text-sm font-semibold text-(--rs-neutral-grey-900)">
-                          {entry.comment.author_name}
-                        </span>
-                        <span className="shrink-0 text-xs text-(--rs-neutral-grey-500)">
-                          commented on {fmt(entry.comment.created_at)}
-                        </span>
-                      </div>
-                      {(entry.comment.author_id === currentUserId || isAdmin) && (
-                        <button
-                          onClick={() => handleDeleteComment(entry.comment.id)}
-                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-(--rs-neutral-grey-400) hover:bg-red-50 hover:text-red-500"
-                          title="Delete"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-                    <div className="bg-white px-3 py-2.5">
-                      <RichText html={entry.comment.body} className="text-sm leading-relaxed text-(--rs-neutral-grey-800)" />
-                    </div>
-                  </div>
+                    comment={entry.comment}
+                    isOwn={entry.comment.author_id === currentUserId}
+                    canDelete={entry.comment.author_id === currentUserId || isAdmin}
+                    highlighted={highlightCommentId === String(entry.comment.id)}
+                    onDelete={() => handleDeleteComment(entry.comment.id)}
+                  />
                 ) : (
-                  <div key={entry.id} className="flex items-center gap-2 px-2 py-0.5 text-xs text-(--rs-neutral-grey-500)">
-                    <ActivityIcon className="h-3 w-3 shrink-0 text-(--rs-neutral-grey-300)" aria-hidden="true" />
+                  <div key={entry.id} className="flex items-center justify-center gap-1.5 py-1 text-center text-[11px] text-(--rs-neutral-grey-400)">
+                    <ActivityIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
                     <span>
-                      <span className="font-medium text-(--rs-neutral-grey-700)">{entry.activity.actor_name}</span>{' '}
-                      {describeActivity(entry.activity, stateNameById, userNameById)}
+                      <span className="font-medium text-(--rs-neutral-grey-500)">{entry.activity.actor_name}</span>{' '}
+                      {describeActivity(entry.activity, stateNameById, userNameById)} · {fmt(entry.activity.created_at)}
                     </span>
-                    <span className="ml-auto shrink-0 text-(--rs-neutral-grey-400)">{fmt(entry.activity.created_at)}</span>
                   </div>
                 ),
               )}
@@ -1046,6 +1020,55 @@ function Field({ label, children }: { label: React.ReactNode; children: React.Re
     <div>
       <label className="block text-xs font-medium text-(--rs-neutral-grey-500) mb-1">{label}</label>
       {children}
+    </div>
+  );
+}
+
+function CommentBubble({
+  comment, isOwn, canDelete, highlighted, onDelete,
+}: {
+  comment: Comment;
+  isOwn: boolean;
+  canDelete: boolean;
+  highlighted: boolean;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      data-comment-id={comment.id}
+      className={`group flex items-end gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}
+    >
+      {!isOwn && <PersonAvatar name={comment.author_name} size={26} className="mb-4 shrink-0" />}
+      <div className={`flex min-w-0 max-w-[78%] flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
+        {!isOwn && (
+          <span className="mb-0.5 px-1 text-xs font-medium text-(--rs-neutral-grey-600)">
+            {comment.author_name}
+          </span>
+        )}
+        <div className={`flex items-center gap-1 ${isOwn ? 'flex-row-reverse' : ''}`}>
+          <div
+            className={`min-w-0 rounded-2xl px-3.5 py-2 text-sm leading-relaxed transition-colors duration-500 ${
+              isOwn
+                ? 'rounded-br-md bg-(--rs-primary-500) text-white'
+                : 'rounded-bl-md bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-900)'
+            } ${highlighted ? 'ring-2 ring-(--rs-accent-300) ring-offset-1' : ''}`}
+          >
+            <RichText html={comment.body} className="text-sm leading-relaxed" />
+          </div>
+          {canDelete && (
+            <button
+              onClick={onDelete}
+              title="Delete"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-(--rs-neutral-grey-400) opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+        <span className="mt-0.5 px-1 text-[11px] text-(--rs-neutral-grey-400)">
+          {fmt(comment.created_at)}
+        </span>
+      </div>
     </div>
   );
 }
