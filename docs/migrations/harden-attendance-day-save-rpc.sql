@@ -3,7 +3,10 @@
 -- CREATE OR REPLACE with an unchanged signature, so it is safe to re-run.
 --
 -- Note: a session belongs to the day it STARTED on, so tagging the following
--- day Absent/Leave while an earlier day's shift clocks out on it is allowed.
+-- day Absent/Leave while an earlier day's shift clocks out on it is allowed, and
+-- a shift may clock out on a day already tagged Absent/Leave. The old
+-- "session can't cross into an Absent/Leave day" rule is removed. Absent/Leave
+-- days still can't OWN sessions, and sessions still can't overlap.
 --
 -- Fixes:
 --  1. Every submitted session id must belong to this user AND this day. The old
@@ -39,10 +42,6 @@ DECLARE
   v_base_seconds    integer;
   v_week_dates      text[];
   v_attendance_id   integer;
-  v_other_column    text;
-  v_other_week_start text;
-  v_other_status    text;
-  v_other_dow       integer;
   r                 record;
   v_duration        integer;
   v_ot_seconds      integer;
@@ -128,34 +127,6 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'This overlaps another clock-in/out session for this user.';
   END IF;
-
-  -- A session that crosses into an adjacent day can't land on one tagged
-  -- Absent/Leave (the day being edited here is governed by p_status above).
-  FOR r IN
-    SELECT DISTINCT d::date AS dt
-    FROM tmp_attendance_day_sessions s,
-         generate_series(
-           (s.in_ts AT TIME ZONE 'Asia/Manila')::date,
-           (COALESCE(s.out_ts, s.in_ts) AT TIME ZONE 'Asia/Manila')::date,
-           interval '1 day'
-         ) d
-    WHERE d::date <> p_date::date
-  LOOP
-    v_other_dow := extract(dow FROM r.dt)::integer;
-    v_other_week_start := to_char(
-      CASE WHEN v_other_dow = 0 THEN r.dt - 6 ELSE r.dt - (v_other_dow - 1) END,
-      'YYYY-MM-DD'
-    );
-    v_other_column := v_day_names[v_other_dow + 1] || '_status';
-
-    EXECUTE format('SELECT %I FROM attendance WHERE user_id = $1 AND week_start = $2', v_other_column)
-      INTO v_other_status USING p_user_id, v_other_week_start;
-
-    IF v_other_status IN ('absent', 'leave') THEN
-      RAISE EXCEPTION '% is tagged % — that session can''t cross into it.',
-        to_char(r.dt, 'Mon FMDD'), (CASE WHEN v_other_status = 'absent' THEN 'Absent' ELSE 'Leave' END);
-    END IF;
-  END LOOP;
 
   -- Every submitted id must be one of THIS user's sessions on THIS day.
   IF EXISTS (
