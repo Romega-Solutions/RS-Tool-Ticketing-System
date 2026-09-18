@@ -15,6 +15,19 @@
 -- the actual fix for the bug where a day with no workable status could still
 -- carry timesheet sessions.
 --
+-- A session belongs to the day it STARTED on (PHT). Tagging the following day
+-- Absent/Leave while an earlier day's shift clocks out on it is allowed, and a
+-- shift may clock out on a day tagged Absent/Leave. Absent/Leave days still
+-- can't OWN sessions, and sessions still can't overlap.
+--
+-- Also enforced here:
+--  * every submitted session id must belong to this user AND this day;
+--  * overtime is reconciled across the whole week after each save
+--    (chronological, base allowance only — same formula as computeOvertime());
+--  * saves for one user are serialized by a transaction-scoped advisory lock.
+--
+-- Idempotent: CREATE OR REPLACE, safe to re-run.
+--
 -- p_sessions shape: jsonb array of { "id": int|null, "clockedInAt": ISO text,
 -- "clockedOutAt": ISO text | null }.
 CREATE OR REPLACE FUNCTION save_attendance_day(
@@ -41,16 +54,15 @@ DECLARE
   v_base_seconds    integer;
   v_week_dates      text[];
   v_attendance_id   integer;
-  v_other_column    text;
-  v_other_week_start text;
-  v_other_status    text;
-  v_other_dow       integer;
   r                 record;
   v_duration        integer;
-  v_week_before     integer;
   v_ot_seconds      integer;
   v_is_ot           integer;
+  v_cum_seconds     integer;
 BEGIN
+  -- Serialize concurrent saves for the same user (released at commit/rollback).
+  PERFORM pg_advisory_xact_lock(hashtext('save_attendance_day:' || p_user_id::text));
+
   IF v_status IS NULL OR NOT (v_status = ANY (ARRAY['present','wfh','absent','leave'])) THEN
     RAISE EXCEPTION 'status must be one of present, wfh, absent, leave';
   END IF;
@@ -128,33 +140,17 @@ BEGIN
     RAISE EXCEPTION 'This overlaps another clock-in/out session for this user.';
   END IF;
 
-  -- A session that crosses into an adjacent day can't land on one tagged
-  -- Absent/Leave (the day being edited here is governed by p_status above).
-  FOR r IN
-    SELECT DISTINCT d::date AS dt
-    FROM tmp_attendance_day_sessions s,
-         generate_series(
-           (s.in_ts AT TIME ZONE 'Asia/Manila')::date,
-           (COALESCE(s.out_ts, s.in_ts) AT TIME ZONE 'Asia/Manila')::date,
-           interval '1 day'
-         ) d
-    WHERE d::date <> p_date::date
-  LOOP
-    v_other_dow := extract(dow FROM r.dt)::integer;
-    v_other_week_start := to_char(
-      CASE WHEN v_other_dow = 0 THEN r.dt - 6 ELSE r.dt - (v_other_dow - 1) END,
-      'YYYY-MM-DD'
-    );
-    v_other_column := v_day_names[v_other_dow + 1] || '_status';
-
-    EXECUTE format('SELECT %I FROM attendance WHERE user_id = $1 AND week_start = $2', v_other_column)
-      INTO v_other_status USING p_user_id, v_other_week_start;
-
-    IF v_other_status IN ('absent', 'leave') THEN
-      RAISE EXCEPTION '% is tagged % — that session can''t cross into it.',
-        to_char(r.dt, 'Mon FMDD'), (CASE WHEN v_other_status = 'absent' THEN 'Absent' ELSE 'Leave' END);
-    END IF;
-  END LOOP;
+  -- Every submitted id must be one of THIS user's sessions on THIS day.
+  IF EXISTS (
+    SELECT 1 FROM tmp_attendance_day_sessions s
+    WHERE s.id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM timesheets t
+        WHERE t.id = s.id AND t.user_id = p_user_id AND t.date = p_date
+      )
+  ) THEN
+    RAISE EXCEPTION 'A session doesn''t belong to this user''s day — reload the page and try again.';
+  END IF;
 
   -- Delete sessions dropped from this day's list.
   DELETE FROM timesheets
@@ -169,37 +165,47 @@ BEGIN
   FROM generate_series(p_week_start::date, p_week_start::date + 6, interval '1 day') d;
 
   FOR r IN SELECT * FROM tmp_attendance_day_sessions ORDER BY in_ts LOOP
-    v_duration := NULL; v_is_ot := 0; v_ot_seconds := NULL;
-
+    v_duration := NULL;
     IF r.out_ts IS NOT NULL THEN
       v_duration := round(extract(epoch FROM (r.out_ts - r.in_ts)))::integer;
-
-      SELECT COALESCE(sum(duration_seconds), 0) INTO v_week_before
-      FROM timesheets
-      WHERE user_id = p_user_id
-        AND date = ANY (v_week_dates)
-        AND duration_seconds IS NOT NULL
-        AND (r.id IS NULL OR id <> r.id);
-
-      v_ot_seconds := greatest(0, least(v_duration, v_week_before + v_duration - v_base_seconds));
-      IF v_ot_seconds > 0 THEN v_is_ot := 1; ELSE v_ot_seconds := NULL; END IF;
     END IF;
 
+    -- Overtime fields are (re)computed for the whole week by the pass below.
     IF r.id IS NOT NULL THEN
       UPDATE timesheets SET
         clocked_in_at = r.clocked_in_at,
         clocked_out_at = r.clocked_out_at,
         date = p_date,
         duration_seconds = v_duration,
-        is_overtime = v_is_ot,
-        overtime_seconds = v_ot_seconds,
         edited_by = p_edited_by,
         edited_at = v_now
-      WHERE id = r.id;
+      WHERE id = r.id AND user_id = p_user_id AND date = p_date;
     ELSE
       INSERT INTO timesheets (user_id, clocked_in_at, clocked_out_at, date, duration_seconds, is_overtime, overtime_seconds, edited_by, edited_at)
-      VALUES (p_user_id, r.clocked_in_at, r.clocked_out_at, p_date, v_duration, v_is_ot, v_ot_seconds, p_edited_by, v_now);
+      VALUES (p_user_id, r.clocked_in_at, r.clocked_out_at, p_date, v_duration, 0, NULL, p_edited_by, v_now);
     END IF;
+  END LOOP;
+
+  -- Reconcile overtime for the whole week in chronological order. Only rows
+  -- whose values actually change are written, and edited_by/edited_at are left
+  -- alone so untouched sessions don't gain a misleading "Edited" marker.
+  v_cum_seconds := 0;
+  FOR r IN
+    SELECT id, duration_seconds, is_overtime, overtime_seconds
+    FROM timesheets
+    WHERE user_id = p_user_id
+      AND date = ANY (v_week_dates)
+      AND duration_seconds IS NOT NULL
+    ORDER BY clocked_in_at::timestamptz, id
+  LOOP
+    v_ot_seconds := greatest(0, least(r.duration_seconds, v_cum_seconds + r.duration_seconds - v_base_seconds));
+    v_is_ot := CASE WHEN v_ot_seconds > 0 THEN 1 ELSE 0 END;
+    IF v_ot_seconds = 0 THEN v_ot_seconds := NULL; END IF;
+
+    IF r.is_overtime IS DISTINCT FROM v_is_ot OR r.overtime_seconds IS DISTINCT FROM v_ot_seconds THEN
+      UPDATE timesheets SET is_overtime = v_is_ot, overtime_seconds = v_ot_seconds WHERE id = r.id;
+    END IF;
+    v_cum_seconds := v_cum_seconds + r.duration_seconds;
   END LOOP;
 
   -- Upsert just this one day's status column on the week's attendance row —
