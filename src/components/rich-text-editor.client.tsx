@@ -44,8 +44,12 @@ export interface RichTextEditorProps {
   /** Enables the @mention autocomplete (structured nodes carrying the user id). */
   enableMentions?: boolean;
   mentionUsers?: RichTextMentionUser[];
-  /** Adds an emoji-picker button to the toolbar. */
+  /** Adds an emoji-picker button. */
   enableEmoji?: boolean;
+  /** Chat-style mode for comment composers: hides the formatting toolbar
+   *  entirely, tightens padding, and floats the emoji button inside the
+   *  input instead of in a toolbar row. */
+  hideToolbar?: boolean;
 }
 
 const MIN_FONT_SIZE = 8;
@@ -222,6 +226,7 @@ export function RichTextEditor({
   enableMentions = false,
   mentionUsers = [],
   enableEmoji = false,
+  hideToolbar = false,
 }: RichTextEditorProps) {
   const initial = value ?? defaultValue ?? '';
   const [html, setHtml] = useState(initial);
@@ -317,7 +322,11 @@ export function RichTextEditor({
     extensions,
     content: initial,
     editorProps: {
-      attributes: { class: 'rs-richtext px-4 py-3 text-sm text-(--rs-neutral-grey-800)' },
+      attributes: {
+        class: hideToolbar
+          ? `rs-richtext py-2 pl-3 text-sm text-(--rs-neutral-grey-800) ${enableEmoji ? 'pr-9' : 'pr-3'}`
+          : 'rs-richtext px-4 py-3 text-sm text-(--rs-neutral-grey-800)',
+      },
     },
     onUpdate: ({ editor }) => {
       const next = editor.getHTML();
@@ -345,23 +354,37 @@ export function RichTextEditor({
 
   return (
     <div>
-      <div className="rs-richtext-editor flex flex-col overflow-hidden rounded-xl border border-(--rs-neutral-grey-200) bg-white focus-within:border-(--rs-primary-300) focus-within:ring-4 focus-within:ring-(--rs-primary-100)">
-        <Toolbar
-          editor={editor}
-          trailing={enableEmoji ? (
-            <>
-              <span className="mx-1 h-5 w-px bg-(--rs-neutral-grey-200)" />
-              <ToolbarButton
-                label="Insert emoji"
-                active={emojiOpen}
-                buttonRef={emojiBtnRef}
-                onClick={toggleEmoji}
-              >
-                <Smile className="h-4 w-4" />
-              </ToolbarButton>
-            </>
-          ) : null}
-        />
+      <div className={`rs-richtext-editor relative flex flex-col overflow-hidden border border-(--rs-neutral-grey-200) bg-white focus-within:border-(--rs-primary-300) focus-within:ring-4 focus-within:ring-(--rs-primary-100) ${hideToolbar ? 'rs-richtext-chat rounded-2xl' : 'rounded-xl'}`}>
+        {!hideToolbar && (
+          <Toolbar
+            editor={editor}
+            trailing={enableEmoji ? (
+              <>
+                <span className="mx-1 h-5 w-px bg-(--rs-neutral-grey-200)" />
+                <ToolbarButton
+                  label="Insert emoji"
+                  active={emojiOpen}
+                  buttonRef={emojiBtnRef}
+                  onClick={toggleEmoji}
+                >
+                  <Smile className="h-4 w-4" />
+                </ToolbarButton>
+              </>
+            ) : null}
+          />
+        )}
+        {hideToolbar && enableEmoji && (
+          <div className="absolute right-1 top-1">
+            <ToolbarButton
+              label="Insert emoji"
+              active={emojiOpen}
+              buttonRef={emojiBtnRef}
+              onClick={toggleEmoji}
+            >
+              <Smile className="h-4 w-4" />
+            </ToolbarButton>
+          </div>
+        )}
         <div className={bodyClassName ?? ''}>
           <EditorContent editor={editor} />
         </div>

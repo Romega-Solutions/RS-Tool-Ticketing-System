@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Loader2, MessageSquare, Activity as ActivityIcon, FileText, ImagePlus, Save, Trash2, X, Maximize2, Minimize2, Eye, Lock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Activity as ActivityIcon, FileText, ImagePlus, Save, Send, Trash2, X, Maximize2, Minimize2, Eye, Lock } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { extractTaskDescriptionImageUrls } from '@/lib/task-description-images';
 import {
@@ -56,6 +56,9 @@ interface ProjectMember {
   id: number; user_id: number; name: string; email: string; role: string;
 }
 type StateOption = { id: string; name: string; color: string };
+type TimelineEntry =
+  | { kind: 'comment'; id: string; ts: string; comment: Comment }
+  | { kind: 'activity'; id: string; ts: string; activity: ActivityEntry };
 
 const PRIORITIES: Array<{ value: SheetWorkItem['priority']; label: string }> = [
   { value: 'urgent', label: 'Urgent' },
@@ -105,7 +108,7 @@ export function TaskDetailSheet({
   const canEdit = caps.canEditItem;            // member+ : general fields
   const canEditDates = caps.canEditDates;      // lead    : due date
   const canEditAssignees = caps.canEditAssignees; // lead : assignees
-  const [tab, setTab] = useState<'details' | 'comments' | 'activity'>('details');
+  const [tab, setTab] = useState<'details' | 'activity'>('details');
 
   // Deep-link to a specific comment (from a "tagged you" notification): jump to
   // the Comments tab, scroll the comment into view, and flash a highlight.
@@ -194,6 +197,20 @@ export function TaskDetailSheet({
 
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const descriptionImageUrls = extractTaskDescriptionImageUrls(description);
+
+  // Comments + activity, merged into one GitHub-style chronological timeline.
+  // 'commented' activity rows are dropped — the comment itself already
+  // represents that event, so keeping both would show it twice.
+  const timeline: TimelineEntry[] = [
+    ...comments.map((comment): TimelineEntry => ({ kind: 'comment', id: `c${comment.id}`, ts: comment.created_at, comment })),
+    ...activity
+      .filter(a => a.action !== 'commented')
+      .map((activity): TimelineEntry => ({ kind: 'activity', id: `a${activity.id}`, ts: activity.created_at, activity })),
+  ].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+
+  // Activity rows store raw state/user ids — resolve them to readable names.
+  const stateNameById = new Map(states.map(s => [s.id, s.name]));
+  const userNameById = new Map(members.map(m => [String(m.user_id), m.name]));
 
   function imageAltFromFilename(filename: string): string {
     return filename
@@ -288,8 +305,8 @@ export function TaskDetailSheet({
 
     let innerRaf = 0;
     const raf = window.requestAnimationFrame(() => {
-      setTab('comments');
-      // Scroll on the next frame, after the Comments tab has painted.
+      setTab('activity');
+      // Scroll on the next frame, after the Activity tab has painted.
       innerRaf = window.requestAnimationFrame(() => {
         commentsListRef.current
           ?.querySelector(`[data-comment-id="${focusCommentId}"]`)
@@ -573,8 +590,7 @@ export function TaskDetailSheet({
         <div className="flex overflow-x-auto border-b border-(--rs-neutral-grey-100) px-4 sm:px-5">
           {[
             { key: 'details',  label: 'Details',  icon: FileText },
-            { key: 'comments', label: 'Comments', icon: MessageSquare },
-            { key: 'activity', label: 'Activity', icon: ActivityIcon },
+            { key: 'activity', label: 'Activity',  icon: ActivityIcon },
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
@@ -587,7 +603,7 @@ export function TaskDetailSheet({
             >
               <Icon className="w-3.5 h-3.5" />
               {label}
-              {key === 'comments' && comments.length > 0 && (
+              {key === 'activity' && comments.length > 0 && (
                 <span className="text-xs bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-600) px-1.5 py-0.5 rounded-full ml-1">
                   {comments.length}
                 </span>
@@ -939,80 +955,61 @@ export function TaskDetailSheet({
             </div>
           )}
 
-          {!loading && item && tab === 'comments' && (
-            <div ref={commentsListRef} className="space-y-3">
-              {comments.length === 0 && (
-                <p className="text-sm text-(--rs-neutral-grey-400) italic">No comments yet.</p>
-              )}
-              {comments.map(c => (
-                <div
-                  key={c.id}
-                  data-comment-id={c.id}
-                  className={`rounded-lg p-3 transition-colors duration-500 ${
-                    highlightCommentId === String(c.id)
-                      ? 'border border-(--rs-accent-300) bg-(--rs-accent-50) ring-2 ring-(--rs-accent-200)'
-                      : 'border border-(--rs-neutral-grey-100) bg-white'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-xs text-(--rs-neutral-grey-500) mb-1.5">
-                    <span className="font-medium text-(--rs-neutral-grey-800)">{c.author_name}</span>
-                    <div className="flex items-center gap-2">
-                      <span>{fmt(c.created_at)}</span>
-                      {(c.author_id === currentUserId || isAdmin) && (
-                        <button
-                          onClick={() => handleDeleteComment(c.id)}
-                          className="flex h-8 w-8 items-center justify-center rounded-md text-(--rs-neutral-grey-400) hover:bg-red-50 hover:text-red-500"
-                          title="Delete"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <RichText html={c.body} className="text-sm text-(--rs-neutral-grey-800)" />
-                </div>
-              ))}
-
-              <div className="pt-2 space-y-2">
-                <RichTextEditor
-                  value={newComment}
-                  onChange={setNewComment}
-                  placeholder="Write a comment… use @ to tag a teammate"
-                  bodyClassName="min-h-[84px] overflow-y-auto"
-                  enableMentions
-                  enableEmoji
-                  mentionUsers={members.map(m => ({ id: m.user_id, name: m.name }))}
-                />
-                <button
-                  onClick={handlePostComment}
-                  disabled={postingComment || isRichTextEmpty(newComment)}
-                  className="flex min-h-10 items-center justify-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                  style={{ background: 'var(--rs-primary-500)' }}
-                >
-                  {postingComment && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  Post comment
-                </button>
-              </div>
-            </div>
-          )}
-
           {!loading && item && tab === 'activity' && (
-            <div className="space-y-2">
-              {activity.length === 0 && (
+            <div ref={commentsListRef} className="space-y-1.5">
+              {timeline.length === 0 && (
                 <p className="text-sm text-(--rs-neutral-grey-400) italic">No activity yet.</p>
               )}
-              {activity.map(a => (
-                <div key={a.id} className="grid gap-1 py-2 text-xs text-(--rs-neutral-grey-600) sm:flex sm:items-start sm:gap-2 sm:py-1">
-                  <span className="text-(--rs-neutral-grey-400) sm:w-24 sm:shrink-0">{fmt(a.created_at)}</span>
-                  <span className="font-medium text-(--rs-neutral-grey-800) sm:shrink-0">{a.actor_name}</span>
-                  <span className="text-(--rs-neutral-grey-500)">
-                    {describeActivity(a)}
-                  </span>
-                </div>
-              ))}
+              {timeline.map(entry =>
+                entry.kind === 'comment' ? (
+                  <CommentBubble
+                    key={entry.id}
+                    comment={entry.comment}
+                    isOwn={entry.comment.author_id === currentUserId}
+                    canDelete={entry.comment.author_id === currentUserId || isAdmin}
+                    highlighted={highlightCommentId === String(entry.comment.id)}
+                    onDelete={() => handleDeleteComment(entry.comment.id)}
+                  />
+                ) : (
+                  <div key={entry.id} className="flex items-center justify-center gap-1.5 py-1 text-center text-[11px] text-(--rs-neutral-grey-400)">
+                    <ActivityIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    <span>
+                      <span className="font-medium text-(--rs-neutral-grey-500)">{entry.activity.actor_name}</span>{' '}
+                      {describeActivity(entry.activity, stateNameById, userNameById)} · {fmt(entry.activity.created_at)}
+                    </span>
+                  </div>
+                ),
+              )}
             </div>
           )}
         </div>
+
+        {!loading && item && tab === 'activity' && (
+          <div className="flex items-end gap-2 border-t border-(--rs-neutral-grey-100) bg-white px-4 py-3 sm:px-5">
+            <div className="min-w-0 flex-1">
+              <RichTextEditor
+                value={newComment}
+                onChange={setNewComment}
+                placeholder="Message…"
+                bodyClassName="max-h-32 overflow-y-auto"
+                enableMentions
+                enableEmoji
+                hideToolbar
+                mentionUsers={members.map(m => ({ id: m.user_id, name: m.name }))}
+              />
+            </div>
+            <button
+              onClick={handlePostComment}
+              disabled={postingComment || isRichTextEmpty(newComment)}
+              aria-label="Post comment"
+              title="Post comment"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-40"
+              style={{ background: 'var(--rs-primary-500)' }}
+            >
+              {postingComment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            </button>
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   );
@@ -1027,13 +1024,64 @@ function Field({ label, children }: { label: React.ReactNode; children: React.Re
   );
 }
 
-function describeActivity(a: ActivityEntry): string {
+function CommentBubble({
+  comment, isOwn, canDelete, highlighted, onDelete,
+}: {
+  comment: Comment;
+  isOwn: boolean;
+  canDelete: boolean;
+  highlighted: boolean;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      data-comment-id={comment.id}
+      className={`group flex items-end gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}
+    >
+      {!isOwn && <PersonAvatar name={comment.author_name} size={26} className="mb-4 shrink-0" />}
+      <div className={`flex min-w-0 max-w-[78%] flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
+        {!isOwn && (
+          <span className="mb-0.5 px-1 text-xs font-medium text-(--rs-neutral-grey-600)">
+            {comment.author_name}
+          </span>
+        )}
+        <div className={`flex items-center gap-1 ${isOwn ? 'flex-row-reverse' : ''}`}>
+          <div
+            className={`min-w-0 rounded-2xl px-3.5 py-2 text-sm leading-relaxed transition-colors duration-500 ${
+              isOwn
+                ? 'rounded-br-md bg-(--rs-primary-500) text-white'
+                : 'rounded-bl-md bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-900)'
+            } ${highlighted ? 'ring-2 ring-(--rs-accent-300) ring-offset-1' : ''}`}
+          >
+            <RichText html={comment.body} className="text-sm leading-relaxed" />
+          </div>
+          {canDelete && (
+            <button
+              onClick={onDelete}
+              title="Delete"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-(--rs-neutral-grey-400) opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+        <span className="mt-0.5 px-1 text-[11px] text-(--rs-neutral-grey-400)">
+          {fmt(comment.created_at)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function describeActivity(a: ActivityEntry, stateNameById: Map<string, string>, userNameById: Map<string, string>): string {
+  const stateName = (id: string | null) => (id != null ? (stateNameById.get(id) ?? id) : '—');
+  const userName = (id: string | null) => (id != null ? (userNameById.get(id) ?? `user ${id}`) : 'someone');
   switch (a.action) {
     case 'created':       return `created this task`;
-    case 'state_changed': return `moved state ${a.from_value ?? '—'} → ${a.to_value ?? '—'}`;
+    case 'state_changed': return `moved from ${stateName(a.from_value)} to ${stateName(a.to_value)}`;
     case 'edited':        return `edited ${a.to_value ?? a.from_value ?? 'field'}`;
-    case 'assigned':      return `assigned user ${a.to_value}`;
-    case 'unassigned':    return `unassigned user ${a.from_value}`;
+    case 'assigned':      return `assigned ${userName(a.to_value)}`;
+    case 'unassigned':    return `unassigned ${userName(a.from_value)}`;
     case 'commented':     return `commented: "${(a.to_value ?? '').slice(0, 60)}${(a.to_value?.length ?? 0) > 60 ? '…' : ''}"`;
     case 'archived':      return `archived this task`;
     case 'restored':      return `restored this task`;
