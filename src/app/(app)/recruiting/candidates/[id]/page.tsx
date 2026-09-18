@@ -33,6 +33,7 @@ import {
   CandidateStatus,
   CandidateRating,
   CandidateDelete,
+  CandidateReminderButton,
 } from "../candidate-row";
 import { TalentConsentPanel } from "../talent-consent-panel";
 import { ResumeUploadCard, UploadResumeButton } from "../resume-upload";
@@ -53,6 +54,7 @@ import {
 } from "../pre-employment-document-upload";
 import { ResendEmailButton } from "./resend-email-button";
 import { formatPhoneNumber, formatReminderSentAt } from "@/lib/format";
+import { isActiveRecruitmentRequest } from "@/lib/recruitment-progress";
 
 type Candidate = {
   id: number;
@@ -415,6 +417,7 @@ export default async function CandidateDetailPage({
   let candidateEmploymentVerificationSubmissions: CandidateEmploymentVerificationSubmissionRow[] =
     [];
   let candidateDocuments: CandidatePreEmploymentDocumentRow[] = [];
+  let responseProgressUnavailable = false;
   if (showPreEmployment) {
     const [requestResult, submissionResult] = await Promise.all([
       supabase
@@ -508,6 +511,7 @@ export default async function CandidateDetailPage({
       .from("candidate_pre_employment_documents")
       .select("kind, file_name, signed_url, uploaded_at, sent_at, signed_at, last_reminder_sent_at")
       .eq("candidate_id", id);
+    responseProgressUnavailable = Boolean(submissionResult.error || referencesError || employmentError || documentsError);
     if (!documentsError && documentsData) {
       candidateDocuments = documentsData as CandidatePreEmploymentDocumentRow[];
     } else if (documentsError?.message.toLowerCase().includes("signed_at")) {
@@ -829,14 +833,15 @@ export default async function CandidateDetailPage({
           {showPreEmployment && (
             <>
               <PreEmploymentTabBar id={c.id} active={activePreEmploymentTab} />
-              <PreEmploymentNextStep
+              {responseProgressUnavailable && <p className="text-sm text-amber-700">Response progress unavailable. Refresh to try again.</p>}
+              {!responseProgressUnavailable && <PreEmploymentNextStep
                 candidateStatus={c.status}
                 request={backgroundCheckRequest}
                 submission={backgroundCheckSubmission}
                 references={candidateReferences}
                 employmentVerifications={candidateEmploymentVerifications}
                 documents={candidateDocuments}
-              />
+              />}
               {activePreEmploymentTab === "information" && (
                 <PreEmploymentCandidateInformationTab candidate={c} />
               )}
@@ -1111,6 +1116,7 @@ function PreEmploymentBackgroundCheckTab({
     verifications
       .flatMap(verification => [verification.requestSentAt, verification.lastReminderSentAt]),
   );
+  const hasActiveCandidateRequest = isActiveRecruitmentRequest(request);
 
   return (
     <div className="space-y-6">
@@ -1120,7 +1126,15 @@ function PreEmploymentBackgroundCheckTab({
         action={
           <div className="flex flex-col items-end gap-1">
             {!submitted ? (
-              <SendPreEmploymentBgCheckButton candidateId={candidateId} disabled={!canSend} />
+              hasActiveCandidateRequest ? (
+                <CandidateReminderButton
+                  candidateId={candidateId}
+                  kind="background_check"
+                  lastSentAt={latestReminder([request?.sent_at, request?.last_reminder_sent_at])}
+                />
+              ) : (
+                <SendPreEmploymentBgCheckButton candidateId={candidateId} disabled={!canSend} />
+              )
             ) : (
               <SendCandidateReferenceEmailsButton
                 candidateId={candidateId}
@@ -1131,7 +1145,7 @@ function PreEmploymentBackgroundCheckTab({
                   : !references.some(reference => !!reference.requestSentAt && !reference.respondedAt))}
               />
             )}
-            {(submitted ? referenceLastSentAt : request?.sent_at) && (
+            {(submitted ? referenceLastSentAt : !hasActiveCandidateRequest ? request?.sent_at : null) && (
               <span className="inline-flex items-center gap-1 text-[10px] text-(--rs-neutral-grey-500)">
                 <Clock className="h-3 w-3" /> Last sent {formatReminderSentAt(submitted ? referenceLastSentAt : latestReminder([request?.sent_at, request?.last_reminder_sent_at]))}
               </span>
@@ -1403,10 +1417,16 @@ function PreEmploymentNextStep({
       detail: `Waiting for ${waitingFor} to be completed.`,
       tone: "waiting",
     };
+  } else if (references.length === 0 || employmentVerifications.length === 0) {
+    progress = {
+      title: "Next action: Review missing contacts",
+      detail: "Reference or employment-verification contacts are missing. Review the submitted form before proceeding; no contacts does not mean checks are complete.",
+      tone: "next",
+    };
   } else if (missingDocuments.length > 0) {
     progress = {
       title: "Next action: Upload pre-employment documents",
-      detail: `Upload the ${missingDocuments.length === 1 ? "remaining document" : `${missingDocuments.length} remaining documents`} before sending the candidate package.`,
+      detail: `Review the received responses, then upload the ${missingDocuments.length === 1 ? "remaining document" : `${missingDocuments.length} remaining documents`} before sending the candidate package.`,
       tone: "next",
     };
   } else if (documents.some((document) => !document.sent_at)) {
@@ -1599,7 +1619,7 @@ function PreEmploymentDocumentsTab({
             />
             {documents.some(document => !!document.sent_at) && (
               <span className="text-[10px] text-(--rs-neutral-grey-500)">
-                Last sent {formatReminderSentAt(documents.map(document => document.sent_at).filter((value): value is string => Boolean(value)).sort().at(-1))}
+                Last sent {formatReminderSentAt(documents.flatMap(document => [document.sent_at, document.last_reminder_sent_at]).filter((value): value is string => Boolean(value)).sort().at(-1))}
               </span>
             )}
           </div>

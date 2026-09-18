@@ -41,7 +41,8 @@ export function SendCandidateReferenceEmailsButton({
   disabled?: boolean;
 }) {
   const [isPending, start] = useTransition();
-  const label = reminder || remainingCount === 0 || remainingCount === 3 ? 'Send reference emails' : `Send ${remainingCount} remaining`;
+  const label = reminder ? 'Remind references'
+    : remainingCount === 0 || remainingCount === 3 ? 'Send reference emails' : `Send ${remainingCount} remaining`;
 
   return (
     <button
@@ -71,7 +72,8 @@ export function SendCandidateReferenceEmailsButton({
 
 export function SendCandidateEmploymentVerificationEmailsButton({ candidateId, remainingCount, reminder = false, disabled = false }: { candidateId: number; remainingCount: number; reminder?: boolean; disabled?: boolean }) {
   const [isPending, start] = useTransition();
-  const label = remainingCount <= 1 ? 'Send employment verification' : `Send ${remainingCount} employment verifications`;
+  const label = reminder ? 'Remind employers'
+    : remainingCount <= 1 ? 'Send employment verification' : `Send ${remainingCount} employment verifications`;
   return (
     <button type="button" disabled={isPending || disabled} onClick={() => {
       if (!window.confirm(reminder ? 'Send a reminder to outstanding employers using their existing form link?' : `Send employment-verification request email${remainingCount === 1 ? '' : 's'} now?`)) return;
