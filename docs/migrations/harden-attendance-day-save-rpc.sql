@@ -2,18 +2,17 @@
 -- add-attendance-day-save-rpc.sql; apply that file first, then this one).
 -- CREATE OR REPLACE with an unchanged signature, so it is safe to re-run.
 --
+-- Note: a session belongs to the day it STARTED on, so tagging the following
+-- day Absent/Leave while an earlier day's shift clocks out on it is allowed.
+--
 -- Fixes:
---  1. Tagging a day Absent/Leave is rejected when a session keyed to a
---     DIFFERENT day runs into it (e.g. Thu 22:00 -> Fri 06:00 then Fri=Absent).
---     Previously that neighbour was only checked when the session's own day was
---     saved, so the order of edits decided whether the invariant held.
---  2. Every submitted session id must belong to this user AND this day. The old
+--  1. Every submitted session id must belong to this user AND this day. The old
 --     UPDATE ... WHERE id = r.id would rewrite any row a stale/forged id named.
---  3. Overtime is reconciled across the whole week after every save, in
+--  2. Overtime is reconciled across the whole week after every save, in
 --     chronological order, so editing/deleting an earlier session no longer
 --     leaves later sessions with stale is_overtime / overtime_seconds. Same
 --     formula as computeOvertime() (src/lib/utils.ts): base allowance only.
---  4. Saves for one user are serialized with a transaction-scoped advisory
+--  3. Saves for one user are serialized with a transaction-scoped advisory
 --     lock, so two concurrent saves can't interleave their delete/insert steps.
 --
 CREATE OR REPLACE FUNCTION save_attendance_day(
@@ -48,8 +47,6 @@ DECLARE
   v_duration        integer;
   v_ot_seconds      integer;
   v_is_ot           integer;
-  v_conflict_date   text;
-  v_label           text;
   v_cum_seconds     integer;
 BEGIN
   -- Serialize concurrent saves for the same user (released at commit/rollback).
@@ -84,25 +81,6 @@ BEGIN
   IF NOT v_workable AND EXISTS (SELECT 1 FROM tmp_attendance_day_sessions) THEN
     RAISE EXCEPTION '% days can''t have clock-in/out sessions — remove them first.',
       (CASE WHEN v_status = 'absent' THEN 'Absent' ELSE 'Leave' END);
-  END IF;
-
-  -- A session keyed to another day that runs into this one blocks tagging it
-  -- Absent/Leave (the mirror of the crossing check further down).
-  IF NOT v_workable THEN
-    v_label := CASE WHEN v_status = 'absent' THEN 'Absent' ELSE 'Leave' END;
-    SELECT t.date INTO v_conflict_date
-    FROM timesheets t
-    WHERE t.user_id = p_user_id
-      AND t.date <> p_date
-      AND t.date::date BETWEEN (p_date::date - 2) AND (p_date::date + 1)
-      AND (t.clocked_in_at::timestamptz AT TIME ZONE 'Asia/Manila')::date <= p_date::date
-      AND (COALESCE(t.clocked_out_at, t.clocked_in_at)::timestamptz AT TIME ZONE 'Asia/Manila')::date >= p_date::date
-    ORDER BY t.clocked_in_at
-    LIMIT 1;
-    IF FOUND THEN
-      RAISE EXCEPTION '%''s session runs into % — it can''t be tagged % while that session exists.',
-        to_char(v_conflict_date::date, 'Mon FMDD'), to_char(p_date::date, 'Mon FMDD'), v_label;
-    END IF;
   END IF;
 
   IF EXISTS (SELECT 1 FROM tmp_attendance_day_sessions WHERE in_ts IS NULL) THEN
