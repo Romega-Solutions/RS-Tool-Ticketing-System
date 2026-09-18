@@ -3,6 +3,7 @@ import {
   getKanbanDragAnnouncement,
   getKanbanDragHandleLabel,
   getKanbanTaskAriaLabel,
+  sortKanbanItemsBySequence,
 } from '@/lib/kanban-board-ui';
 
 const task = {
@@ -26,5 +27,27 @@ describe('kanban board UI helpers', () => {
       task,
       targetStateName: 'In Progress',
     })).toBe('Moving task #42, Review onboarding screenshots, over In Progress.');
+  });
+});
+
+describe('kanban column sort-by-task-number', () => {
+  const items = [
+    { sequence_id: 12 },
+    { sequence_id: 3 },
+    { sequence_id: 27 },
+  ];
+
+  it('leaves board order untouched in default mode', () => {
+    expect(sortKanbanItemsBySequence(items, 'default')).toBe(items);
+  });
+
+  it('sorts ascending by sequence_id in number mode', () => {
+    expect(sortKanbanItemsBySequence(items, 'number').map(i => i.sequence_id)).toEqual([3, 12, 27]);
+  });
+
+  it('does not mutate the input array', () => {
+    const copy = [...items];
+    sortKanbanItemsBySequence(items, 'number');
+    expect(items).toEqual(copy);
   });
 });

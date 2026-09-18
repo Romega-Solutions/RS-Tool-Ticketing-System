@@ -215,6 +215,9 @@
 
 /* Editor surface (ProseMirror) — same typography + an empty-state placeholder. */
 .rs-richtext-editor .ProseMirror { outline: none; min-height: 9rem; }
+/* Chat-style composers (hideToolbar) are a single-line-ish input, not a
+   document editor — the 9rem default reads as an empty document field. */
+.rs-richtext-editor.rs-richtext-chat .ProseMirror { min-height: 2.25rem; }
 /* Keeps the text selection visible once the editor loses DOM focus (e.g. the
    font-size input takes focus) — Chrome/WebKit hide native selection on blur. */
 .rs-richtext-editor .rs-frozen-selection { background-color: var(--rs-primary-100); }
