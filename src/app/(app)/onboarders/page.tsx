@@ -33,6 +33,8 @@ import { SendOnboardingFormReminderButton } from "./onboarder-actions";
 import { listOnboardingLeadOptions } from "@/lib/onboarding-lead";
 import { manilaDate } from "@/lib/onboarding-sessions";
 
+export const dynamic = 'force-dynamic';
+
 // ─── Stage groupings (3 happy lanes + 1 terminal lane) ──────────────────────
 
 const LANES: {

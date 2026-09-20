@@ -71,7 +71,7 @@ npx drizzle-kit migrate    # apply migrations
 ## Configuration
 
 All config is environment variables — see **`.env.example`** for the full annotated list.
-Minimum to boot locally: the four `NEXT_PUBLIC_SUPABASE_*` / `SUPABASE_SERVICE_ROLE_KEY` /
+Minimum to boot locally: the four `NEXT_PUBLIC_SUPABASE_*` / `SUPABASE_SECRET_KEY` /
 `DATABASE_URL` values. `CRON_SECRET` is required for the auto-clock-out cron (and must match
 the value configured in Vercel).
 
