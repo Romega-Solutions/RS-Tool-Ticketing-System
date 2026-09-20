@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isActiveRecruitmentRequest, recruitmentActions, recruitmentDashboardActions, type RecruitmentProgressInput } from '@/lib/recruitment-progress';
+import { isActiveRecruitmentRequest, recruitmentActions, recruitmentWaitingLabel, type RecruitmentProgressInput } from '@/lib/recruitment-progress';
 
 const sent = '2026-09-01T00:00:00Z';
 const response = '2026-09-02T00:00:00Z';
@@ -36,10 +36,12 @@ describe('recruitment action / reminder cycle', () => {
     expect(result[0].reminderKind).toBe('reference_check');
     expect(result[1].kind).toBe('send_verifications');
   });
-  it('keeps reminders off the dashboard while retaining actual next actions', () => {
-    expect(recruitmentDashboardActions(recruitmentActions({ ...base, request: activeRequest }, now))).toEqual([]);
-    const mixed = recruitmentActions({ ...submitted, references: [pending], verifications: [unsent] });
-    expect(recruitmentDashboardActions(mixed).map(row => row.kind)).toEqual(['send_verifications']);
+  it('provides compact waiting labels for dashboard reminder states', () => {
+    const candidate = recruitmentActions({ ...base, request: activeRequest }, now)[0];
+    expect(recruitmentWaitingLabel(candidate)).toBe('Awaiting candidate response');
+    const mixed = recruitmentActions({ ...submitted, references: [pending, pending], verifications: [unsent] });
+    expect(recruitmentWaitingLabel(mixed[0])).toBe('Awaiting 2 reference responses');
+    expect(recruitmentWaitingLabel(mixed[1])).toBeNull();
   });
   it('keeps reminders for unanswered contacts after a partial response', () => {
     const result = recruitmentActions({ ...submitted, references: [received, pending, pending] });
@@ -64,6 +66,17 @@ describe('recruitment action / reminder cycle', () => {
     expect(result[0].kind).toBe('remind');
     expect(result[0].reminderKind).toBe('sow');
     expect(result[1].label).toContain('confirm signed SOW');
+  });
+  it('shows the most recent SOW package or reminder timestamp', () => {
+    const reminderAt = '2026-09-05T00:00:00Z';
+    const result = recruitmentActions({
+      ...complete,
+      documents: documents.map(document => ({
+        ...document,
+        last_reminder_sent_at: document.kind === 'sow' ? reminderAt : null,
+      })),
+    });
+    expect(result[0].lastSentAt).toBe(reminderAt);
   });
   it('does not offer a SOW reminder before every package document is sent', () => {
     expect(recruitmentActions({ ...complete, documents: documents.slice(1) }).some(row => row.reminderKind === 'sow')).toBe(false);

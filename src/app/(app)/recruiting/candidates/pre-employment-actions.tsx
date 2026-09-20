@@ -4,7 +4,7 @@ import { useTransition } from 'react';
 import { Mail, Send } from 'lucide-react';
 import { sendCandidateFormReminder, sendCandidateEmploymentVerificationEmails, sendCandidateReferenceEmails, sendPreEmploymentBgCheckEmail } from './actions';
 
-export function SendPreEmploymentBgCheckButton({ candidateId, disabled = false }: { candidateId: number; disabled?: boolean }) {
+export function SendPreEmploymentBgCheckButton({ candidateId, disabled = false, reminder = false }: { candidateId: number; disabled?: boolean; reminder?: boolean }) {
   const [isPending, start] = useTransition();
 
   return (
@@ -12,13 +12,17 @@ export function SendPreEmploymentBgCheckButton({ candidateId, disabled = false }
       type="button"
       disabled={isPending || disabled}
       onClick={() => {
-        if (!window.confirm('Send the pre-employment background-check request email now?')) return;
+        const confirmation = reminder
+          ? 'Send the candidate a reminder to complete the form with their character-reference and employment-verification contacts?'
+          : 'Send the pre-employment background-check request email now?';
+        if (!window.confirm(confirmation)) return;
         start(async () => {
           try {
-            await sendPreEmploymentBgCheckEmail(candidateId);
+            if (reminder) await sendCandidateFormReminder(candidateId, 'background_check');
+            else await sendPreEmploymentBgCheckEmail(candidateId);
           } catch (err) {
             console.error(err);
-            alert(err instanceof Error ? err.message : 'Could not send the background-check email');
+            alert(err instanceof Error ? err.message : reminder ? 'Could not remind the candidate' : 'Could not send the background-check email');
           }
         });
       }}
@@ -26,8 +30,8 @@ export function SendPreEmploymentBgCheckButton({ candidateId, disabled = false }
     >
       {isPending
         ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-        : <Send className="w-3.5 h-3.5" />}
-      {isPending ? 'Sending…' : 'Send BG-check email'}
+        : reminder ? <Mail className="w-3.5 h-3.5" /> : <Send className="w-3.5 h-3.5" />}
+      {isPending ? 'Sending…' : reminder ? 'Remind candidate' : 'Send BG-check email'}
     </button>
   );
 }

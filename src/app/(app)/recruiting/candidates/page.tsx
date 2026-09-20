@@ -13,7 +13,7 @@ import { ResumeUploadButton } from './resume-upload';
 import { deleteAllCandidates } from './actions';
 import { AtsTabs } from '../ats-tabs';
 import { formatPhoneNumber } from '@/lib/format';
-import { recruitmentActions, recruitmentDashboardActions, type RecruitmentAction } from '@/lib/recruitment-progress';
+import { recruitmentActions, type RecruitmentAction } from '@/lib/recruitment-progress';
 import { RecruitmentWorkflowActions } from './recruitment-workflow-actions';
 
 type CandidateRowData = {
@@ -141,20 +141,20 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
         .eq('form_key', 'background_check')
         .order('submitted_at', { ascending: false }),
       supabase.from('candidate_pre_employment_documents')
-        .select('candidate_id, kind, sent_at, signed_at')
+        .select('candidate_id, kind, sent_at, signed_at, last_reminder_sent_at')
         .in('candidate_id', candidateIds),
     ]);
     progressUnavailable = Boolean(backgroundResult.error || referencesResult.error || verificationsResult.error || submissionsResult.error || documentsResult.error);
     if (!progressUnavailable) {
       for (const candidateId of candidateIds) {
-        actionsByCandidate.set(candidateId, recruitmentDashboardActions(recruitmentActions({
+        actionsByCandidate.set(candidateId, recruitmentActions({
           request: backgroundResult.data?.find(row => row.candidate_id === candidateId) ?? null,
           status: 'offered',
           submittedAt: submissionsResult.data?.find(row => row.candidate_id === candidateId)?.submitted_at ?? null,
           references: (referencesResult.data ?? []).filter(row => row.candidate_id === candidateId),
           verifications: (verificationsResult.data ?? []).filter(row => row.candidate_id === candidateId),
           documents: (documentsResult.data ?? []).filter(row => row.candidate_id === candidateId),
-        })));
+        }));
       }
     }
   }

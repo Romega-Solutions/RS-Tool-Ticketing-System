@@ -33,7 +33,6 @@ import {
   CandidateStatus,
   CandidateRating,
   CandidateDelete,
-  CandidateReminderButton,
 } from "../candidate-row";
 import { TalentConsentPanel } from "../talent-consent-panel";
 import { ResumeUploadCard, UploadResumeButton } from "../resume-upload";
@@ -1127,10 +1126,10 @@ function PreEmploymentBackgroundCheckTab({
           <div className="flex flex-col items-end gap-1">
             {!submitted ? (
               hasActiveCandidateRequest ? (
-                <CandidateReminderButton
+                <SendPreEmploymentBgCheckButton
                   candidateId={candidateId}
-                  kind="background_check"
-                  lastSentAt={latestReminder([request?.sent_at, request?.last_reminder_sent_at])}
+                  disabled={!canSend}
+                  reminder
                 />
               ) : (
                 <SendPreEmploymentBgCheckButton candidateId={candidateId} disabled={!canSend} />
@@ -1145,7 +1144,7 @@ function PreEmploymentBackgroundCheckTab({
                   : !references.some(reference => !!reference.requestSentAt && !reference.respondedAt))}
               />
             )}
-            {(submitted ? referenceLastSentAt : !hasActiveCandidateRequest ? request?.sent_at : null) && (
+            {(submitted ? referenceLastSentAt : request?.sent_at) && (
               <span className="inline-flex items-center gap-1 text-[10px] text-(--rs-neutral-grey-500)">
                 <Clock className="h-3 w-3" /> Last sent {formatReminderSentAt(submitted ? referenceLastSentAt : latestReminder([request?.sent_at, request?.last_reminder_sent_at]))}
               </span>

@@ -6,7 +6,7 @@ export type RecruitmentProgressInput = {
   request: Request | null;
   references: Contact[];
   verifications: Contact[];
-  documents: { kind: string; sent_at: string | null; signed_at?: string | null }[];
+  documents: { kind: string; sent_at: string | null; signed_at?: string | null; last_reminder_sent_at?: string | null }[];
 };
 export type RecruitmentAction = {
   kind: 'send_background' | 'send_references' | 'send_verifications' | 'remind' | 'review';
@@ -18,8 +18,17 @@ export type RecruitmentAction = {
   tab?: 'background-check' | 'documents';
 };
 
-export function recruitmentDashboardActions(actions: RecruitmentAction[]): RecruitmentAction[] {
-  return actions.filter(action => action.kind !== 'remind');
+export function recruitmentWaitingLabel(action: RecruitmentAction): string | null {
+  if (action.kind !== 'remind') return null;
+  if (action.reminderKind === 'background_check') return 'Awaiting candidate response';
+  if (action.reminderKind === 'reference_check') {
+    return `Awaiting ${action.count ?? 1} reference response${action.count === 1 ? '' : 's'}`;
+  }
+  if (action.reminderKind === 'employment_verification') {
+    return `Awaiting ${action.count ?? 1} employer response${action.count === 1 ? '' : 's'}`;
+  }
+  if (action.reminderKind === 'sow') return 'Awaiting signed SOW';
+  return 'Awaiting response';
 }
 function latest(values: (string | null | undefined)[]) {
   return values.filter((v): v is string => !!v).sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? null;
@@ -66,6 +75,7 @@ export function recruitmentActions(input: RecruitmentProgressInput, now = Date.n
     return [{ kind: 'review', group: 'Signed SOW recorded', label: 'Review for onboarding', tab: 'documents' }];
   }
   // SOW replies are checked manually. Preserve resend-package, not a SOW reminder.
-  return [{ kind: 'remind', group: 'Awaiting signed SOW', label: 'Remind about SOW', reminderKind: 'sow', count: 1, lastSentAt: latestPackage },
+  const lastSowEmail = latest(documents.flatMap(doc => [doc.sent_at, doc.last_reminder_sent_at]));
+  return [{ kind: 'remind', group: 'SOW', label: 'Remind about SOW', reminderKind: 'sow', count: 1, lastSentAt: lastSowEmail },
     { kind: 'review', group: 'SOW email reply', label: 'Review / confirm signed SOW', tab: 'documents' }];
 }
