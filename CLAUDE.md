@@ -100,7 +100,7 @@ own PM/ticketing data, attendance, LMS, recruiting/ATS, and onboarding. ~51 API 
 `sb-*-auth-token` cookies managed by Supabase. There is also a legacy username/password path
 (`bcryptjs` + `users.password_hash`) handled in `src/app/auth/callback/route.ts`.
 
-- `src/lib/supabase/{client,server,admin,config}.ts` — browser, server (SSR), service-role, and config-guard clients.
+- `src/lib/supabase/{client,server,admin,config}.ts` — browser, server (SSR), secret-key admin, and config-guard clients.
 - `src/lib/session.ts` — `getSession()`: reads the Supabase user, joins `public.users` by email, returns a normalized `SessionUser` (rejects inactive users).
 - `src/proxy.ts` — middleware-equivalent. Refreshes the Supabase session, clears dead `sb-*` cookies, redirects unauthenticated users to `/login`.
   - **Its matcher excludes `/api`, `/auth`, `/onboarding`, `/guide`, `/apply`.** API routes are NOT guarded by the proxy — each route must call `getSession()` itself.
@@ -191,8 +191,8 @@ UI components come from **shadcn/ui** (`components.json` at root). The codebase 
 
 | Variable | Purpose |
 |----------|---------|
-| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase client (browser-safe) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-side admin client (user creation, `getSession` lookup) — secret |
+| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase client (browser-safe; publishable key replaces the legacy anon key) |
+| `SUPABASE_SECRET_KEY` | Server-side admin client (user creation, `getSession` lookup) — secret; replaces the legacy service_role key |
 | `DATABASE_URL` | Supabase Postgres pooler connection string (transaction mode, port 6543) |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | Google Sign-In (configured in Supabase) |
 | `CRON_SECRET` | **Required.** Bearer token gating `/api/cron/auto-clock-out` — route returns 500 if unset. Must match the value set in Vercel and in the n8n trigger. |
@@ -207,3 +207,20 @@ UI components come from **shadcn/ui** (`components.json` at root). The codebase 
 | `NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS` | `true` shows demo logins on `/login` |
 
 `.env` is gitignored; only `.env.example` is committed.
+
+---
+
+## E2E Testing
+
+Always run end-to-end/browser testing against the **staging** environment (see
+`docs/SETUP_AUDIT.md` / memory for the staging Supabase project ref), never against prod or a
+one-off local seed. Use these existing staging accounts to cover each role — password is
+`Demo@1234` for all of them:
+
+| Role | Name | Email |
+|------|------|-------|
+| `admin` | Sienna Novak | `sienna.novak@romega-solutions.com` |
+| `ceo` (lead, CEO tool) | Robbie Galoso | `robbie@romega-solutions.com` |
+| `ic` | Rowan Okonkwo | `rowan.okonkwo@romega-solutions.com` |
+| `intern` | Priya Dumont | `priya.dumont@gmail.com` |
+| `lead` | Ivy Bergstrom | `ivy.bergstrom@romega-solutions.com` |

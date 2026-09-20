@@ -7,6 +7,7 @@ import { recordAudit, deriveUserPatchAction } from '@/lib/audit';
 import { enforceRateLimit, keyByUser } from '@/lib/rate-limit';
 import { isGateableToolKey, defaultToolAccess, normalizeRole } from '@/lib/rbac';
 import { USERS_LIST_TAG } from '@/lib/cache-tags';
+import { removeUserFromAllProjects } from '@/lib/tickets';
 
 export const runtime = 'nodejs';
 
@@ -174,6 +175,18 @@ export const POST = route(async (req: Request) => {
   try { body = await req.json(); } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
+
+  // These fields are optional on PATCH (partial edits) but required when
+  // creating a brand-new user — enforce presence before the shared parsers,
+  // which otherwise treat an empty value as "clear"/"default".
+  if (!body.jobTitle?.trim()) return NextResponse.json({ error: 'Job title is required' }, { status: 400 });
+  if (!body.team?.trim()) return NextResponse.json({ error: 'Department is required' }, { status: 400 });
+  if (body.approvedHoursPerWeek === undefined || body.approvedHoursPerWeek === null || body.approvedHoursPerWeek === '') {
+    return NextResponse.json({ error: 'Approved hours per week is required' }, { status: 400 });
+  }
+  if (!body.schedulePhtStart?.trim()) return NextResponse.json({ error: 'Schedule start is required' }, { status: 400 });
+  if (!body.schedulePhtEnd?.trim()) return NextResponse.json({ error: 'Schedule end is required' }, { status: 400 });
+  if (!body.driveUrl?.trim()) return NextResponse.json({ error: 'Google Drive link is required' }, { status: 400 });
 
   const rate = parseHourlyRate(body.hourlyRateUsd);
   if (!rate.ok) return NextResponse.json({ error: rate.error }, { status: 400 });
@@ -484,6 +497,12 @@ export const PATCH = route(async (req: Request) => {
     const otherFieldChanged = body.team !== undefined || body.memberCode !== undefined || body.hourlyRateUsd !== undefined
       || body.dateOfBirth !== undefined || body.startDate !== undefined || body.endDate !== undefined || body.driveUrl !== undefined
       || body.approvedHoursPerWeek !== undefined || body.schedulePhtStart !== undefined || body.schedulePhtEnd !== undefined;
+    // Deactivation removes the user from every project — membership and
+    // any work items they were still assigned to — so they stop showing
+    // up anywhere in ticketing once they're no longer active.
+    if (activeChanged && Number(updated.is_active) === 0) {
+      await removeUserFromAllProjects(body.id);
+    }
     if (roleChanged || activeChanged || otherFieldChanged) {
       const { action, details } = deriveUserPatchAction(
         { role: String(before.role), is_active: Number(before.is_active) },

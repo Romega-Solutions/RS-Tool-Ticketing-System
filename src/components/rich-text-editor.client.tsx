@@ -3,7 +3,9 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
-import type { Extensions } from '@tiptap/core';
+import { Extension, type Extensions } from '@tiptap/core';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import StarterKit from '@tiptap/starter-kit';
 import { TextStyle, FontSize } from '@tiptap/extension-text-style';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -46,12 +48,46 @@ export interface RichTextEditorProps {
   enableEmoji?: boolean;
 }
 
-const FONT_SIZES = [
-  { label: 'Small',  value: '13px' },
-  { label: 'Normal', value: '16px' },
-  { label: 'Large',  value: '20px' },
-  { label: 'Huge',   value: '28px' },
-];
+const MIN_FONT_SIZE = 8;
+const MAX_FONT_SIZE = 96;
+
+// Chrome/WebKit stop rendering a contenteditable's native text selection the
+// moment it loses DOM focus, which happens as soon as you click the toolbar's
+// font-size input — so the highlighted text visibly vanishes right as you're
+// about to resize it. This plugin redraws the selection as a decoration
+// whenever the editor is blurred, so it stays visible until you click back in.
+const frozenSelectionKey = new PluginKey('frozenSelection');
+const FrozenSelection = Extension.create({
+  name: 'frozenSelection',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: frozenSelectionKey,
+        state: {
+          init: () => ({ focused: true }),
+          apply(tr, prev) {
+            const meta = tr.getMeta(frozenSelectionKey);
+            return meta ? meta : prev;
+          },
+        },
+        props: {
+          decorations(state) {
+            const { focused } = frozenSelectionKey.getState(state) as { focused: boolean };
+            const { from, to } = state.selection;
+            if (focused || from === to) return null;
+            return DecorationSet.create(state.doc, [
+              Decoration.inline(from, to, { class: 'rs-frozen-selection' }),
+            ]);
+          },
+          handleDOMEvents: {
+            focus: (view) => { view.dispatch(view.state.tr.setMeta(frozenSelectionKey, { focused: true })); return false; },
+            blur: (view) => { view.dispatch(view.state.tr.setMeta(frozenSelectionKey, { focused: false })); return false; },
+          },
+        },
+      }),
+    ];
+  },
+});
 
 // Lightweight curated set — no heavy emoji extension/asset pack.
 const EMOJIS = [
@@ -91,9 +127,17 @@ function ToolbarButton({
 }
 
 function Toolbar({ editor, trailing }: { editor: Editor | null; trailing?: React.ReactNode }) {
+  // While the font-size field is focused, its displayed text is driven by
+  // this draft instead of the editor's (clamped) attribute. Without it, every
+  // keystroke re-derives the shown value from the clamped mark, so typing the
+  // first digit of e.g. "24" clamps to the 8px floor and redisplays "8" before
+  // the second keystroke lands — "24" comes out as "84".
+  const [sizeDraft, setSizeDraft] = useState<string | null>(null);
   if (!editor) return null;
   const currentSize =
     (editor.getAttributes('textStyle').fontSize as string | undefined) ?? '';
+  const currentSizeInt = currentSize ? parseInt(currentSize, 10) : NaN;
+  const sizeDisplayValue = sizeDraft ?? (Number.isNaN(currentSizeInt) ? '' : String(currentSizeInt));
 
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-2 py-1.5">
@@ -109,19 +153,44 @@ function Toolbar({ editor, trailing }: { editor: Editor | null; trailing?: React
 
       <span className="mx-1 h-5 w-px bg-(--rs-neutral-grey-200)" />
 
-      <select
-        aria-label="Font size"
-        value={currentSize}
+      <input
+        type="number"
+        inputMode="numeric"
+        aria-label="Font size (px)"
+        title="Font size (px)"
+        placeholder="16"
+        min={MIN_FONT_SIZE}
+        max={MAX_FONT_SIZE}
+        step={1}
+        value={sizeDisplayValue}
+        onFocus={() => setSizeDraft(sizeDisplayValue)}
         onChange={(e) => {
-          const v = e.target.value;
-          if (!v) editor.chain().focus().unsetFontSize().run();
-          else editor.chain().focus().setFontSize(v).run();
+          // No .focus() here — these commands apply to the editor's tracked
+          // selection regardless of DOM focus. Focusing the editor would
+          // steal focus away from this input on every keystroke, so typed
+          // digits (or a highlighted selection) end up hitting the document
+          // instead of this field.
+          const raw = e.target.value;
+          setSizeDraft(raw);
+          if (!raw) { editor.chain().unsetFontSize().run(); return; }
+          const n = Math.trunc(Number(raw));
+          if (!Number.isFinite(n)) return;
+          // Applied live, unclamped, so the preview updates as you type —
+          // clamping happens once on blur instead of on every keystroke.
+          editor.chain().setFontSize(`${n}px`).run();
         }}
-        className="h-8 rounded-md border border-(--rs-neutral-grey-200) bg-white px-2 text-xs text-(--rs-neutral-grey-700) focus:border-(--rs-primary-300) focus:outline-none"
-      >
-        <option value="">Font size</option>
-        {FONT_SIZES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-      </select>
+        onBlur={() => {
+          if (sizeDraft) {
+            const n = Math.trunc(Number(sizeDraft));
+            if (Number.isFinite(n)) {
+              const clamped = Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, n));
+              editor.chain().setFontSize(`${clamped}px`).run();
+            }
+          }
+          setSizeDraft(null);
+        }}
+        className="h-8 w-14 rounded-md border border-(--rs-neutral-grey-200) bg-white px-2 text-xs text-(--rs-neutral-grey-700) focus:border-(--rs-primary-300) focus:outline-none"
+      />
 
       {trailing}
     </div>
@@ -220,6 +289,7 @@ export function RichTextEditor({
     StarterKit,
     TextStyle,
     FontSize,
+    FrozenSelection,
     Placeholder.configure({ placeholder: placeholder ?? 'Write something…' }),
   ];
   if (enableMentions) {

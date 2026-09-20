@@ -8,8 +8,19 @@ import sanitizeHtml from 'sanitize-html';
 
 const FONT_SIZE = /^\d+(?:\.\d+)?(?:px|pt|em|rem|%)$/;
 
+// The Tiptap editor is WYSIWYG, not a raw-HTML input: typing the characters
+// `<br>` into it (a common instinct when someone wants a line break and
+// doesn't find one via the toolbar) becomes literal text, which the editor's
+// HTML serializer correctly escapes to `&lt;br&gt;` — and that then renders
+// as the visible string "<br>" instead of an actual line break. Normalize
+// that specific, predictable mistake into a real `<br>` before sanitizing.
+// Applied on every sanitize call (write + render), so it also repairs
+// descriptions that were already saved this way.
+const LITERAL_BR = /&lt;\s*br\s*\/?\s*&gt;/gi;
+
 export function sanitizeRichText(dirty: string): string {
-  return sanitizeHtml(dirty ?? '', {
+  const normalized = (dirty ?? '').replace(LITERAL_BR, '<br>');
+  return sanitizeHtml(normalized, {
     allowedTags: [
       'p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike',
       'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'code', 'pre', 'span', 'a',

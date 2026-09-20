@@ -5,7 +5,7 @@
  *
  *   npx tsx scripts/seed-lms.ts
  *
- * Requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.
+ * Requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY in .env.
  * Courses are auto-assigned by scope: 'foundation' → everyone,
  * 'intern' → users whose normalized role is intern, 'department' → users.team match.
  */
@@ -13,14 +13,14 @@ import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SERVICE_KEY  = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const SECRET_KEY   = process.env.SUPABASE_SECRET_KEY!;
 
-if (!SUPABASE_URL || !SERVICE_KEY || SERVICE_KEY === 'your-service-role-key-here') {
-  console.error('Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env first.');
+if (!SUPABASE_URL || !SECRET_KEY || SECRET_KEY === 'your-secret-key-here') {
+  console.error('Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY in .env first.');
   process.exit(1);
 }
 
-const sb = createClient(SUPABASE_URL, SERVICE_KEY, {
+const sb = createClient(SUPABASE_URL, SECRET_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
