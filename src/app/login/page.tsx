@@ -55,25 +55,6 @@ function LoginContent() {
     }
   };
 
-  const [devEmail, setDevEmail]       = useState('ken@romega-solutions.com');
-  const [devPassword, setDevPassword] = useState('Demo@1234');
-  const [devSigningIn, setDevSigningIn] = useState(false);
-
-  const handleDevPasswordSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setServerError('');
-    setDevSigningIn(true);
-    try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.signInWithPassword({ email: devEmail, password: devPassword });
-      if (error) { pushError(error.message); setDevSigningIn(false); return; }
-      window.location.href = '/dashboard';
-    } catch {
-      pushError('An error occurred. Please try again.');
-      setDevSigningIn(false);
-    }
-  };
-
   const brandFeatures = [
     { icon: CheckSquare, text: 'Task & ticket tracking' },
     { icon: Clock,       text: 'Attendance & clock-in/out' },
@@ -159,37 +140,6 @@ function LoginContent() {
           <p className="mt-4 text-center text-xs text-(--rs-neutral-grey-500)">
             Access is limited to emails listed in the Romega Org Chart.
           </p>
-
-          {(process.env.NODE_ENV === 'development' || process.env.NEXT_PUBLIC_ENABLE_DEV_LOGIN === 'true') && (
-            <div className="mt-6 rounded-lg border border-dashed border-(--color-border) p-4">
-              <p className="mb-3 text-xs font-medium text-(--rs-neutral-grey-500)">
-                Dev only — password sign-in (local Supabase)
-              </p>
-              <form onSubmit={handleDevPasswordSignIn} className="space-y-2">
-                <input
-                  type="email"
-                  value={devEmail}
-                  onChange={e => setDevEmail(e.target.value)}
-                  placeholder="email"
-                  className="w-full rounded-md border border-(--color-border) px-3 py-2 text-sm"
-                />
-                <input
-                  type="password"
-                  value={devPassword}
-                  onChange={e => setDevPassword(e.target.value)}
-                  placeholder="password"
-                  className="w-full rounded-md border border-(--color-border) px-3 py-2 text-sm"
-                />
-                <button
-                  type="submit"
-                  disabled={devSigningIn}
-                  className="w-full rounded-md bg-(--rs-neutral-grey-900) py-2 text-sm font-medium text-white disabled:opacity-60 cursor-pointer"
-                >
-                  {devSigningIn ? 'Signing in…' : 'Sign in (dev)'}
-                </button>
-              </form>
-            </div>
-          )}
 
           {/* Footer links */}
           <div className="mt-8 text-center space-y-1.5">
