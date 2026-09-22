@@ -25,7 +25,12 @@ const SOURCES = [
   { value: 'manual',     label: 'Manually added' },
 ];
 
-export function CandidateForm() {
+type PositionOption = {
+  id: number;
+  jobTitle: string;
+};
+
+export function CandidateForm({ positions }: { positions: PositionOption[] }) {
   const [open, setOpen]         = useState(false);
   const [isPending, start]      = useTransition();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -69,8 +74,27 @@ export function CandidateForm() {
               <Input id="fullName" name="fullName" required placeholder="Juan Dela Cruz" className="h-11 rounded-xl border-(--rs-neutral-grey-200) focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100)" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="position" className="text-(--rs-neutral-grey-700) font-medium">Position applied for</Label>
-              <Input id="position" name="position" placeholder="Frontend Developer" className="h-11 rounded-xl border-(--rs-neutral-grey-200) focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100)" />
+              <Label htmlFor="positionId" className="text-(--rs-neutral-grey-700) font-medium">Position applied for *</Label>
+              <select
+                id="positionId"
+                name="positionId"
+                required
+                defaultValue=""
+                disabled={positions.length === 0}
+                className="flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100) disabled:cursor-not-allowed disabled:bg-(--rs-neutral-grey-50) disabled:text-(--rs-neutral-grey-400)"
+              >
+                <option value="" disabled>
+                  {positions.length ? '— Select an open position —' : 'No open positions available'}
+                </option>
+                {positions.map(position => (
+                  <option key={position.id} value={position.id}>{position.jobTitle}</option>
+                ))}
+              </select>
+              {positions.length === 0 && (
+                <p className="text-[11px] text-(--rs-neutral-grey-500)">
+                  Create or reopen a position before adding a candidate.
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="email" className="text-(--rs-neutral-grey-700) font-medium">Email address</Label>
