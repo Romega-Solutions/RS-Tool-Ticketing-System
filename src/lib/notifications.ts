@@ -14,7 +14,7 @@ import { renderNotificationEmail, type NotificationTaskMeta } from '@/lib/email-
 
 export type NotificationType =
   | 'project_added' | 'mentioned' | 'task_due' | 'task_assigned'
-  | 'time_edit_requested' | 'time_edit_decided';
+  | 'time_edit_requested' | 'time_edit_decided' | 'thread_reply';
 
 // ── Per-user email preferences ─────────────────────────────────────────────
 // Mirrors users.notification_prefs (jsonb, default all-on — see schema.ts).
@@ -257,6 +257,27 @@ export async function notifyMention(opts: {
     actorId: opts.actorId,
     type:    'mentioned',
     title:   `${opts.actorName} tagged you in ${opts.projectName}`,
+    body:    opts.snippet ?? null,
+    link:    opts.link,
+  })));
+}
+
+// Reply in a comment thread → notify the thread's participants (in-app only;
+// `thread_reply` has no email toggle, so it never emails).
+export async function notifyThreadReply(opts: {
+  recipientIds: number[];
+  actorId:      number;
+  actorName:    string;
+  projectName:  string;
+  snippet?:     string | null;
+  link:         string;
+}): Promise<void> {
+  const unique = [...new Set(opts.recipientIds)];
+  await Promise.all(unique.map(userId => createNotification({
+    userId,
+    actorId: opts.actorId,
+    type:    'thread_reply',
+    title:   `${opts.actorName} replied to a thread in ${opts.projectName}`,
     body:    opts.snippet ?? null,
     link:    opts.link,
   })));

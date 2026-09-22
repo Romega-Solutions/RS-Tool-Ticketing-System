@@ -508,11 +508,15 @@ export const workItemComments = pgTable('work_item_comments', {
   id:         serial('id').primaryKey(),
   workItemId: integer('work_item_id').notNull().references(() => workItems.id, { onDelete: 'cascade' }),
   authorId:   integer('author_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  // Thread root this comment replies to (null = top-level). One level deep, like
+  // Slack/Google Chat threads. Self-FK (ON DELETE CASCADE) lives in the SQL migration.
+  parentId:   integer('parent_id'),
   body:       text('body').notNull(),
   createdAt:  text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt:  text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (t) => [
   index('work_item_comments_work_item_idx').on(t.workItemId),
+  index('work_item_comments_parent_idx').on(t.parentId),
 ]);
 
 export const projectComments = pgTable('project_comments', {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Loader2, Activity as ActivityIcon, FileText, ImagePlus, Save, Send, Trash2, X, Maximize2, Minimize2, Eye, Lock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Activity as ActivityIcon, FileText, ImagePlus, Save, Send, Trash2, X, MessageSquareReply, Maximize2, Minimize2, Eye, Lock } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { extractTaskDescriptionImageUrls } from '@/lib/task-description-images';
 import {
@@ -46,7 +46,7 @@ interface CycleRow {
 
 interface Comment {
   id: number; author_id: number; author_name: string; body: string;
-  created_at: string; updated_at: string;
+  parent_id: number | null; created_at: string; updated_at: string;
 }
 interface ActivityEntry {
   id: number; actor_name: string; action: string;
@@ -72,6 +72,9 @@ const PRIORITY_DOT: Record<string, string> = {
   urgent: 'bg-red-500',  high: 'bg-orange-400', medium: 'bg-yellow-400',
   low: 'bg-green-400',   none: 'bg-slate-300',
 };
+
+const THREAD_PANEL_WIDTH = 400;
+type ThreadPanelMode = 'outside' | 'split' | 'cover';
 
 function fmt(ts: string): string {
   if (!ts) return '';
@@ -157,6 +160,13 @@ export function TaskDetailSheet({
   };
 
   const isWide = panelWidth >= 900;   // enlarge title/description once it's roomy
+  // Where the thread panel goes: docked left of the task panel when the viewport
+  // has room (Slack-style), else split beside the chat inside a wide task panel,
+  // else covering the chat (narrow panel / mobile).
+  const threadMode: ThreadPanelMode =
+    typeof window !== 'undefined' && window.innerWidth - panelWidth >= THREAD_PANEL_WIDTH + 16 ? 'outside'
+    : panelWidth >= THREAD_PANEL_WIDTH + 360 ? 'split'
+    : 'cover';
   const toggleWide = () => {
     const wide = clampWidth(typeof window !== 'undefined' ? window.innerWidth * 0.94 : 1120);
     applyWidth(isWide ? DEFAULT_PANEL_WIDTH : wide);
@@ -195,14 +205,29 @@ export function TaskDetailSheet({
   const [newComment, setNewComment] = useState('');
   const [postingComment, setPostingComment] = useState(false);
 
+  // Slack / Google Chat-style threads: replies hang off a top-level comment and
+  // open in a side panel, so a side conversation doesn't bury the main feed.
+  const [openThreadId, setOpenThreadId] = useState<number | null>(null);
+  const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
+  const [postingReplyTo, setPostingReplyTo] = useState<number | null>(null);
+
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const descriptionImageUrls = extractTaskDescriptionImageUrls(description);
 
   // Comments + activity, merged into one GitHub-style chronological timeline.
   // 'commented' activity rows are dropped — the comment itself already
   // represents that event, so keeping both would show it twice.
+  // Only thread roots sit in the timeline; replies render inside their thread.
+  const repliesByRoot = new Map<number, Comment[]>();
+  for (const c of comments) {
+    if (c.parent_id == null) continue;
+    repliesByRoot.set(c.parent_id, [...(repliesByRoot.get(c.parent_id) ?? []), c]);
+  }
+  const openThread = openThreadId != null
+    ? comments.find(c => c.id === openThreadId && c.parent_id == null) ?? null
+    : null;
   const timeline: TimelineEntry[] = [
-    ...comments.map((comment): TimelineEntry => ({ kind: 'comment', id: `c${comment.id}`, ts: comment.created_at, comment })),
+    ...comments.filter(c => c.parent_id == null).map((comment): TimelineEntry => ({ kind: 'comment', id: `c${comment.id}`, ts: comment.created_at, comment })),
     ...activity
       .filter(a => a.action !== 'commented')
       .map((activity): TimelineEntry => ({ kind: 'activity', id: `a${activity.id}`, ts: activity.created_at, activity })),
@@ -266,6 +291,8 @@ export function TaskDetailSheet({
       setChildren(kidRes.ok ? ((await kidRes.json()) as SubIssueRow[]) : []);
       setNewSub('');
       setNewComment('');
+      setOpenThreadId(null);
+      setReplyDrafts({});
       setImageUploadError('');
       return { ok: true };
     } catch (e) {
@@ -300,16 +327,19 @@ export function TaskDetailSheet({
 
     const focusKey = `${itemId}:${focusCommentId}`;
     if (handledFocusRef.current === focusKey) return; // already handled this target
-    if (!comments.some(c => String(c.id) === focusCommentId)) return; // not found (deleted?)
+    const target = comments.find(c => String(c.id) === focusCommentId);
+    if (!target) return; // not found (deleted?)
     handledFocusRef.current = focusKey;
 
     let innerRaf = 0;
     const raf = window.requestAnimationFrame(() => {
       setTab('activity');
-      // Scroll on the next frame, after the Activity tab has painted.
+      // A reply lives in its thread — open the thread panel so it can be seen.
+      if (target.parent_id != null) setOpenThreadId(target.parent_id);
+      // Scroll on the next frame, after the Activity tab / thread panel has painted.
       innerRaf = window.requestAnimationFrame(() => {
-        commentsListRef.current
-          ?.querySelector(`[data-comment-id="${focusCommentId}"]`)
+        document
+          .querySelector(`[data-comment-id="${focusCommentId}"]`)
           ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         setHighlightCommentId(focusCommentId);
       });
@@ -385,12 +415,39 @@ export function TaskDetailSheet({
     }
   };
 
+  const handlePostReply = async (rootId: number) => {
+    const draft = replyDrafts[rootId] ?? '';
+    if (!item || isRichTextEmpty(draft)) return;
+    setPostingReplyTo(rootId); setError('');
+    try {
+      const res = await fetch(`/api/tickets/work-items/${item.id}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: draft, parent_id: rootId }),
+      });
+      if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(d.error ?? 'Failed to reply');
+      }
+      const created = (await res.json()) as Comment;
+      setComments(prev => [...prev, created]);
+      setReplyDrafts(prev => ({ ...prev, [rootId]: '' }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed');
+    } finally {
+      setPostingReplyTo(null);
+    }
+  };
+
   const handleDeleteComment = async (commentId: number) => {
     if (!item) return;
     const res = await fetch(`/api/tickets/work-items/${item.id}/comments/${commentId}`, {
       method: 'DELETE',
     });
-    if (res.ok) setComments(prev => prev.filter(c => c.id !== commentId));
+    // Deleting a thread root cascades to its replies server-side.
+    if (!res.ok) return;
+    setComments(prev => prev.filter(c => c.id !== commentId && c.parent_id !== commentId));
+    if (openThreadId === commentId) setOpenThreadId(null);
   };
 
   const handleArchive = async () => {
@@ -540,6 +597,23 @@ export function TaskDetailSheet({
 
   const navigationBackTarget = navigationTrail[navigationTrail.length - 1] ?? null;
 
+  const threadPanel = !loading && item && tab === 'activity' && openThread ? (
+    <ThreadPanel
+      root={openThread}
+      replies={repliesByRoot.get(openThread.id) ?? []}
+      mode={threadMode}
+      onClose={() => setOpenThreadId(null)}
+      draft={replyDrafts[openThread.id] ?? ''}
+      onDraftChange={html => setReplyDrafts(prev => ({ ...prev, [openThread.id]: html }))}
+      posting={postingReplyTo === openThread.id}
+      onPost={() => handlePostReply(openThread.id)}
+      canDelete={c => c.author_id === currentUserId || isAdmin}
+      onDelete={c => handleDeleteComment(c.id)}
+      highlightCommentId={highlightCommentId}
+      mentionUsers={members.map(m => ({ id: m.user_id, name: m.name }))}
+    />
+  ) : null;
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -630,6 +704,10 @@ export function TaskDetailSheet({
           </div>
         )}
 
+        {/* Body row: the main column, plus the thread panel when it opens in
+            split / cover mode (see threadMode). */}
+        <div className="relative flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-5">
           {loading && (
             <div className="flex items-center gap-2 text-sm text-(--rs-neutral-grey-500) py-4">
@@ -962,14 +1040,22 @@ export function TaskDetailSheet({
               )}
               {timeline.map(entry =>
                 entry.kind === 'comment' ? (
-                  <CommentBubble
-                    key={entry.id}
-                    comment={entry.comment}
-                    isOwn={entry.comment.author_id === currentUserId}
-                    canDelete={entry.comment.author_id === currentUserId || isAdmin}
-                    highlighted={highlightCommentId === String(entry.comment.id)}
-                    onDelete={() => handleDeleteComment(entry.comment.id)}
-                  />
+                  <div key={entry.id}>
+                    <CommentBubble
+                      comment={entry.comment}
+                      isOwn={entry.comment.author_id === currentUserId}
+                      canDelete={entry.comment.author_id === currentUserId || isAdmin}
+                      highlighted={highlightCommentId === String(entry.comment.id) || openThreadId === entry.comment.id}
+                      onDelete={() => handleDeleteComment(entry.comment.id)}
+                      onReply={() => setOpenThreadId(entry.comment.id)}
+                    />
+                    <ThreadSummary
+                      replies={repliesByRoot.get(entry.comment.id) ?? []}
+                      isOwnRoot={entry.comment.author_id === currentUserId}
+                      active={openThreadId === entry.comment.id}
+                      onOpen={() => setOpenThreadId(entry.comment.id)}
+                    />
+                  </div>
                 ) : (
                   <div key={entry.id} className="flex items-center justify-center gap-1.5 py-1 text-center text-[11px] text-(--rs-neutral-grey-400)">
                     <ActivityIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -984,7 +1070,8 @@ export function TaskDetailSheet({
           )}
         </div>
 
-        {!loading && item && tab === 'activity' && (
+        {/* The thread panel has its own composer, so the main one steps aside. */}
+        {!loading && item && tab === 'activity' && openThread == null && (
           <div className="flex items-end gap-2 border-t border-(--rs-neutral-grey-100) bg-white px-4 py-3 sm:px-5">
             <div className="min-w-0 flex-1">
               <RichTextEditor
@@ -1010,6 +1097,10 @@ export function TaskDetailSheet({
             </button>
           </div>
         )}
+        </div>
+        {threadPanel && threadMode !== 'outside' && threadPanel}
+        </div>
+        {threadPanel && threadMode === 'outside' && threadPanel}
       </SheetContent>
     </Sheet>
   );
@@ -1025,13 +1116,14 @@ function Field({ label, children }: { label: React.ReactNode; children: React.Re
 }
 
 function CommentBubble({
-  comment, isOwn, canDelete, highlighted, onDelete,
+  comment, isOwn, canDelete, highlighted, onDelete, onReply,
 }: {
   comment: Comment;
   isOwn: boolean;
   canDelete: boolean;
   highlighted: boolean;
   onDelete: () => void;
+  onReply: () => void;
 }) {
   return (
     <div
@@ -1055,6 +1147,14 @@ function CommentBubble({
           >
             <RichText html={comment.body} className="text-sm leading-relaxed" />
           </div>
+          <button
+            onClick={onReply}
+            title="Reply in thread"
+            aria-label="Reply in thread"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-(--rs-neutral-grey-400) opacity-0 transition-opacity hover:bg-(--rs-primary-50) hover:text-(--rs-primary-600) focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            <MessageSquareReply className="h-3.5 w-3.5" />
+          </button>
           {canDelete && (
             <button
               onClick={onDelete}
@@ -1069,6 +1169,184 @@ function CommentBubble({
           {fmt(comment.created_at)}
         </span>
       </div>
+    </div>
+  );
+}
+
+// One-line "N replies · Last reply …" link under a thread root (Slack / Google
+// Chat). Replies themselves live in the side ThreadPanel, not the main feed.
+function ThreadSummary({
+  replies, isOwnRoot, active, onOpen,
+}: {
+  replies: Comment[];
+  isOwnRoot: boolean;
+  active: boolean;
+  onOpen: () => void;
+}) {
+  if (replies.length === 0) return null;
+  const last = replies[replies.length - 1];
+  const people = [...new Map(replies.map(r => [r.author_id, r.author_name])).values()].slice(0, 3);
+  return (
+    <div className={`mb-2 flex ${isOwnRoot ? 'justify-end' : 'pl-[34px]'}`}>
+      <button
+        onClick={onOpen}
+        className={`flex max-w-full items-center gap-2 rounded-md border px-2 py-1 text-xs transition-colors ${
+          active
+            ? 'border-(--rs-primary-200) bg-(--rs-primary-50)'
+            : 'border-transparent hover:border-(--rs-neutral-grey-200) hover:bg-white'
+        }`}
+      >
+        <span className="flex -space-x-1.5">
+          {people.map(name => (
+            <PersonAvatar key={name} name={name} size={18} className="ring-2 ring-white" />
+          ))}
+        </span>
+        <span className="font-semibold text-(--rs-primary-600)">
+          {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
+        </span>
+        <span className="truncate text-(--rs-neutral-grey-400)">Last reply {fmt(last.created_at)}</span>
+      </button>
+    </div>
+  );
+}
+
+// Side panel for one thread: the root message, its replies, and a reply
+// composer — Slack's thread pane / Google Chat's in-line thread panel.
+function ThreadPanel({
+  root, replies, mode, onClose, draft, onDraftChange, posting, onPost,
+  canDelete, onDelete, highlightCommentId, mentionUsers,
+}: {
+  root: Comment;
+  replies: Comment[];
+  mode: ThreadPanelMode;
+  onClose: () => void;
+  draft: string;
+  onDraftChange: (html: string) => void;
+  posting: boolean;
+  onPost: () => void;
+  canDelete: (c: Comment) => boolean;
+  onDelete: (c: Comment) => void;
+  highlightCommentId: string | null;
+  mentionUsers: Array<{ id: number; name: string }>;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Keep the newest reply in view when the thread opens or a reply lands.
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [root.id, replies.length]);
+
+  return (
+    <aside
+      aria-label="Thread"
+      className={`flex flex-col bg-white ${
+        mode === 'outside' ? 'absolute inset-y-0 right-full z-40 border-r border-(--rs-neutral-grey-200) shadow-xl'
+        : mode === 'split' ? 'shrink-0 border-l border-(--rs-neutral-grey-200)'
+        : 'absolute inset-0 z-40'
+      }`}
+      style={mode === 'cover' ? undefined : { width: THREAD_PANEL_WIDTH }}
+    >
+      <div className="flex items-center justify-between border-b border-(--rs-neutral-grey-100) px-4 py-3.5">
+        <div className="min-w-0">
+          <h3 className="font-serif text-base text-(--rs-neutral-grey-900)">Thread</h3>
+          <p className="text-xs text-(--rs-neutral-grey-500)">
+            {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
+          </p>
+        </div>
+        <button
+          onClick={onClose}
+          aria-label="Close thread"
+          title="Close thread"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-(--rs-neutral-grey-400) hover:bg-(--rs-neutral-grey-100) hover:text-(--rs-neutral-grey-700)"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div ref={listRef} className="flex-1 overflow-y-auto px-2 py-3">
+        <ThreadMessage
+          comment={root}
+          highlighted={highlightCommentId === String(root.id)}
+          canDelete={canDelete(root)}
+          onDelete={() => onDelete(root)}
+        />
+        <div className="my-2 flex items-center gap-2 px-2 text-[11px] text-(--rs-neutral-grey-400)">
+          <span>{replies.length === 0 ? 'No replies yet' : `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`}</span>
+          <span className="h-px flex-1 bg-(--rs-neutral-grey-100)" />
+        </div>
+        {replies.map(reply => (
+          <ThreadMessage
+            key={reply.id}
+            comment={reply}
+            highlighted={highlightCommentId === String(reply.id)}
+            canDelete={canDelete(reply)}
+            onDelete={() => onDelete(reply)}
+          />
+        ))}
+      </div>
+
+      <div className="flex items-end gap-2 border-t border-(--rs-neutral-grey-100) px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <RichTextEditor
+            value={draft}
+            onChange={onDraftChange}
+            placeholder="Reply…"
+            bodyClassName="max-h-32 overflow-y-auto"
+            enableMentions
+            enableEmoji
+            hideToolbar
+            mentionUsers={mentionUsers}
+          />
+        </div>
+        <button
+          onClick={onPost}
+          disabled={posting || isRichTextEmpty(draft)}
+          aria-label="Post reply"
+          title="Post reply"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-40"
+          style={{ background: 'var(--rs-primary-500)' }}
+        >
+          {posting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+function ThreadMessage({
+  comment, highlighted, canDelete, onDelete,
+}: {
+  comment: Comment;
+  highlighted: boolean;
+  canDelete: boolean;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      data-comment-id={comment.id}
+      className={`group flex items-start gap-2.5 rounded-md px-2 py-1.5 transition-colors duration-500 hover:bg-(--rs-neutral-grey-50) ${
+        highlighted ? 'bg-(--rs-accent-50) ring-2 ring-(--rs-accent-300)' : ''
+      }`}
+    >
+      <PersonAvatar name={comment.author_name} size={28} className="mt-0.5 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-sm font-semibold text-(--rs-neutral-grey-900)">{comment.author_name}</span>
+          <span className="text-[11px] text-(--rs-neutral-grey-400)">{fmt(comment.created_at)}</span>
+        </div>
+        <RichText html={comment.body} className="text-sm leading-relaxed text-(--rs-neutral-grey-900)" />
+      </div>
+      {canDelete && (
+        <button
+          onClick={onDelete}
+          title="Delete"
+          aria-label="Delete"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-(--rs-neutral-grey-400) opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 focus-visible:opacity-100 group-hover:opacity-100"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
     </div>
   );
 }

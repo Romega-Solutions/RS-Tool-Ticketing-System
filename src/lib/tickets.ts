@@ -583,6 +583,8 @@ export interface WorkItemComment {
   work_item_id: number;
   author_id: number;
   author_name: string;
+  // Thread root this is a reply to; null for top-level comments.
+  parent_id: number | null;
   body: string;
   created_at: string;
   updated_at: string;
@@ -591,7 +593,7 @@ export interface WorkItemComment {
 export async function getComments(itemId: string): Promise<WorkItemComment[]> {
   const sb = createAdminClient();
   const { data, error } = await sb.from('work_item_comments')
-    .select('id, work_item_id, author_id, body, created_at, updated_at, users(name)')
+    .select('id, work_item_id, author_id, parent_id, body, created_at, updated_at, users(name)')
     .eq('work_item_id', Number(itemId))
     .order('created_at');
   if (error) throw new PlaneApiError(500, `comments/${itemId}`);
@@ -600,17 +602,24 @@ export async function getComments(itemId: string): Promise<WorkItemComment[]> {
     work_item_id: Number(r.work_item_id),
     author_id: Number(r.author_id),
     author_name: String((r.users as Row | null)?.name ?? 'Unknown'),
+    parent_id: r.parent_id != null ? Number(r.parent_id) : null,
     body: String(r.body),
     created_at: String(r.created_at),
     updated_at: String(r.updated_at),
   }));
 }
 
-export async function createComment(itemId: string, authorId: number, body: string): Promise<WorkItemComment> {
+export async function createComment(
+  itemId: string,
+  authorId: number,
+  body: string,
+  parentId: number | null = null,
+): Promise<WorkItemComment> {
   const sb = createAdminClient();
   const { data, error } = await sb.from('work_item_comments').insert({
     work_item_id: Number(itemId),
     author_id: authorId,
+    parent_id: parentId,
     body,
   }).select('id').single();
   if (error || !data) throw new PlaneApiError(502, `comments create`);
@@ -634,12 +643,27 @@ export async function deleteComment(commentId: string): Promise<void> {
   if (error) throw new PlaneApiError(502, `comments/${commentId}`);
 }
 
-export async function getComment(commentId: string): Promise<{ id: number; author_id: number; work_item_id: number } | null> {
+export async function getComment(commentId: string): Promise<{ id: number; author_id: number; work_item_id: number; parent_id: number | null } | null> {
   const sb = createAdminClient();
   const { data } = await sb.from('work_item_comments')
-    .select('id, author_id, work_item_id').eq('id', Number(commentId)).maybeSingle();
+    .select('id, author_id, work_item_id, parent_id').eq('id', Number(commentId)).maybeSingle();
   if (!data) return null;
-  return { id: Number(data.id), author_id: Number(data.author_id), work_item_id: Number(data.work_item_id) };
+  return {
+    id: Number(data.id),
+    author_id: Number(data.author_id),
+    work_item_id: Number(data.work_item_id),
+    parent_id: data.parent_id != null ? Number(data.parent_id) : null,
+  };
+}
+
+// Everyone who has spoken in a thread (root author + repliers) — the people a
+// new reply should notify, Slack-style.
+export async function getThreadParticipantIds(rootId: number): Promise<number[]> {
+  const sb = createAdminClient();
+  const { data } = await sb.from('work_item_comments')
+    .select('author_id')
+    .or(`id.eq.${rootId},parent_id.eq.${rootId}`);
+  return [...new Set((data ?? []).map((r: Row) => Number(r.author_id)))];
 }
 
 // ── Project Comments ───────────────────────────────────────────────────
