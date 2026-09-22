@@ -207,3 +207,20 @@ UI components come from **shadcn/ui** (`components.json` at root). The codebase 
 | `NEXT_PUBLIC_SHOW_DEMO_ACCOUNTS` | `true` shows demo logins on `/login` |
 
 `.env` is gitignored; only `.env.example` is committed.
+
+---
+
+## E2E Testing
+
+Always run end-to-end/browser testing against the **staging** environment (see
+`docs/SETUP_AUDIT.md` / memory for the staging Supabase project ref), never against prod or a
+one-off local seed. Use these existing staging accounts to cover each role — password is
+`Demo@1234` for all of them:
+
+| Role | Name | Email |
+|------|------|-------|
+| `admin` | Sienna Novak | `sienna.novak@romega-solutions.com` |
+| `ceo` (lead, CEO tool) | Robbie Galoso | `robbie@romega-solutions.com` |
+| `ic` | Rowan Okonkwo | `rowan.okonkwo@romega-solutions.com` |
+| `intern` | Priya Dumont | `priya.dumont@gmail.com` |
+| `lead` | Ivy Bergstrom | `ivy.bergstrom@romega-solutions.com` |

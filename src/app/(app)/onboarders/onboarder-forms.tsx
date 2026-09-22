@@ -36,6 +36,7 @@ import {
   addEmploymentVerification,
   uploadDocument,
 } from './actions';
+import type { OnboardingLeadOption } from '@/lib/onboarding-lead';
 
 const DOC_KINDS = [
   { value: 'sow',                     label: 'SOW (Statement of Work)' },
@@ -85,7 +86,15 @@ function validateCreate(fd: FormData): FieldErrors {
   return errors;
 }
 
-export function CreateOnboarderForm({ departments }: { departments: string[] }) {
+export function CreateOnboarderForm({
+  departments,
+  leads,
+  globalLead,
+}: {
+  departments: string[];
+  leads: OnboardingLeadOption[];
+  globalLead: OnboardingLeadOption | null;
+}) {
   const [open, setOpen]      = useState(false);
   const [isPending, start]   = useTransition();
   const [error, setError]    = useState<string | null>(null);
@@ -149,6 +158,13 @@ export function CreateOnboarderForm({ departments }: { departments: string[] }) 
             <Field id="roleTitle" label="Role title" placeholder="Frontend Engineer" />
 
             <div className="space-y-1.5">
+              <Label className="text-(--rs-neutral-grey-700) font-medium">Onboarding lead</Label>
+              <div className="flex h-11 items-center rounded-xl border border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-3 text-sm font-medium text-(--rs-neutral-grey-800)">
+                {globalLead?.name ?? 'Not configured — use Setup & workflows'}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
               <Label htmlFor="team" className="text-(--rs-neutral-grey-700) font-medium">Department *</Label>
               <SelectShell error={!!fieldErrors.team}>
                 <select
@@ -167,7 +183,20 @@ export function CreateOnboarderForm({ departments }: { departments: string[] }) 
               {fieldErrors.team && <FieldError text={fieldErrors.team} />}
             </div>
 
-            <Field id="directSupervisor" label="Direct supervisor" placeholder="Mark Tan" />
+            <div className="space-y-1.5">
+              <Label htmlFor="directSupervisorId" className="text-(--rs-neutral-grey-700) font-medium">Direct supervisor</Label>
+              <SelectShell>
+                <select
+                  id="directSupervisorId"
+                  name="directSupervisorId"
+                  defaultValue=""
+                  className="appearance-none flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer"
+                >
+                  <option value="" style={OPTION_STYLE}>No direct supervisor yet</option>
+                  {leads.map(lead => <option key={lead.id} value={lead.id} style={OPTION_STYLE}>{lead.name}</option>)}
+                </select>
+              </SelectShell>
+            </div>
             <Field id="startDate"        label="Start date"        type="date" error={fieldErrors.startDate} />
           </div>
 
@@ -178,7 +207,7 @@ export function CreateOnboarderForm({ departments }: { departments: string[] }) 
               className="h-11 px-6 rounded-xl border-(--rs-neutral-grey-200) hover:bg-(--rs-neutral-grey-50)">
               Discard
             </Button>
-            <Button type="submit" disabled={isPending}
+            <Button type="submit" disabled={isPending || !globalLead}
               className="h-11 px-8 rounded-xl bg-(--rs-primary-600) hover:bg-(--rs-primary-700) shadow-lg shadow-(--rs-primary-100) gap-2 transition-all active:scale-[0.98]">
               {isPending
                 ? <Spinner label="Creating…" />

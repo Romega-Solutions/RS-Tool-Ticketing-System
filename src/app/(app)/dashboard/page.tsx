@@ -20,6 +20,8 @@ import { FxRateWidget } from '@/components/fx-rate-widget';
 import { WeeklyHoursCard } from '@/components/weekly-hours-card';
 import { LearningBanner } from '@/components/lms/learning-banner';
 
+export const dynamic = 'force-dynamic';
+
 function stateGroup(item: { state_detail?: { group?: string } }) {
   return (item.state_detail?.group ?? '').toLowerCase();
 }

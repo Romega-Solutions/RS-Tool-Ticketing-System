@@ -166,24 +166,24 @@ function LogoutButton({ collapsed = false }: { collapsed?: boolean }) {
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
-      // Check clock-in status before attempting logout
-      const presenceRes = await fetch('/api/presence');
-      if (presenceRes.ok) {
-        const presence = await presenceRes.json() as { openSession?: { clockedInAt: string } | null };
-        if (presence.openSession?.clockedInAt) {
-          setClockedInSince(presence.openSession.clockedInAt);
-          setLoggingOut(false);
-          return;
-        }
-      }
-
+      // /api/auth/logout does its own dedicated, minimal open-session check
+      // (a single indexed timesheets query) and returns 409 if still clocked
+      // in — no need to pre-check via /api/presence, which also resolves org
+      // chart photos and can be slow for reasons that have nothing to do with
+      // logout.
       const res = await fetch('/api/auth/logout', { method: 'POST' });
       if (res.ok) {
         router.push('/login');
         router.refresh();
-      } else {
-        setLoggingOut(false);
+        return;
       }
+      if (res.status === 409) {
+        const data = await res.json() as { clockedInAt?: string };
+        if (data.clockedInAt) {
+          setClockedInSince(data.clockedInAt);
+        }
+      }
+      setLoggingOut(false);
     } catch (err) {
       console.error('Failed to logout', err);
       setLoggingOut(false);
