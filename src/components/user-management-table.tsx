@@ -58,7 +58,7 @@ const ROLE_BADGE: Record<string, string> = {
 };
 
 type EditState = {
-  name: string; email: string; jobTitle: string;
+  name: string; username: string; email: string; jobTitle: string;
   role: string; isActive: boolean; team: string; memberCode: string; hourlyRateUsd: string;
   dateOfBirth: string; startDate: string; endDate: string; driveUrl: string;
   approvedHoursPerWeek: string; schedulePhtStart: string; schedulePhtEnd: string;
@@ -161,6 +161,7 @@ function pstLabel(start: string | null, end: string | null): { range: string; zo
 // URL, rate ≥ 0, approved hours 1–60). Returns an error string, or null if valid.
 function validateEditForm(f: EditState): string | null {
   if (!f.name.trim()) return 'Full name is required';
+  if (!/^[a-z0-9_.-]{2,64}$/.test(f.username.trim().toLowerCase())) return 'Username must be 2–64 chars: letters, numbers, _ . -';
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())) return 'Enter a valid email address';
   const dateRe = /^\d{4}-\d{2}-\d{2}$/;
   const dateChecks: [string, string][] = [
@@ -265,7 +266,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
   }, []);
 
   // Edit existing user — the editor lives inside the profile dialog (profileUser).
-  const [editForm, setEditForm]     = useState<EditState>({ name: '', email: '', jobTitle: '', role: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '', dateOfBirth: '', startDate: '', endDate: '', driveUrl: '', approvedHoursPerWeek: '15', schedulePhtStart: '', schedulePhtEnd: '' });
+  const [editForm, setEditForm]     = useState<EditState>({ name: '', username: '', email: '', jobTitle: '', role: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '', dateOfBirth: '', startDate: '', endDate: '', driveUrl: '', approvedHoursPerWeek: '15', schedulePhtStart: '', schedulePhtEnd: '' });
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState('');
 
@@ -296,6 +297,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
     setError('');
     setEditForm({
       name: user.name,
+      username: user.username,
       email: user.email,
       jobTitle: user.jobTitle ?? '',
       role: user.role,
@@ -330,6 +332,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
         body: JSON.stringify({
           id:            userId,
           name:          editForm.name.trim(),
+          username:      editForm.username.trim().toLowerCase(),
           email:         editForm.email.trim().toLowerCase(),
           jobTitle:      editForm.jobTitle.trim() || null,
           role:          editForm.role,
@@ -924,7 +927,11 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                         <input value={editForm.jobTitle} onChange={e => setEditForm(f => ({ ...f, jobTitle: e.target.value }))}
                           aria-label="Job title" className={inputCls} />
                       </Field>
-                      <div className="sm:col-span-2">
+                      <Field label="Username">
+                        <input value={editForm.username} onChange={e => setEditForm(f => ({ ...f, username: e.target.value }))}
+                          aria-label="Username" autoCapitalize="none" spellCheck={false} className={`${inputCls} font-mono`} />
+                      </Field>
+                      <div>
                         <Field label="Email">
                           <input type="email" value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
                             aria-label="Email" className={inputCls} />

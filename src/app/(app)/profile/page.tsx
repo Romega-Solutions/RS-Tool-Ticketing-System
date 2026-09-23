@@ -338,7 +338,7 @@ export default function ProfilePage() {
                 <InfoRow label="Role"       value={user?.role ?? null} />
               </div>
               <p className="mt-1.5 text-[11px] text-(--rs-neutral-grey-400)">
-                Name, email, and job title are managed by HR — contact an admin to change them.
+                Name, username, email, and job title are managed by HR — contact an admin to change them.
               </p>
 
               {!identity.linked && !orgLoading && (

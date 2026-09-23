@@ -368,6 +368,7 @@ export const PATCH = route(async (req: Request) => {
   let body: {
     id?: number;
     name?: string;
+    username?: string;
     email?: string;
     jobTitle?: string | null;
     role?: string;
@@ -425,6 +426,13 @@ export const PATCH = route(async (req: Request) => {
     updates.name = name;
   }
   if (body.jobTitle !== undefined)      updates.job_title      = body.jobTitle?.trim() || null;
+  if (body.username !== undefined) {
+    const username = String(body.username ?? '').trim().toLowerCase();
+    if (!USERNAME_RE.test(username)) {
+      return NextResponse.json({ error: 'Username must be 2–64 chars: letters, numbers, _ . -' }, { status: 400 });
+    }
+    updates.username = username;
+  }
   let newEmail: string | undefined;
   if (body.email !== undefined) {
     newEmail = String(body.email ?? '').trim().toLowerCase();
@@ -486,7 +494,7 @@ export const PATCH = route(async (req: Request) => {
   const admin = createAdminClient();
   const { data: before } = await admin
     .from('users')
-    .select('role, is_active, tool_access, name, email, job_title')
+    .select('role, is_active, tool_access, name, username, email, job_title')
     .eq('id', body.id)
     .maybeSingle();
 
@@ -515,6 +523,18 @@ export const PATCH = route(async (req: Request) => {
     // No auth account yet (user never signed in) → only the profile row changes.
   }
 
+  if (typeof updates.username === 'string') {
+    const { data: clash } = await admin.from('users').select('id').eq('username', updates.username).neq('id', body.id).maybeSingle();
+    if (clash) {
+      if (authEmailRollback) {
+        try {
+          await admin.auth.admin.updateUserById(authEmailRollback.authId, { email: authEmailRollback.email, email_confirm: true });
+        } catch { /* best-effort */ }
+      }
+      return NextResponse.json({ error: 'Another user already has that username' }, { status: 409 });
+    }
+  }
+
   const { error: updateError } = await admin.from('users').update(updates).eq('id', body.id);
   if (updateError) {
     if (authEmailRollback) {
@@ -524,7 +544,7 @@ export const PATCH = route(async (req: Request) => {
     }
     const conflict = /unique|duplicate/i.test(updateError.message);
     return NextResponse.json(
-      { error: conflict ? 'Another user already has that email' : updateError.message },
+      { error: conflict ? 'Another user already has that email or username' : updateError.message },
       { status: conflict ? 409 : 500 },
     );
   }
@@ -552,6 +572,7 @@ export const PATCH = route(async (req: Request) => {
     const activeChanged = Number(before.is_active) !== Number(updated.is_active);
     const identityChanges: Record<string, { from: unknown; to: unknown }> = {};
     if (String(before.name) !== String(updated.name)) identityChanges.name = { from: before.name, to: updated.name };
+    if (String(before.username) !== String(updated.username)) identityChanges.username = { from: before.username, to: updated.username };
     if (String(before.email) !== String(updated.email)) identityChanges.email = { from: before.email, to: updated.email };
     if ((before.job_title ?? null) !== (updated.job_title ?? null)) identityChanges.jobTitle = { from: before.job_title ?? null, to: updated.job_title ?? null };
     if (Object.keys(identityChanges).length) {

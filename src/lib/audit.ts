@@ -66,7 +66,7 @@ export function describeAudit(action: string, details: Record<string, unknown> |
     }
     case 'user.setup_email_sent': return 'Sent an account-setup email';
     case 'user.identity_changed': {
-      const labels: Record<string, string> = { name: 'name', email: 'email', jobTitle: 'job title' };
+      const labels: Record<string, string> = { name: 'name', username: 'username', email: 'email', jobTitle: 'job title' };
       const changed = Object.keys(labels).filter((k) => details && k in details).map((k) => labels[k]);
       return changed.length ? `Changed a user's ${changed.join(', ')}` : "Changed a user's identity details";
     }
