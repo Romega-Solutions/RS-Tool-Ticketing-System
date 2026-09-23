@@ -4,12 +4,10 @@ import { route, requireReports } from '@/lib/api';
 import { computeOvertime } from '@/lib/utils';
 import { weeklySecondsForUser, baseWeeklySecondsForUser } from '@/lib/overtime-server';
 import { notifyTimeEditDecided } from '@/lib/notifications';
+import { phtDateOf } from '@/lib/pht';
 
 export const runtime = 'nodejs';
 
-function toLocalISO(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 function fmtDateLabel(date: string): string {
   const d = new Date(date + 'T00:00:00');
   if (isNaN(d.getTime())) return date;
@@ -100,7 +98,7 @@ export const POST = route(async (req: Request) => {
   const update: Record<string, string | number | null> = {
     clocked_in_at:  inDate.toISOString(),
     clocked_out_at: outDate ? outDate.toISOString() : null,
-    date:           toLocalISO(inDate),
+    date:           phtDateOf(inDate),
     edited_by:      session.id,
     edited_at:      nowIso,
   };
