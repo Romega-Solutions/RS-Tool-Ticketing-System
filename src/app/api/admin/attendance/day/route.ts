@@ -1,41 +1,16 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { weekStartMonday } from '@/lib/overtime-policy';
 import { route, requireAdmin } from '@/lib/api';
+import { dayOfWeekYmd, isValidYmd, mondayOfYmd, phtDateOf } from '@/lib/pht';
 
 export const runtime = 'nodejs';
 
 const VALID_STATUSES = new Set(['present', 'wfh', 'absent', 'leave']);
 const WORKABLE_STATUSES = new Set(['present', 'wfh']);
 
-function toLocalISO(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
-// Fixed PHT offset (Asia/Manila, UTC+8, no DST) — same convention as
-// src/lib/briefing.ts / src/lib/status-drafter.ts. Deriving a calendar date
-// from an ISO instant must NOT use the server process's ambient timezone
-// (Vercel/Node run in UTC): 8:00 AM PHT is exactly UTC midnight, so any
-// earlier PHT clock-in falls on the *previous* UTC calendar date and was
-// being wrongly rejected as "not on the day you're editing."
-const PHT_OFFSET_MS = 8 * 3600 * 1000;
-
-function phtDateOf(d: Date): string {
-  const shifted = new Date(d.getTime() + PHT_OFFSET_MS);
-  const y  = shifted.getUTCFullYear();
-  const m  = String(shifted.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(shifted.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
 function getMondayOfWeek(dateStr: string): string | null {
-  const d = new Date(dateStr + 'T00:00:00');
-  if (isNaN(d.getTime())) return null;
-  if (d.getDay() !== 1) return null;
-  return toLocalISO(d);
+  if (!isValidYmd(dateStr) || dayOfWeekYmd(dateStr) !== 1) return null;
+  return dateStr;
 }
 
 interface SessionInput { id?: number; clockedInAt?: string; clockedOutAt?: string | null; }
@@ -102,11 +77,10 @@ export const PATCH = route(async (req: Request) => {
   }
 
   const date = body.date ?? '';
-  const dateObj = new Date(date + 'T00:00:00');
-  if (!date || isNaN(dateObj.getTime())) {
+  if (!isValidYmd(date)) {
     return NextResponse.json({ error: 'date is invalid' }, { status: 400 });
   }
-  if (weekStartMonday(dateObj) !== weekStart) {
+  if (mondayOfYmd(date) !== weekStart) {
     return NextResponse.json({ error: "date must fall within weekStart's Mon–Sun week" }, { status: 400 });
   }
 

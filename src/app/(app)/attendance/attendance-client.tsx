@@ -2,6 +2,7 @@
 
 import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 import { WEEKLY_CAP_SECONDS } from '@/lib/utils';
+import { addDaysYmd, phtDateOf, phtWeekStartOf } from '@/lib/pht';
 import { Button } from '@/components/ui/button';
 import { AttendanceExportSheet } from '@/components/attendance-export-sheet';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -83,8 +84,10 @@ function fmtSeconds(s: number): string {
   return `${h}h ${m}m`;
 }
 
+// Attendance times are shown and edited in PHT (the attendance day's timezone,
+// see src/lib/pht.ts), regardless of the viewer's browser timezone.
 function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila' });
 }
 
 // Audit-trail tooltip: "Edited by Jane Doe on Jun 16".
@@ -116,8 +119,7 @@ function detailDayStatusLabel(day: DetailDay): string {
 // ── Day-crossing session helpers ────────────────────────────────────────────────
 
 function localDateOf(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return phtDateOf(iso);
 }
 
 function fmtDayMonth(dateStr: string): string {
@@ -157,12 +159,9 @@ function isSameLocalDay(iso: string, ref: Date): boolean {
 
 // ── Date helpers ───────────────────────────────────────────────────────────────
 
+// Local-midnight Date for the Monday of the PHT week `offset` weeks from now.
 function getMondayDate(offset = 0): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  const dow = d.getDay();
-  d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow) + offset * 7);
-  return d;
+  return new Date(addDaysYmd(phtWeekStartOf(new Date()), offset * 7) + 'T00:00:00');
 }
 
 function toLocalISO(d: Date): string {
@@ -178,11 +177,10 @@ function addDays(dateStr: string, n: number): string {
   return toLocalISO(d);
 }
 
-// Combines a "YYYY-MM-DD" date with an "HH:mm" <input type="time"> value into
-// a local Date — no timezone suffix, so this parses as local time (matching
-// how <input type="datetime-local"> values used to be handled here).
+// Combines a "YYYY-MM-DD" date with an "HH:mm" <input type="time"> value,
+// both in PHT, into the instant they denote.
 function combineDateTime(dateStr: string, timeStr: string): Date {
-  return new Date(`${dateStr}T${timeStr}:00`);
+  return new Date(`${dateStr}T${timeStr}:00+08:00`);
 }
 
 function fmtDate(d: Date): string {
@@ -273,11 +271,8 @@ function TimesheetDetailPanel({
   }, [userId, weekStart, reloadKey]);
 
   function toLocalTimeValue(iso: string): string {
-    // <input type="time"> wants "HH:mm" in *local* time.
-    const d = new Date(iso);
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mi = String(d.getMinutes()).padStart(2, '0');
-    return `${hh}:${mi}`;
+    // <input type="time"> wants "HH:mm" — in PHT, matching combineDateTime.
+    return new Date(new Date(iso).getTime() + 8 * 3600 * 1000).toISOString().slice(11, 16);
   }
 
   // Opens a single day's edit modal, seeding drafts from that day's current

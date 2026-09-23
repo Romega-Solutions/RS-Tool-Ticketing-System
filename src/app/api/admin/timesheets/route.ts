@@ -2,44 +2,20 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { computeOvertime } from '@/lib/utils';
 import { weeklySecondsForUser, baseWeeklySecondsForUser } from '@/lib/overtime-server';
-import { weekStartMonday } from '@/lib/overtime-policy';
 import { route, requireAdmin, requireTool } from '@/lib/api';
+import { addDaysYmd, dayOfWeekYmd, isValidYmd, mondayOfYmd, phtDateOf, phtDatesTouched } from '@/lib/pht';
 
 export const runtime = 'nodejs';
 
 type Admin = ReturnType<typeof createAdminClient>;
 
 function getMondayOfWeek(dateStr: string): string | null {
-  const d = new Date(dateStr + 'T00:00:00');
-  if (isNaN(d.getTime())) return null;
-  if (d.getDay() !== 1) return null;
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
-function toLocalISO(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (!isValidYmd(dateStr) || dayOfWeekYmd(dateStr) !== 1) return null;
+  return dateStr;
 }
 
 function fmtDateLabel(dateStr: string): string {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-
-// Every local calendar date an interval touches, inclusive of both ends —
-// a session that clocks out the next day touches two dates.
-function datesTouched(startIso: string, endIso: string): string[] {
-  const start = new Date(startIso);
-  const end = new Date(endIso);
-  const cur = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-  const dates: string[] = [];
-  while (cur.getTime() <= last.getTime()) {
-    dates.push(toLocalISO(cur));
-    cur.setDate(cur.getDate() + 1);
-  }
-  return dates;
 }
 
 const DOW_STATUS_COLUMN = [
@@ -55,8 +31,8 @@ async function findAbsentDayConflict(
   inIso: string,
   outIso: string,
 ): Promise<{ date: string; status: string } | null> {
-  const dates = datesTouched(inIso, outIso);
-  const weekStarts = [...new Set(dates.map(d => weekStartMonday(new Date(d + 'T00:00:00'))))];
+  const dates = phtDatesTouched(inIso, outIso);
+  const weekStarts = [...new Set(dates.map(mondayOfYmd))];
   const { data: attRows } = await admin
     .from('attendance')
     .select('*')
@@ -64,9 +40,9 @@ async function findAbsentDayConflict(
     .in('week_start', weekStarts);
   const byWeek = new Map((attRows ?? []).map((r: Record<string, unknown>) => [r.week_start as string, r]));
   for (const date of dates) {
-    const att = byWeek.get(weekStartMonday(new Date(date + 'T00:00:00')));
+    const att = byWeek.get(mondayOfYmd(date));
     if (!att) continue;
-    const status = (att as Record<string, unknown>)[DOW_STATUS_COLUMN[new Date(date + 'T00:00:00').getDay()]] as string | null;
+    const status = (att as Record<string, unknown>)[DOW_STATUS_COLUMN[dayOfWeekYmd(date)]] as string | null;
     if (status === 'absent' || status === 'leave') return { date, status };
   }
   return null;
@@ -81,10 +57,8 @@ async function findOverlappingSession(
   outIso: string | null,
   excludeId?: number,
 ): Promise<{ id: number } | null> {
-  const startDate = toLocalISO(new Date(inIso));
-  const endDate   = toLocalISO(new Date(outIso ?? inIso));
-  const windowStart = toLocalISO(new Date(new Date(startDate + 'T00:00:00').getTime() - 86400000));
-  const windowEnd   = toLocalISO(new Date(new Date(endDate   + 'T00:00:00').getTime() + 86400000));
+  const windowStart = addDaysYmd(phtDateOf(inIso), -1);
+  const windowEnd   = addDaysYmd(phtDateOf(outIso ?? inIso), 1);
   let query = admin
     .from('timesheets')
     .select('id, clocked_in_at, clocked_out_at')
@@ -145,11 +119,7 @@ export const GET = route(async (req: Request) => {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const base = new Date(weekStart + 'T00:00:00');
-  const weekDates: string[] = [];
-  for (let i = 0; i < 7; i++) {
-    weekDates.push(toLocalISO(new Date(base.getTime() + i * 86400000)));
-  }
+  const weekDates = Array.from({ length: 7 }, (_, i) => addDaysYmd(weekStart, i));
 
   // select('*') (rather than naming edited_by/edited_at) keeps this read working
   // even if the audit-columns migration hasn't been applied yet — the fields just
@@ -264,7 +234,7 @@ export const PATCH = route(async (req: Request) => {
   const update: Record<string, string | number | null> = {
     clocked_in_at: inDate.toISOString(),
     clocked_out_at: outDate ? outDate.toISOString() : null,
-    date: toLocalISO(inDate),
+    date: phtDateOf(inDate),
     edited_by: session.id,
     edited_at: new Date().toISOString(),
   };
@@ -361,7 +331,7 @@ export const POST = route(async (req: Request) => {
     user_id:        userId,
     clocked_in_at:  inDate.toISOString(),
     clocked_out_at: outDate ? outDate.toISOString() : null,
-    date:           toLocalISO(inDate),
+    date:           phtDateOf(inDate),
     edited_by:      session.id,
     edited_at:      new Date().toISOString(),
   };

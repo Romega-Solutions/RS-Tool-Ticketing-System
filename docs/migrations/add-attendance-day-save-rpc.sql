@@ -15,6 +15,9 @@
 -- the actual fix for the bug where a day with no workable status could still
 -- carry timesheet sessions.
 --
+-- The file also locks EXECUTE down to service_role and ends with a one-time,
+-- idempotent backfill re-keying timesheets.date to PHT (see bottom).
+--
 -- p_sessions shape: jsonb array of { "id": int|null, "clockedInAt": ISO text,
 -- "clockedOutAt": ISO text | null }.
 CREATE OR REPLACE FUNCTION save_attendance_day(
@@ -50,6 +53,7 @@ DECLARE
   v_week_before     integer;
   v_ot_seconds      integer;
   v_is_ot           integer;
+  v_batch_before    integer := 0;
 BEGIN
   IF v_status IS NULL OR NOT (v_status = ANY (ARRAY['present','wfh','absent','leave'])) THEN
     RAISE EXCEPTION 'status must be one of present, wfh, absent, leave';
@@ -114,6 +118,17 @@ BEGIN
   SELECT array_agg(id) INTO v_submitted_ids
   FROM tmp_attendance_day_sessions WHERE id IS NOT NULL;
 
+  -- Every submitted id must be one of THIS user's sessions on THIS day. Anything
+  -- else is a stale modal (the row was deleted or moved since it was opened) or a
+  -- forged payload — updating it would silently no-op or rewrite someone else's
+  -- row, so refuse the whole save.
+  IF EXISTS (
+    SELECT 1 FROM tmp_attendance_day_sessions
+    WHERE id IS NOT NULL AND id <> ALL (COALESCE(v_existing_ids, ARRAY[]::integer[]))
+  ) THEN
+    RAISE EXCEPTION 'This day''s sessions changed since you opened it — reload and try again.';
+  END IF;
+
   -- Overlap against sessions NOT part of this day's edit batch (adjacent-day
   -- sessions that cross into/out of this date).
   IF EXISTS (
@@ -162,7 +177,7 @@ BEGIN
     AND id <> ALL (COALESCE(v_submitted_ids, ARRAY[]::integer[]));
 
   -- Insert/update sessions in chronological order so weekly-overtime math
-  -- sees each prior session's already-written duration.
+  -- accumulates this day's earlier sessions (v_batch_before).
   SELECT (approved_hours_per_week * 3600) INTO v_base_seconds FROM users WHERE id = p_user_id;
   v_base_seconds := COALESCE(v_base_seconds, 15 * 3600);
   SELECT array_agg(to_char(d, 'YYYY-MM-DD')) INTO v_week_dates
@@ -174,15 +189,21 @@ BEGIN
     IF r.out_ts IS NOT NULL THEN
       v_duration := round(extract(epoch FROM (r.out_ts - r.in_ts)))::integer;
 
-      SELECT COALESCE(sum(duration_seconds), 0) INTO v_week_before
+      -- Weekly total BEFORE this session: completed sessions on other days of
+      -- the week that started earlier, plus this day's earlier sessions from
+      -- this batch (this day's stored rows are mid-rewrite, so they're excluded
+      -- and the batch's own running total is used instead).
+      SELECT COALESCE(sum(duration_seconds), 0) + v_batch_before INTO v_week_before
       FROM timesheets
       WHERE user_id = p_user_id
         AND date = ANY (v_week_dates)
+        AND date <> p_date
         AND duration_seconds IS NOT NULL
-        AND (r.id IS NULL OR id <> r.id);
+        AND clocked_in_at::timestamptz < r.in_ts;
 
       v_ot_seconds := greatest(0, least(v_duration, v_week_before + v_duration - v_base_seconds));
       IF v_ot_seconds > 0 THEN v_is_ot := 1; ELSE v_ot_seconds := NULL; END IF;
+      v_batch_before := v_batch_before + v_duration;
     END IF;
 
     IF r.id IS NOT NULL THEN
@@ -195,7 +216,7 @@ BEGIN
         overtime_seconds = v_ot_seconds,
         edited_by = p_edited_by,
         edited_at = v_now
-      WHERE id = r.id;
+      WHERE id = r.id AND user_id = p_user_id AND date = p_date;
     ELSE
       INSERT INTO timesheets (user_id, clocked_in_at, clocked_out_at, date, duration_seconds, is_overtime, overtime_seconds, edited_by, edited_at)
       VALUES (p_user_id, r.clocked_in_at, r.clocked_out_at, p_date, v_duration, v_is_ot, v_ot_seconds, p_edited_by, v_now);
@@ -214,5 +235,53 @@ BEGIN
     EXECUTE format('INSERT INTO attendance (user_id, week_start, %I, submitted_at, edited_by, edited_at) VALUES ($1, $2, $3, $4, $5, $4)', v_day_column)
       USING p_user_id, p_week_start, v_status, v_now, p_edited_by;
   END IF;
+END;
+$$;
+
+-- SECURITY DEFINER + Postgres's default EXECUTE-to-PUBLIC grant (and Supabase's
+-- default grants to anon/authenticated) would expose this through PostgREST at
+-- /rest/v1/rpc/save_attendance_day to anyone holding the publishable key,
+-- bypassing the route's requireAdmin(). Only the service-role client used by
+-- PATCH /api/admin/attendance/day may call it.
+REVOKE EXECUTE ON FUNCTION save_attendance_day(integer, text, text, text, jsonb, integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION save_attendance_day(integer, text, text, text, jsonb, integer) TO service_role;
+
+-- ─── One-time backfill: re-key timesheets.date to the PHT calendar date ──────
+-- Clock-in used to stamp `date` from the server clock (UTC on Vercel), whose day
+-- flips at 8:00 AM PHT, so every clock-in before 8 AM PHT was filed under the
+-- previous day. The app now derives it in PHT (src/lib/pht.ts); this re-dates
+-- the existing rows to match. Idempotent — a second run matches no rows.
+--
+-- The same bug made clock-in auto-mark the wrong weekday Present, so each
+-- re-dated session's real day is marked Present when it has no status yet
+-- (existing statuses are never overwritten, and the old day's status is left
+-- alone since it may be legitimately set).
+DO $$
+DECLARE
+  v_day_names text[] := array['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+  r           record;
+  v_dow       integer;
+  v_col       text;
+  v_week      text;
+BEGIN
+  FOR r IN
+    WITH redated AS (
+      UPDATE timesheets
+      SET date = to_char((clocked_in_at::timestamptz AT TIME ZONE 'Asia/Manila')::date, 'YYYY-MM-DD')
+      WHERE date <> to_char((clocked_in_at::timestamptz AT TIME ZONE 'Asia/Manila')::date, 'YYYY-MM-DD')
+      RETURNING user_id, date
+    )
+    SELECT DISTINCT user_id, date AS pht_date FROM redated
+  LOOP
+    v_dow := extract(dow FROM r.pht_date::date)::integer;
+    CONTINUE WHEN v_dow IN (0, 6);  -- clock-in never auto-marks weekends
+    v_col  := v_day_names[v_dow + 1] || '_status';
+    v_week := to_char(r.pht_date::date - (v_dow - 1), 'YYYY-MM-DD');
+    EXECUTE format(
+      'INSERT INTO attendance (user_id, week_start, %1$I) VALUES ($1, $2, ''present'')
+       ON CONFLICT (user_id, week_start) DO UPDATE SET %1$I = ''present''
+       WHERE attendance.%1$I IS NULL', v_col)
+    USING r.user_id, v_week;
+  END LOOP;
 END;
 $$;
