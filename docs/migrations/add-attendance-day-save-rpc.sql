@@ -250,12 +250,20 @@ GRANT EXECUTE ON FUNCTION save_attendance_day(integer, text, text, text, jsonb, 
 -- Clock-in used to stamp `date` from the server clock (UTC on Vercel), whose day
 -- flips at 8:00 AM PHT, so every clock-in before 8 AM PHT was filed under the
 -- previous day. The app now derives it in PHT (src/lib/pht.ts); this re-dates
--- the existing rows to match. Idempotent — a second run matches no rows.
+-- the existing rows to match. Idempotent — a second run matches no rows and so
+-- changes nothing.
 --
--- The same bug made clock-in auto-mark the wrong weekday Present, so each
--- re-dated session's real day is marked Present when it has no status yet
--- (existing statuses are never overwritten, and the old day's status is left
--- alone since it may be legitimately set).
+-- Session times and durations are untouched; only the day (and, for a Monday
+-- before 8 AM, the Mon–Sun week) a session counts toward changes. Therefore:
+--   * The same bug made clock-in auto-mark the wrong weekday Present, so each
+--     re-dated session's real weekday is marked Present when it has no status
+--     yet (existing statuses are never overwritten, and the old day's status is
+--     left alone since it may be legitimately set).
+--   * Weekly overtime is recomputed for every (user, week) a re-dated session
+--     left or joined, using the same rule as clock-out and save_attendance_day:
+--     a completed session's overtime is the slice beyond the user's
+--     approved_hours_per_week base (default 15h), counting the completed
+--     sessions that started before it that Mon–Sun week.
 DO $$
 DECLARE
   v_day_names text[] := array['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
@@ -264,24 +272,69 @@ DECLARE
   v_col       text;
   v_week      text;
 BEGIN
-  FOR r IN
-    WITH redated AS (
-      UPDATE timesheets
-      SET date = to_char((clocked_in_at::timestamptz AT TIME ZONE 'Asia/Manila')::date, 'YYYY-MM-DD')
-      WHERE date <> to_char((clocked_in_at::timestamptz AT TIME ZONE 'Asia/Manila')::date, 'YYYY-MM-DD')
-      RETURNING user_id, date
-    )
-    SELECT DISTINCT user_id, date AS pht_date FROM redated
-  LOOP
-    v_dow := extract(dow FROM r.pht_date::date)::integer;
+  CREATE TEMPORARY TABLE IF NOT EXISTS tmp_pht_redated (
+    user_id  integer,
+    old_date text,
+    new_date text
+  ) ON COMMIT DROP;
+  TRUNCATE tmp_pht_redated;
+
+  WITH stale AS (
+    SELECT id, date AS old_date
+    FROM timesheets
+    WHERE date <> to_char((clocked_in_at::timestamptz AT TIME ZONE 'Asia/Manila')::date, 'YYYY-MM-DD')
+  ), redated AS (
+    UPDATE timesheets t
+    SET date = to_char((t.clocked_in_at::timestamptz AT TIME ZONE 'Asia/Manila')::date, 'YYYY-MM-DD')
+    FROM stale
+    WHERE t.id = stale.id
+    RETURNING t.user_id, stale.old_date, t.date AS new_date
+  )
+  INSERT INTO tmp_pht_redated SELECT user_id, old_date, new_date FROM redated;
+
+  -- Mark each re-dated session's real weekday Present where it has no status.
+  FOR r IN SELECT DISTINCT user_id, new_date FROM tmp_pht_redated LOOP
+    v_dow := extract(dow FROM r.new_date::date)::integer;
     CONTINUE WHEN v_dow IN (0, 6);  -- clock-in never auto-marks weekends
     v_col  := v_day_names[v_dow + 1] || '_status';
-    v_week := to_char(r.pht_date::date - (v_dow - 1), 'YYYY-MM-DD');
+    v_week := to_char(r.new_date::date - (v_dow - 1), 'YYYY-MM-DD');
     EXECUTE format(
       'INSERT INTO attendance (user_id, week_start, %1$I) VALUES ($1, $2, ''present'')
        ON CONFLICT (user_id, week_start) DO UPDATE SET %1$I = ''present''
        WHERE attendance.%1$I IS NULL', v_col)
     USING r.user_id, v_week;
   END LOOP;
+
+  -- Recompute overtime for every (user, Mon–Sun week) a re-dated session left or
+  -- joined. Monday of a date = date - ((ISO dow) - 1), ISO dow Mon=1 … Sun=7.
+  WITH touched AS (
+    SELECT DISTINCT user_id, (d::date - (extract(isodow FROM d::date)::integer - 1)) AS week_start
+    FROM tmp_pht_redated, LATERAL (VALUES (old_date), (new_date)) v(d)
+  ), sessions AS (
+    SELECT t.id,
+           t.duration_seconds AS dur,
+           COALESCE(u.approved_hours_per_week, 15) * 3600 AS base,
+           COALESCE(sum(t.duration_seconds) OVER (
+             PARTITION BY t.user_id, w.week_start
+             ORDER BY t.clocked_in_at::timestamptz, t.id
+             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+           ), 0) AS before
+    FROM timesheets t
+    JOIN touched w
+      ON w.user_id = t.user_id
+     AND t.date::date BETWEEN w.week_start AND w.week_start + 6
+    LEFT JOIN users u ON u.id = t.user_id
+    WHERE t.duration_seconds IS NOT NULL
+  ), recalc AS (
+    SELECT id, greatest(0, least(dur, before + dur - base)) AS ot
+    FROM sessions
+  )
+  UPDATE timesheets t
+  SET is_overtime      = CASE WHEN recalc.ot > 0 THEN 1 ELSE 0 END,
+      overtime_seconds = CASE WHEN recalc.ot > 0 THEN recalc.ot END
+  FROM recalc
+  WHERE t.id = recalc.id
+    AND (t.is_overtime IS DISTINCT FROM CASE WHEN recalc.ot > 0 THEN 1 ELSE 0 END
+      OR t.overtime_seconds IS DISTINCT FROM CASE WHEN recalc.ot > 0 THEN recalc.ot END);
 END;
 $$;
