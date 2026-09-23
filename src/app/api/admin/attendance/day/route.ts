@@ -166,7 +166,7 @@ export const PATCH = route(async (req: Request) => {
   if (error) {
     // The RPC raises plain exceptions for validation/overlap/absent-day
     // conflicts (recognizable text) vs. genuine unexpected DB failures.
-    const isConflict = /overlaps|tagged|can't have|must start|Clock-out|Clock-in|status must be/.test(error.message);
+    const isConflict = /overlaps|tagged|can't have|must start|Clock-out|Clock-in|status must be|changed since you opened it/.test(error.message);
     if (!isConflict) console.error('[PATCH /api/admin/attendance/day] RPC failed:', error.message);
     return NextResponse.json({ error: error.message }, { status: isConflict ? 409 : 500 });
   }
