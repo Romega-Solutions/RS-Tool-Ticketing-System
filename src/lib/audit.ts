@@ -7,6 +7,7 @@ export type AuditAction =
   | 'user.reactivated'
   | 'user.tool_access_changed'
   | 'user.setup_email_sent'
+  | 'user.identity_changed'
   | 'user.updated';
 
 // Best-effort audit write: logs failures but NEVER throws — an audit insert must
@@ -64,6 +65,11 @@ export function describeAudit(action: string, details: Record<string, unknown> |
       return parts.length ? `Changed a user's tool access (${parts.join('; ')})` : "Changed a user's tool access";
     }
     case 'user.setup_email_sent': return 'Sent an account-setup email';
+    case 'user.identity_changed': {
+      const labels: Record<string, string> = { name: 'name', email: 'email', jobTitle: 'job title' };
+      const changed = Object.keys(labels).filter((k) => details && k in details).map((k) => labels[k]);
+      return changed.length ? `Changed a user's ${changed.join(', ')}` : "Changed a user's identity details";
+    }
     case 'user.updated':      return 'Updated a user account';
     default:                  return `Admin action: ${action}`;
   }

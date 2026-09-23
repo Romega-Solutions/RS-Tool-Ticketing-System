@@ -367,6 +367,9 @@ export const PATCH = route(async (req: Request) => {
 
   let body: {
     id?: number;
+    name?: string;
+    email?: string;
+    jobTitle?: string | null;
     role?: string;
     isActive?: number;
     team?: string | null;
@@ -411,6 +414,23 @@ export const PATCH = route(async (req: Request) => {
   }
 
   const updates: Record<string, unknown> = {};
+  // Identity fields (legal name, company email, contract job title) are
+  // admin-owned — the profile page can't change them. Everything else
+  // (attendance, timesheets, tickets, …) references users.id, so renames
+  // and email changes carry the user's history along with them.
+  if (body.name !== undefined) {
+    const name = String(body.name ?? '').trim();
+    if (!name) return NextResponse.json({ error: 'Full name is required' }, { status: 400 });
+    if (name.length > 200) return NextResponse.json({ error: 'Full name is too long' }, { status: 400 });
+    updates.name = name;
+  }
+  if (body.jobTitle !== undefined)      updates.job_title      = body.jobTitle?.trim() || null;
+  let newEmail: string | undefined;
+  if (body.email !== undefined) {
+    newEmail = String(body.email ?? '').trim().toLowerCase();
+    if (!EMAIL_RE.test(newEmail)) return NextResponse.json({ error: 'Invalid email address' }, { status: 400 });
+    updates.email = newEmail;
+  }
   if (body.role !== undefined)          updates.role           = body.role;
   if (body.isActive !== undefined)      updates.is_active      = body.isActive;
   if (body.team !== undefined)          updates.team           = body.team?.trim() || null;
@@ -466,12 +486,48 @@ export const PATCH = route(async (req: Request) => {
   const admin = createAdminClient();
   const { data: before } = await admin
     .from('users')
-    .select('role, is_active, tool_access')
+    .select('role, is_active, tool_access, name, email, job_title')
     .eq('id', body.id)
     .maybeSingle();
 
+  // Email change: getSession() resolves the signed-in Supabase Auth user to
+  // public.users BY EMAIL, so the auth account's email must move in lockstep
+  // or the user is locked out. Update auth first, then the profile row, and
+  // roll the auth email back if the profile write fails.
+  let authEmailRollback: { authId: string; email: string } | null = null;
+  const oldEmail = before ? String(before.email).toLowerCase() : null;
+  if (newEmail !== undefined && oldEmail !== null && newEmail !== oldEmail) {
+    const { data: clash } = await admin.from('users').select('id').eq('email', newEmail).neq('id', body.id).maybeSingle();
+    if (clash) return NextResponse.json({ error: 'Another user already has that email' }, { status: 409 });
+
+    const authUser = await findAuthUserByEmail(admin, oldEmail);
+    if (authUser) {
+      const { error: authErr } = await admin.auth.admin.updateUserById(authUser.id, { email: newEmail, email_confirm: true });
+      if (authErr) {
+        const taken = /already|exists|registered/i.test(authErr.message);
+        return NextResponse.json(
+          { error: taken ? 'That email is already registered to another login account' : `Could not update login email: ${authErr.message}` },
+          { status: taken ? 409 : 500 },
+        );
+      }
+      authEmailRollback = { authId: authUser.id, email: oldEmail };
+    }
+    // No auth account yet (user never signed in) → only the profile row changes.
+  }
+
   const { error: updateError } = await admin.from('users').update(updates).eq('id', body.id);
-  if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 });
+  if (updateError) {
+    if (authEmailRollback) {
+      try {
+        await admin.auth.admin.updateUserById(authEmailRollback.authId, { email: authEmailRollback.email, email_confirm: true });
+      } catch { /* best-effort */ }
+    }
+    const conflict = /unique|duplicate/i.test(updateError.message);
+    return NextResponse.json(
+      { error: conflict ? 'Another user already has that email' : updateError.message },
+      { status: conflict ? 409 : 500 },
+    );
+  }
 
   const { data: updated } = await admin
     .from('users')
@@ -494,6 +550,13 @@ export const PATCH = route(async (req: Request) => {
     // when the only change was tool access).
     const roleChanged = String(before.role) !== String(updated.role);
     const activeChanged = Number(before.is_active) !== Number(updated.is_active);
+    const identityChanges: Record<string, { from: unknown; to: unknown }> = {};
+    if (String(before.name) !== String(updated.name)) identityChanges.name = { from: before.name, to: updated.name };
+    if (String(before.email) !== String(updated.email)) identityChanges.email = { from: before.email, to: updated.email };
+    if ((before.job_title ?? null) !== (updated.job_title ?? null)) identityChanges.jobTitle = { from: before.job_title ?? null, to: updated.job_title ?? null };
+    if (Object.keys(identityChanges).length) {
+      await recordAudit({ actorId: session.id, action: 'user.identity_changed', targetUserId: body.id, details: identityChanges });
+    }
     const otherFieldChanged = body.team !== undefined || body.memberCode !== undefined || body.hourlyRateUsd !== undefined
       || body.dateOfBirth !== undefined || body.startDate !== undefined || body.endDate !== undefined || body.driveUrl !== undefined
       || body.approvedHoursPerWeek !== undefined || body.schedulePhtStart !== undefined || body.schedulePhtEnd !== undefined;
