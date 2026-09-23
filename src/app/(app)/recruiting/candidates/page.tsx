@@ -13,6 +13,8 @@ import { ResumeUploadButton } from './resume-upload';
 import { deleteAllCandidates } from './actions';
 import { AtsTabs } from '../ats-tabs';
 import { formatPhoneNumber } from '@/lib/format';
+import { recruitmentActions, type RecruitmentAction } from '@/lib/recruitment-progress';
+import { RecruitmentWorkflowActions } from './recruitment-workflow-actions';
 
 type CandidateRowData = {
   id:           number;
@@ -27,6 +29,11 @@ type CandidateRowData = {
   linkedin_url: string | null;
   parsed_at:    string | null;
   created_at:   string;
+};
+
+type PositionOptionRow = {
+  id: number;
+  job_title: string;
 };
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -94,10 +101,63 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
     .order('created_at', { ascending: false })
     .limit(200);
 
+  // Manual candidates must be attached to a real, currently open position.
+  // The server action validates the chosen ID again before saving.
+  const { data: positionData } = await supabase
+    .from('positions')
+    .select('id, job_title')
+    .eq('is_open', true)
+    .order('job_title', { ascending: true })
+    .limit(200);
+  const positions = ((positionData ?? []) as PositionOptionRow[])
+    .filter(position => Number.isInteger(position.id) && position.job_title.trim())
+    .map(position => ({ id: Number(position.id), jobTitle: position.job_title }));
+
   const errorMsg = error?.message;
   const tableMissing = isTableMissing(errorMsg);
   const unexpectedError = error && !tableMissing ? errorMsg : null;
   const allCandidates: CandidateRowData[] = (data as CandidateRowData[] | null) ?? [];
+  const candidateIds = allCandidates
+    .filter(candidate => candidate.status === 'offered')
+    .map(candidate => candidate.id);
+  const actionsByCandidate = new Map<number, RecruitmentAction[]>();
+  let progressUnavailable = false;
+  if (candidateIds.length) {
+    const [backgroundResult, referencesResult, verificationsResult, submissionsResult, documentsResult] = await Promise.all([
+      supabase.from('candidate_pre_employment_requests')
+        .select('candidate_id, sent_at, last_reminder_sent_at, submitted_at, invalidated_at, expires_at')
+        .in('candidate_id', candidateIds)
+        .eq('form_key', 'background_check')
+        .order('created_at', { ascending: false }),
+      supabase.from('candidate_references')
+        .select('candidate_id, request_sent_at, last_reminder_sent_at, responded_at')
+        .in('candidate_id', candidateIds),
+      supabase.from('candidate_employment_verifications')
+        .select('candidate_id, request_sent_at, last_reminder_sent_at, responded_at')
+        .in('candidate_id', candidateIds),
+      supabase.from('candidate_pre_employment_submissions')
+        .select('candidate_id, submitted_at')
+        .in('candidate_id', candidateIds)
+        .eq('form_key', 'background_check')
+        .order('submitted_at', { ascending: false }),
+      supabase.from('candidate_pre_employment_documents')
+        .select('candidate_id, kind, sent_at, signed_at, last_reminder_sent_at')
+        .in('candidate_id', candidateIds),
+    ]);
+    progressUnavailable = Boolean(backgroundResult.error || referencesResult.error || verificationsResult.error || submissionsResult.error || documentsResult.error);
+    if (!progressUnavailable) {
+      for (const candidateId of candidateIds) {
+        actionsByCandidate.set(candidateId, recruitmentActions({
+          request: backgroundResult.data?.find(row => row.candidate_id === candidateId) ?? null,
+          status: 'offered',
+          submittedAt: submissionsResult.data?.find(row => row.candidate_id === candidateId)?.submitted_at ?? null,
+          references: (referencesResult.data ?? []).filter(row => row.candidate_id === candidateId),
+          verifications: (verificationsResult.data ?? []).filter(row => row.candidate_id === candidateId),
+          documents: (documentsResult.data ?? []).filter(row => row.candidate_id === candidateId),
+        }));
+      }
+    }
+  }
   const candidates = allCandidates.filter(candidate => {
     const matchesQuery = !query || [
       candidate.full_name,
@@ -134,7 +194,7 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
                 action={deleteAllCandidates}
               />
               <ResumeUploadButton mode="create" variant="outline" />
-              <CandidateForm />
+              <CandidateForm positions={positions} />
             </div>
           ) : null
         }
@@ -254,6 +314,7 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
                         <th className="px-4 py-3 font-semibold">Rating</th>
                         <th className="px-4 py-3 font-semibold">Applied</th>
                         <th className="px-4 py-3 font-semibold">Status</th>
+                        <th className="px-4 py-3 font-semibold">Next action</th>
                         <th className="px-4 py-3 font-semibold w-10" />
                       </tr>
                     </thead>
@@ -293,6 +354,11 @@ export default async function CandidatesPage({ searchParams }: PageProps) {
                           <td className="px-4 py-3.5"><CandidateRating id={c.id} rating={c.rating} /></td>
                           <td className="px-4 py-3.5 text-(--rs-neutral-grey-500) whitespace-nowrap">{formatDate(c.created_at)}</td>
                           <td className="px-4 py-3.5"><CandidateStatus id={c.id} status={c.status} /></td>
+                          <td className="px-4 py-3.5">
+                            {progressUnavailable && c.status === 'offered' ? (
+                              <span className="text-xs text-amber-700">Actions unavailable — refresh to try again</span>
+                            ) : <RecruitmentWorkflowActions candidateId={c.id} actions={actionsByCandidate.get(c.id) ?? []} />}
+                          </td>
                           <td className="px-4 py-3.5"><CandidateDelete id={c.id} /></td>
                         </tr>
                       ))}

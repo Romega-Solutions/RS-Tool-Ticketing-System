@@ -52,7 +52,7 @@ const STEPS: Step[] = [
     stage: 'Pre-onboarding',
     pill: 'bg-blue-100 text-blue-700',
     you: 'Confirm role, team, and start date.',
-    auto: 'The welcome email fires automatically — it picks the contractor or intern version on its own.',
+    auto: 'After you assign the Onboarding Lead and Direct Supervisor, confirm the handoff to send the matching welcome email and assign the Friday cohort.',
     send: ['Gmail + signature nudge', 'Group-chat announcement'],
   },
   {
