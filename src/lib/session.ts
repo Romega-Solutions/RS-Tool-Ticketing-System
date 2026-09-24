@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { normalizeRole, isGateableToolKey, type AppRole } from '@/lib/rbac';
 
 export type SessionUser = {
+  isImpersonating?:boolean;
   id: number;
   email: string;
   name: string;

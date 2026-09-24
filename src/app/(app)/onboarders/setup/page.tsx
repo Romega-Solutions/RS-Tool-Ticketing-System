@@ -29,7 +29,7 @@ const WORKFLOWS: WorkflowEntry[] = [
     envKey:   'N8N_BG_CHECK_INITIATE_URL',
     label:    'Background Check Initiate',
     purpose:  'SOP §3 — Emails the new hire the request for 3 character references + employment verification contacts.',
-    stage:    'background_check',
+    stage:    'Recruitment pre-employment',
     icon:     IdCard,
     phase:    'mvp',
     template: 'bg-check-initiate',
@@ -38,7 +38,7 @@ const WORKFLOWS: WorkflowEntry[] = [
     envKey:   'N8N_REFERENCE_REQUEST_URL',
     label:    'Reference Request',
     purpose:  'SOP §4 — One email per referee asking for a confidential PDF response within 48h.',
-    stage:    'background_check',
+    stage:    'Recruitment pre-employment',
     icon:     Mail,
     phase:    'mvp',
     template: 'reference-request',
@@ -47,7 +47,7 @@ const WORKFLOWS: WorkflowEntry[] = [
     envKey:   'N8N_EMPLOYMENT_VERIFICATION_URL',
     label:    'Employment Verification',
     purpose:  'SOP §4 — One email per prior-HR contact for factual employment verification.',
-    stage:    'background_check',
+    stage:    'Recruitment pre-employment',
     icon:     Mail,
     phase:    'mvp',
     template: 'employment-verification',
@@ -60,6 +60,14 @@ const WORKFLOWS: WorkflowEntry[] = [
     icon:     FileSignature,
     phase:    'mvp',
     template: 'welcome',
+  },
+  {
+    envKey:   'N8N_FORM_REMINDER_URL',
+    label:    'Manual Form Reminders',
+    purpose:  'One shared, linkless reminder sender for overdue Recruitment and Onboarding form responses. It runs only when HR clicks a reminder button.',
+    stage:    'Manual button after 24h',
+    icon:     Mail,
+    phase:    'mvp',
   },
   {
     envKey:   'N8N_GMAIL_SIGNATURE_NUDGE_URL',
@@ -83,7 +91,7 @@ const WORKFLOWS: WorkflowEntry[] = [
     envKey:   'N8N_SOW_REMINDER_URL',
     label:    'Sweeps (SOW + referee nudges)',
     purpose:  'Daily 08:00 PHT cron — nudges HRBP on unsigned SOWs >48h and chases referees who haven’t responded >48h.',
-    stage:    'offer_signed + background_check',
+    stage:    'Recruitment pre-employment',
     icon:     FileSignature,
     phase:    'mvp',
     // No test trigger — cron-only workflow with no inbound webhook.
@@ -123,7 +131,7 @@ const BACKGROUND_CHECKS = [
 
 const POST_MVP_PHASES = [
   { letter: 'A', title: 'ATS auto-promotion',    summary: 'When candidates.status flips to "hired", automatically create the onboarder row.' },
-  { letter: 'B', title: 'Day-1 checklist UI',    summary: 'Render the seven *_at columns as toggleable checkboxes; auto-advance status when all done.' },
+  { letter: 'B', title: 'Day-1 checklist UI',    summary: 'Render the six current checklist columns as toggleable checkboxes; auto-advance status when all are done.' },
   { letter: 'C', title: 'Two extra emails',      summary: 'Ship gmail-signature-nudge (contractor/intern) and group-chat-announce.' },
   { letter: 'D', title: 'Onboarder-facing UI',   summary: 'In-app intake forms + welcome banner on /my-tasks, replacing the Google Forms.' },
   { letter: 'E', title: '30/90-day workflows',   summary: 'Probation milestone emails and decision UI.' },
@@ -131,7 +139,7 @@ const POST_MVP_PHASES = [
 ];
 
 const OPEN_QUESTIONS = [
-  { q: 'Default Onboarding Lead resolution',      a: 'MVP uses DEFAULT_ONBOARDING_LEAD_USER_ID env var. Replace with per-team lookup once HR confirms.' },
+  { q: 'Internal assignee selection',             a: 'Onboarding Leads and Direct Supervisors must be active Lead, Admin, or Founder users. Recruitment handoffs begin unassigned.' },
   { q: 'Group-chat announcement delivery',        a: 'Today returns text the Lead pastes. Decide whether to invest in Teams API integration.' },
   { q: 'W-8 attachments',                          a: 'Attach blank+sample W-8 PDFs to welcome email, or host links in a public bucket. Pick after observing bounce rates.' },
   { q: 'SOW e-signature integration',              a: 'MVP records sow_signed_at on manual click. Add webhook from DocuSign / Google Workspace when adopted.' },
@@ -188,8 +196,8 @@ export default async function OnboardingSetupPage() {
             />
             <SetupItem
               n={2}
-              title="Onboarding Lead is set to Erich"
-              body={<>Hardcoded default — every onboarder is created with <strong>Erich</strong> as the Onboarding Lead, and every email is signed by her. Override at runtime by setting <code className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 text-xs">ONBOARDING_LEAD_NAME</code> in env.</>}
+              title="Assign an Onboarding Lead"
+              body={<>Choose an active internal user with <strong>Onboarding</strong> access when creating an onboarder, or assign one from the onboarding record&apos;s Quick Facts panel. Recruitment handoffs begin unassigned until HR selects the owner.</>}
             />
             <SetupItem
               n={3}
