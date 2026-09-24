@@ -1184,6 +1184,72 @@ export async function removeLabel(itemId: string, labelId: number): Promise<void
   if (error) throw new PlaneApiError(502, `remove-label/${itemId}/${labelId}`);
 }
 
+// ── Related links ───────────────────────────────────────────────────────
+
+export interface WorkItemLink {
+  id: number;
+  work_item_id: number;
+  title: string;
+  url: string;
+  created_by: number | null;
+  created_by_name: string | null;
+  created_at: string;
+}
+
+function mapLink(r: Row): WorkItemLink {
+  return {
+    id: Number(r.id),
+    work_item_id: Number(r.work_item_id),
+    title: String(r.title),
+    url: String(r.url),
+    created_by: r.created_by != null ? Number(r.created_by) : null,
+    created_by_name: (r.users as Row | null)?.name != null ? String((r.users as Row).name) : null,
+    created_at: String(r.created_at),
+  };
+}
+
+const LINK_COLUMNS = 'id, work_item_id, title, url, created_by, created_at, users(name)';
+
+export async function getLinks(itemId: string): Promise<WorkItemLink[]> {
+  const sb = createAdminClient();
+  const { data, error } = await sb.from('work_item_links')
+    .select(LINK_COLUMNS)
+    .eq('work_item_id', Number(itemId))
+    .order('created_at');
+  if (error) throw new PlaneApiError(500, `links/${itemId}`);
+  return (data ?? []).map((r: Row) => mapLink(r));
+}
+
+export async function getLink(linkId: number): Promise<WorkItemLink | null> {
+  const sb = createAdminClient();
+  const { data } = await sb.from('work_item_links')
+    .select(LINK_COLUMNS).eq('id', linkId).maybeSingle();
+  return data ? mapLink(data as Row) : null;
+}
+
+export async function createLink(
+  itemId: string,
+  createdBy: number,
+  title: string,
+  url: string,
+): Promise<WorkItemLink> {
+  const sb = createAdminClient();
+  const { data, error } = await sb.from('work_item_links').insert({
+    work_item_id: Number(itemId),
+    created_by: createdBy,
+    title,
+    url,
+  }).select(LINK_COLUMNS).single();
+  if (error || !data) throw new PlaneApiError(502, `links create`);
+  return mapLink(data as Row);
+}
+
+export async function deleteLink(linkId: number): Promise<void> {
+  const sb = createAdminClient();
+  const { error } = await sb.from('work_item_links').delete().eq('id', linkId);
+  if (error) throw new PlaneApiError(502, `links/${linkId}`);
+}
+
 // ── Sub-issues (Phase 4) ────────────────────────────────────────────────
 
 export interface SubIssue {
