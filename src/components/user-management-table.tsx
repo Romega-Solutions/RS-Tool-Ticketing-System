@@ -164,12 +164,13 @@ function fmtDate(value: string | null): string {
   return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-// ISO timestamp → short 'Jan 5' for the "setup email sent" badge.
+// ISO timestamp → short 'Jan 5' (PHT) for the "setup email sent" badge. Fixed
+// timezone so the server (UTC on Vercel) and browser render the same text.
 function fmtSent(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'Asia/Manila' });
 }
 
 // Derived PST/PDT range label for a PHT window, or '—'.
