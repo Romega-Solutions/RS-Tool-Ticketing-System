@@ -22,7 +22,13 @@ function getMondayOfWeek(dateStr: string): string | null {
 }
 
 // PATCH /api/admin/attendance
-// Admin-only — overwrite weekly attendance status + notes for ANY user.
+// Admin-only — update weekly attendance notes, and/or day statuses, for ANY
+// user. Each day field is OPTIONAL: a day key omitted from the body leaves
+// that column untouched. This is what lets the week-notes editor save just
+// `{ userId, weekStart, notes }` without clobbering the other six days' — per-
+// day status changes normally go through the atomic PATCH /api/admin/attendance/day
+// instead, which is also the only place session-vs-status consistency is
+// enforced; this route does not touch `timesheets` at all.
 // Body: { userId, weekStart, monday?..sunday?, notes? }
 export const PATCH = route(async (req: Request) => {
   const session = await requireAdmin();
@@ -52,6 +58,7 @@ export const PATCH = route(async (req: Request) => {
 
   const dayValues: Record<string, string | null> = {};
   for (const day of DAYS) {
+    if (!(day in body)) continue; // omitted entirely — leave that column untouched
     const val = (body[day] ?? '').toString().toLowerCase();
     if (!VALID_STATUSES.has(val)) {
       return NextResponse.json({ error: `Invalid status for ${day}` }, { status: 400 });
@@ -72,19 +79,19 @@ export const PATCH = route(async (req: Request) => {
   }
 
   const now = new Date().toISOString();
-  const payload = {
-    monday_status:    dayValues.monday,
-    tuesday_status:   dayValues.tuesday,
-    wednesday_status: dayValues.wednesday,
-    thursday_status:  dayValues.thursday,
-    friday_status:    dayValues.friday,
-    saturday_status:  dayValues.saturday,
-    sunday_status:    dayValues.sunday,
-    notes:            body.notes == null ? null : body.notes.toString().trim() || null,
+  const dayColumns: Record<string, string | null> = {};
+  for (const day of DAYS) {
+    if (day in dayValues) dayColumns[`${day}_status`] = dayValues[day];
+  }
+  const payload: Record<string, string | number | null> = {
+    ...dayColumns,
     submitted_at:     now,
     edited_by:        session.id,
     edited_at:        now,
   };
+  if ('notes' in body) {
+    payload.notes = body.notes == null ? null : body.notes.toString().trim() || null;
+  }
 
   const { data: existing } = await admin
     .from('attendance')

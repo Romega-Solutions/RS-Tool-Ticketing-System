@@ -1,12 +1,21 @@
 'use client';
 
-import { Fragment, useState, useEffect, useMemo } from 'react';
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 import { WEEKLY_CAP_SECONDS } from '@/lib/utils';
+import { addDaysYmd, phtDateOf, phtWeekStartOf } from '@/lib/pht';
 import { Button } from '@/components/ui/button';
 import { AttendanceExportSheet } from '@/components/attendance-export-sheet';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { PersonAvatar } from '@/components/person-avatar';
-import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock, Search, X, Pencil, LogOut, Save, Trash2, ShieldCheck, Check, History } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock, Search, X, Pencil, LogOut, Save, Trash2, ShieldCheck, History, Plus } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -75,8 +84,10 @@ function fmtSeconds(s: number): string {
   return `${h}h ${m}m`;
 }
 
+// Attendance times are shown and edited in PHT (the attendance day's timezone,
+// see src/lib/pht.ts), regardless of the viewer's browser timezone.
 function fmtTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila' });
 }
 
 // Audit-trail tooltip: "Edited by Jane Doe on Jun 16".
@@ -93,10 +104,44 @@ function statusLabel(val: string | null): string {
   return STATUS_OPTS.find(o => o.value === (val ?? ''))?.label ?? '—';
 }
 
+// Only these statuses can carry clock-in/out times — Leave/Absent/blank days
+// show a status badge instead of time fields.
+function isWorkableStatus(status: string | null): boolean {
+  return status === 'present' || status === 'wfh';
+}
+
 function detailDayStatusLabel(day: DetailDay): string {
   if (day.status) return statusLabel(day.status);
   if (day.label === 'Sat' || day.label === 'Sun') return 'Weekend';
   return '—';
+}
+
+// ── Day-crossing session helpers ────────────────────────────────────────────────
+
+function localDateOf(iso: string): string {
+  return phtDateOf(iso);
+}
+
+function fmtDayMonth(dateStr: string): string {
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+// True when a session's clock-out falls on a different calendar date than
+// its clock-in (an overnight / day-crossing shift).
+function crossesDay(clockedInAt: string, clockedOutAt: string | null): boolean {
+  return !!clockedOutAt && localDateOf(clockedInAt) !== localDateOf(clockedOutAt);
+}
+
+// Only a day's LAST (latest clock-in) session can plausibly cross into the
+// next calendar day — an earlier session in a multi-shift day always ends
+// same-day. Returns -1 if no session has a clock-in time yet.
+function lastSessionIndex(sessions: { inTime: string }[]): number {
+  let idx = -1;
+  for (let i = 0; i < sessions.length; i++) {
+    if (!sessions[i].inTime) continue;
+    if (idx === -1 || sessions[i].inTime > sessions[idx].inTime) idx = i;
+  }
+  return idx;
 }
 
 // ── Avatar / today helpers ─────────────────────────────────────────────────────
@@ -114,12 +159,9 @@ function isSameLocalDay(iso: string, ref: Date): boolean {
 
 // ── Date helpers ───────────────────────────────────────────────────────────────
 
+// Local-midnight Date for the Monday of the PHT week `offset` weeks from now.
 function getMondayDate(offset = 0): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  const dow = d.getDay();
-  d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow) + offset * 7);
-  return d;
+  return new Date(addDaysYmd(phtWeekStartOf(new Date()), offset * 7) + 'T00:00:00');
 }
 
 function toLocalISO(d: Date): string {
@@ -127,6 +169,18 @@ function toLocalISO(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${dd}`;
+}
+
+function addDays(dateStr: string, n: number): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return toLocalISO(d);
+}
+
+// Combines a "YYYY-MM-DD" date with an "HH:mm" <input type="time"> value,
+// both in PHT, into the instant they denote.
+function combineDateTime(dateStr: string, timeStr: string): Date {
+  return new Date(`${dateStr}T${timeStr}:00+08:00`);
 }
 
 function fmtDate(d: Date): string {
@@ -169,29 +223,38 @@ function TimesheetDetailPanel({
   const [entries, setEntries] = useState<TimesheetEntry[]>([]);
   const [reloadKey, setReloadKey] = useState(0);
   const [adminBusy, setAdminBusy] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editIn,    setEditIn]    = useState('');
-  const [editOut,   setEditOut]   = useState('');
-  const [dayDraft,  setDayDraft]  = useState<Record<string, string | null>>(
-    () => Object.fromEntries(detailDays.map(d => [d.key, d.status])),
-  );
-  // Baseline statuses captured at mount so we can detect admin edits and gate
-  // the Save button on a mandatory note. The panel remounts (keyed) after each
-  // save, which re-baselines automatically.
-  const [initialStatuses] = useState<Record<string, string | null>>(
-    () => Object.fromEntries(detailDays.map(d => [d.key, d.status])),
-  );
+
+  // Per-day edit modal: which day (if any) is currently open for editing, and
+  // its staged status/session drafts. Nothing is persisted until that
+  // modal's own Save button is clicked — each day saves independently via
+  // the atomic PATCH /api/admin/attendance/day.
+  const [editingDay, setEditingDay] = useState<DetailDay | null>(null);
+  const [draftStatus, setDraftStatus] = useState('');
+  // Clock-in is always on the day being edited, so it only needs a time.
+  // Clock-out is usually the same day too, but an overnight shift clocks out
+  // on the following calendar day — outNextDay carries that as an explicit
+  // boolean instead of asking admins to pick a clock-out date.
+  const [draftSessions, setDraftSessions] = useState<{ id?: number; inTime: string; outTime: string; outNextDay: boolean }[]>([]);
+  const [dayModalError, setDayModalError] = useState('');
+  const dayModalBodyRef = useRef<HTMLDivElement>(null);
+
+  // Week notes: inline edit (no modal) — a single free-text field.
+  const [notesEditing, setNotesEditing] = useState(false);
   const [notesDraft, setNotesDraft] = useState(notes ?? '');
-  // Which day's status editor is open (per-day accordion — one at a time).
-  const [openDayKey, setOpenDayKey] = useState<string | null>(null);
-  // Pending destructive action awaiting confirmation in the styled dialog.
+  const [notesBusy, setNotesBusy] = useState(false);
+  const [notesError, setNotesError] = useState('');
+
+  // Pending destructive action awaiting confirmation in the styled dialog:
+  // either force-closing an open session, or the "this will delete this
+  // day's time logs" warning shown when saving a workable→non-workable
+  // status transition on a day that still has sessions.
   const [pendingAction, setPendingAction] = useState<
-    { kind: 'delete'; id: number } | { kind: 'forceOut'; userId: number } | null
+    { kind: 'forceOut'; userId: number } | { kind: 'statusTransition' } | null
   >(null);
 
-  const statusChanged = detailDays.some(d => (dayDraft[d.key] ?? null) !== (initialStatuses[d.key] ?? null));
-  const notesChanged  = (notesDraft ?? '') !== (notes ?? '');
-  const dirty         = statusChanged || notesChanged;
+  useEffect(() => {
+    if (dayModalError) dayModalBodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [dayModalError]);
 
   useEffect(() => {
     let cancelled = false;
@@ -207,62 +270,145 @@ function TimesheetDetailPanel({
     return () => { cancelled = true; };
   }, [userId, weekStart, reloadKey]);
 
-  function toLocalInputValue(iso: string): string {
-    // <input type="datetime-local"> wants "YYYY-MM-DDTHH:mm" in *local* time.
-    const d = new Date(iso);
-    const y  = d.getFullYear();
-    const m  = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mi = String(d.getMinutes()).padStart(2, '0');
-    return `${y}-${m}-${dd}T${hh}:${mi}`;
+  function toLocalTimeValue(iso: string): string {
+    // <input type="time"> wants "HH:mm" — in PHT, matching combineDateTime.
+    return new Date(new Date(iso).getTime() + 8 * 3600 * 1000).toISOString().slice(11, 16);
   }
 
-  function startEditTimes(entry: TimesheetEntry) {
-    setEditingId(entry.id);
-    setEditIn(toLocalInputValue(entry.clockedInAt));
-    setEditOut(entry.clockedOutAt ? toLocalInputValue(entry.clockedOutAt) : '');
+  // Opens a single day's edit modal, seeding drafts from that day's current
+  // status and its own sessions only (a cross-midnight session belongs to
+  // the day it clocks in on — see the server route for why).
+  function openDayModal(day: DetailDay) {
+    const daySessions = entries.filter(e => e.date === day.date);
+    setDraftSessions(daySessions.map(s => ({
+      id:         s.id,
+      inTime:     toLocalTimeValue(s.clockedInAt),
+      outTime:    s.clockedOutAt ? toLocalTimeValue(s.clockedOutAt) : '',
+      outNextDay: crossesDay(s.clockedInAt, s.clockedOutAt),
+    })));
+    setDraftStatus(day.status ?? '');
+    setDayModalError('');
+    setEditingDay(day);
   }
 
-  async function saveTimes(id: number) {
-    if (!editIn) { alert('Clock-in time is required'); return; }
+  function closeDayModal() {
+    setEditingDay(null);
+    setDayModalError('');
+  }
+
+  function addDraftSession() {
+    setDraftSessions(prev => [...prev, { inTime: '', outTime: '', outNextDay: false }]);
+  }
+
+  function removeDraftSession(idx: number) {
+    setDraftSessions(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  function updateDraftSession(idx: number, field: 'inTime' | 'outTime', value: string) {
+    setDraftSessions(prev => prev.map((d, i) => (i === idx ? { ...d, [field]: value } : d)));
+  }
+
+  function setDraftSessionNextDay(idx: number, value: boolean) {
+    setDraftSessions(prev => prev.map((d, i) => (i === idx ? { ...d, outNextDay: value } : d)));
+  }
+
+  // Validates only this day's staged sessions: required clock-in, clock-out
+  // after clock-in, and no two sessions overlapping each other. Cross-day
+  // overlap and the Absent/Leave-day check are re-verified server-side.
+  function validateDraftSessions(): string | null {
+    if (!editingDay) return null;
+    const day = editingDay.date;
+    // Only the last (latest clock-in) session's outNextDay is honored — an
+    // earlier session can't plausibly cross into the next day.
+    const lastIdx = lastSessionIndex(draftSessions);
+    for (const d of draftSessions) {
+      if (!d.inTime) return 'Clock-in time is required for every session.';
+    }
+    for (let i = 0; i < draftSessions.length; i++) {
+      const d = draftSessions[i];
+      if (!d.outTime) continue;
+      const nextDay = i === lastIdx && d.outNextDay;
+      const inMs  = combineDateTime(day, d.inTime).getTime();
+      const outMs = combineDateTime(nextDay ? addDays(day, 1) : day, d.outTime).getTime();
+      if (outMs <= inMs) return 'Clock-out must be after clock-in.';
+    }
+    for (let i = 0; i < draftSessions.length; i++) {
+      for (let j = i + 1; j < draftSessions.length; j++) {
+        const a = draftSessions[i], b = draftSessions[j];
+        const aNextDay = i === lastIdx && a.outNextDay;
+        const bNextDay = j === lastIdx && b.outNextDay;
+        const aIn  = combineDateTime(day, a.inTime).getTime();
+        const bIn  = combineDateTime(day, b.inTime).getTime();
+        const aOut = a.outTime ? combineDateTime(aNextDay ? addDays(day, 1) : day, a.outTime).getTime() : Infinity;
+        const bOut = b.outTime ? combineDateTime(bNextDay ? addDays(day, 1) : day, b.outTime).getTime() : Infinity;
+        if (aIn < bOut && bIn < aOut) return 'Two sessions on this day overlap in time.';
+      }
+    }
+    return null;
+  }
+
+  // Commits the currently-open day's edit: one atomic PATCH carrying both
+  // the status and the day's full session list, so the two can never end up
+  // inconsistent (the bug this redesign closes).
+  async function performDaySave() {
+    if (!editingDay) return;
+    setDayModalError('');
     setAdminBusy(true);
     try {
-      const res = await fetch('/api/admin/timesheets', {
+      const workable = draftStatus === 'present' || draftStatus === 'wfh';
+      // Only the last (latest clock-in) session's outNextDay is honored — an
+      // earlier session can't plausibly cross into the next day.
+      const lastIdx = lastSessionIndex(draftSessions);
+      const sessionsPayload = workable
+        ? draftSessions
+            .map((d, i) => ({ d, i }))
+            .filter(({ d }) => d.inTime)
+            .map(({ d, i }) => ({
+              id:           d.id,
+              clockedInAt:  combineDateTime(editingDay.date, d.inTime).toISOString(),
+              clockedOutAt: d.outTime
+                ? combineDateTime(i === lastIdx && d.outNextDay ? addDays(editingDay.date, 1) : editingDay.date, d.outTime).toISOString()
+                : null,
+            }))
+        : [];
+      const res = await fetch('/api/admin/attendance/day', {
         method:  'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
-          id,
-          clockedInAt:  new Date(editIn).toISOString(),
-          clockedOutAt: editOut ? new Date(editOut).toISOString() : null,
+          userId, weekStart, date: editingDay.date, status: draftStatus, sessions: sessionsPayload,
         }),
       });
       const data = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Update failed');
-      setEditingId(null);
-      setReloadKey(k => k + 1);
+      if (!res.ok) throw new Error(data.error ?? 'Save failed');
+      setPendingAction(null);
+      setEditingDay(null);
       onChanged();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Update failed');
+      setPendingAction(null);
+      setDayModalError(err instanceof Error ? err.message : 'Save failed');
     } finally {
       setAdminBusy(false);
     }
   }
 
-  async function performDelete(id: number) {
-    setAdminBusy(true);
-    try {
-      const res = await fetch(`/api/admin/timesheets?id=${id}`, { method: 'DELETE' });
-      const data = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Delete failed');
-      setPendingAction(null);
-      setReloadKey(k => k + 1);
-      onChanged();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Delete failed');
-    } finally {
-      setAdminBusy(false);
+  // Validates, then either saves directly or — when switching a day that
+  // currently has logs from a workable status to a non-workable one — routes
+  // through the confirmation dialog first, since that save deletes them.
+  function handleDaySaveClick() {
+    if (!editingDay) return;
+    setDayModalError('');
+    if (!draftStatus) { setDayModalError('Select a status for this day.'); return; }
+    const workable = draftStatus === 'present' || draftStatus === 'wfh';
+    if (workable) {
+      const err = validateDraftSessions();
+      if (err) { setDayModalError(err); return; }
     }
+    const hadSessions = entries.some(e => e.date === editingDay.date);
+    if (!workable && hadSessions) {
+      setPendingAction({ kind: 'statusTransition' });
+      return;
+    }
+    void performDaySave();
   }
 
   async function performForceClockOut(userIdToClose: number) {
@@ -279,7 +425,7 @@ function TimesheetDetailPanel({
       setReloadKey(k => k + 1);
       onChanged();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Force clock-out failed');
+      setDayModalError(err instanceof Error ? err.message : 'Force clock-out failed');
     } finally {
       setAdminBusy(false);
     }
@@ -287,35 +433,38 @@ function TimesheetDetailPanel({
 
   function runPendingAction() {
     if (!pendingAction) return;
-    if (pendingAction.kind === 'delete') void performDelete(pendingAction.id);
-    else void performForceClockOut(pendingAction.userId);
+    if (pendingAction.kind === 'forceOut') void performForceClockOut(pendingAction.userId);
+    else void performDaySave();
   }
 
-  async function saveAttendance() {
-    setAdminBusy(true);
+  function openNotesEdit() {
+    setNotesDraft(notes ?? '');
+    setNotesError('');
+    setNotesEditing(true);
+  }
+
+  function cancelNotesEdit() {
+    setNotesEditing(false);
+    setNotesError('');
+  }
+
+  async function saveNotes() {
+    setNotesBusy(true);
+    setNotesError('');
     try {
       const res = await fetch('/api/admin/attendance', {
         method:  'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          userId, weekStart,
-          monday:    dayDraft.monday    ?? '',
-          tuesday:   dayDraft.tuesday   ?? '',
-          wednesday: dayDraft.wednesday ?? '',
-          thursday:  dayDraft.thursday  ?? '',
-          friday:    dayDraft.friday    ?? '',
-          saturday:  dayDraft.saturday  ?? '',
-          sunday:    dayDraft.sunday    ?? '',
-          notes:     notesDraft,
-        }),
+        body:    JSON.stringify({ userId, weekStart, notes: notesDraft }),
       });
       const data = await res.json() as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Save failed');
+      if (!res.ok) throw new Error(data.error ?? 'Failed to save notes');
+      setNotesEditing(false);
       onChanged();
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Save failed');
+      setNotesError(err instanceof Error ? err.message : 'Failed to save notes');
     } finally {
-      setAdminBusy(false);
+      setNotesBusy(false);
     }
   }
 
@@ -353,308 +502,367 @@ function TimesheetDetailPanel({
     <tr>
       <td colSpan={10} className="bg-(--rs-neutral-grey-50) border-b border-(--rs-neutral-grey-100)">
         <div className="px-4 py-3">
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_2fr]">
-            <div className="space-y-3">
-              <div>
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-semibold text-(--rs-neutral-grey-600) uppercase tracking-wider">Attendance status</p>
-                  <div className="flex items-center gap-1.5">
-                    {attendanceEditedAt && attendanceEditedByName && (
-                      <span
-                        className="inline-flex items-center gap-1 text-[10px] text-(--rs-neutral-grey-500)"
-                        title={auditTooltip(attendanceEditedByName, attendanceEditedAt)}
-                      >
-                        <History className="w-2.5 h-2.5" /> Edited
-                      </span>
-                    )}
-                    {isAdmin && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-(--rs-primary-50) px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-(--rs-primary-700)">
-                        <ShieldCheck className="w-2.5 h-2.5" /> Admin edit
-                      </span>
-                    )}
-                  </div>
-                </div>
-                {isAdmin && (
-                  <p className="mt-1 text-[11px] text-(--rs-neutral-grey-400)">Click a day to change its status.</p>
-                )}
-                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-2">
-                  {detailDays.map(day => {
-                    const draftVal = dayDraft[day.key] ?? '';
-                    const dayLabel = `${day.label} ${new Date(day.date + 'T00:00:00').getDate()}`;
-                    const changed  = (dayDraft[day.key] ?? null) !== (initialStatuses[day.key] ?? null);
-                    const isOpen   = isAdmin && openDayKey === day.key;
-
-                    // Admin, day open → inline dropdown editor.
-                    if (isOpen) {
-                      return (
-                        <div key={day.key} className="rounded border border-(--rs-primary-300) bg-(--rs-primary-50)/40 px-2.5 py-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold uppercase tracking-wide text-(--rs-primary-700)">{dayLabel}</span>
-                            <button
-                              type="button"
-                              onClick={() => setOpenDayKey(null)}
-                              aria-label={`Done editing ${dayLabel}`}
-                              className="rounded p-0.5 text-(--rs-primary-600) hover:bg-(--rs-primary-100)"
-                            >
-                              <Check className="w-3 h-3" />
-                            </button>
-                          </div>
-                          <select
-                            autoFocus
-                            value={draftVal ?? ''}
-                            onChange={e => setDayDraft(prev => ({ ...prev, [day.key]: e.target.value || null }))}
-                            disabled={adminBusy}
-                            className={`mt-1 w-full rounded border text-xs font-medium px-1.5 py-1 outline-none focus:ring-2 focus:ring-(--rs-primary-100) ${statusColor(draftVal)}`}
-                          >
-                            <option value="">—</option>
-                            {STATUS_OPTS.map(opt => (
-                              <option key={opt.value} value={opt.value}>{opt.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                      );
-                    }
-
-                    // Admin, day collapsed → clickable chip that opens the editor.
-                    if (isAdmin) {
-                      return (
-                        <button
-                          key={day.key}
-                          type="button"
-                          onClick={() => setOpenDayKey(day.key)}
-                          disabled={adminBusy}
-                          aria-label={`Edit ${dayLabel} attendance status`}
-                          className="w-full rounded border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-left transition-colors hover:border-(--rs-primary-300) cursor-pointer focus:outline-none focus:ring-2 focus:ring-(--rs-primary-100) disabled:opacity-60"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold uppercase tracking-wide text-(--rs-neutral-grey-400)">
-                              {dayLabel}
-                              {changed && <span className="ml-1 text-(--rs-accent-600)" title="Unsaved change">●</span>}
-                            </span>
-                            <Pencil className="w-3 h-3 text-(--rs-neutral-grey-300)" />
-                          </div>
-                          <span className={`mt-1 inline-block rounded border px-2 py-0.5 text-xs font-medium ${statusColor(draftVal || null)}`}>
-                            {draftVal ? statusLabel(draftVal) : '—'}
-                          </span>
-                        </button>
-                      );
-                    }
-
-                    // Non-admin → read-only chip.
-                    return (
-                      <div key={day.key} className="rounded border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2">
-                        <div className="text-[10px] font-bold uppercase tracking-wide text-(--rs-neutral-grey-400)">
-                          {dayLabel}
-                        </div>
-                        <div className={`mt-1 inline-block rounded border px-2 py-0.5 text-xs font-medium ${statusColor(day.status)}`}>
-                          {detailDayStatusLabel(day)}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <p className="text-xs font-semibold text-(--rs-neutral-grey-600) uppercase tracking-wider">Notes</p>
-                {isAdmin ? (
-                  <textarea
-                    value={notesDraft}
-                    onChange={e => setNotesDraft(e.target.value)}
-                    disabled={adminBusy}
-                    rows={3}
-                    placeholder="Reason for adjustment, leave context, etc."
-                    className="mt-2 w-full rounded border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-xs text-(--rs-neutral-grey-700) outline-none focus:border-(--rs-primary-300) focus:ring-2 focus:ring-(--rs-primary-100)"
-                  />
-                ) : (
-                  <div className="mt-2 rounded border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-xs text-(--rs-neutral-grey-600)">
-                    {notes?.trim() ? (
-                      <p className="whitespace-pre-line">{notes}</p>
-                    ) : (
-                      <p className="italic text-(--rs-neutral-grey-400)">No attendance notes recorded for this week.</p>
-                    )}
-                  </div>
-                )}
-                {isAdmin && (
-                  <div className="mt-2 space-y-1.5">
-                    <div className="flex justify-end">
-                      <Button
-                        size="sm"
-                        onClick={saveAttendance}
-                        disabled={adminBusy || !dirty}
-                        className="gap-1.5"
-                      >
-                        {adminBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                        Save attendance
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-1.5">
+              <Clock className="w-3 h-3 text-(--rs-neutral-grey-400)" />
+              <span className="text-xs font-semibold text-(--rs-neutral-grey-600) uppercase tracking-wider">Daily attendance</span>
             </div>
+            <div className="flex items-center gap-1.5">
+              {attendanceEditedAt && attendanceEditedByName && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] text-(--rs-neutral-grey-500)"
+                  title={auditTooltip(attendanceEditedByName, attendanceEditedAt)}
+                >
+                  <History className="w-2.5 h-2.5" /> Edited
+                </span>
+              )}
+              {isAdmin && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-(--rs-primary-50) px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-(--rs-primary-700)">
+                  <ShieldCheck className="w-2.5 h-2.5" /> Admin edit
+                </span>
+              )}
+            </div>
+          </div>
 
-            <div>
-              <div className="flex items-center gap-1.5 mb-2">
-                <Clock className="w-3 h-3 text-(--rs-neutral-grey-400)" />
-                <span className="text-xs font-semibold text-(--rs-neutral-grey-600) uppercase tracking-wider">Clock-in / Clock-out log</span>
-              </div>
-              {entries.length === 0 ? (
-                <p className="text-xs text-(--rs-neutral-grey-400) italic">No clock-in sessions recorded this week.</p>
-              ) : (
-                <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-7">
-                  {detailDays.map(day => {
-                    const daySessions = byDate[day.date] ?? [];
-                    const daySessionSeconds = daySessions.reduce((sum, s) => sum + (s.durationSeconds ?? 0), 0);
-                    return (
-                      <div key={day.key} className="space-y-1">
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-(--rs-neutral-grey-400)">
-                          {day.label} {new Date(day.date + 'T00:00:00').getDate()}
-                        </p>
+          <div className="grid gap-2 md:grid-cols-4 xl:grid-cols-7">
+            {detailDays.map((day, idx) => {
+              const daySessions = byDate[day.date] ?? [];
+              const daySessionSeconds = daySessions.reduce((sum, s) => sum + (s.durationSeconds ?? 0), 0);
+              const workable = isWorkableStatus(day.status);
+              // A session from the previous day that lands (clocks out) on
+              // this date — shown even when this day has no sessions of its
+              // own, so an overnight shift never looks like a blank day.
+              const prevDay = idx > 0 ? detailDays[idx - 1] : null;
+              const incoming = prevDay
+                ? (byDate[prevDay.date] ?? []).find(s => s.clockedOutAt && localDateOf(s.clockedOutAt) === day.date)
+                : undefined;
+              return (
+                <div key={day.key} className="rounded border border-(--rs-neutral-grey-200) bg-white p-2 space-y-1.5">
+                  <div className="flex items-start justify-between gap-1">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-(--rs-neutral-grey-400)">
+                      {day.label} {new Date(day.date + 'T00:00:00').getDate()}
+                    </p>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => openDayModal(day)}
+                        title={`Edit ${day.label}`}
+                        aria-label={`Edit ${day.label}`}
+                        className="shrink-0 rounded p-0.5 text-(--rs-neutral-grey-300) hover:bg-(--rs-primary-50) hover:text-(--rs-primary-700) transition-colors"
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  {incoming && (
+                    <div className="text-[10px] text-(--rs-primary-600) font-medium">
+                      ↳ from {prevDay!.label}, out {fmtTime(incoming.clockedOutAt!)}
+                    </div>
+                  )}
+
+                  {workable ? (
+                    daySessions.length > 0 ? (
+                      <div className="space-y-1.5">
                         {daySessions.length > 1 && (
                           <p className="text-[9px] font-medium text-(--rs-primary-600)">
                             {daySessions.length} sessions · {fmtSeconds(daySessionSeconds)}
                           </p>
                         )}
-                        {daySessions.length === 0 ? (
-                          <p className="text-xs text-(--rs-neutral-grey-300)">—</p>
-                        ) : (
-                          daySessions.map(s => {
-                            const isEditing = editingId === s.id;
-                            return (
-                              <div key={s.id} className="bg-white border border-(--rs-neutral-grey-200) rounded px-2 py-1.5 space-y-0.5">
-                                {isEditing ? (
-                                  <div className="space-y-1.5">
-                                    <label className="block text-[10px] text-(--rs-neutral-grey-500) font-semibold">
-                                      Clock-in
-                                      <input
-                                        type="datetime-local"
-                                        value={editIn}
-                                        onChange={e => setEditIn(e.target.value)}
-                                        className="mt-0.5 block w-full rounded border border-(--rs-neutral-grey-200) px-1.5 py-0.5 text-[11px]"
-                                      />
-                                    </label>
-                                    <label className="block text-[10px] text-(--rs-neutral-grey-500) font-semibold">
-                                      Clock-out
-                                      <input
-                                        type="datetime-local"
-                                        value={editOut}
-                                        onChange={e => setEditOut(e.target.value)}
-                                        className="mt-0.5 block w-full rounded border border-(--rs-neutral-grey-200) px-1.5 py-0.5 text-[11px]"
-                                      />
-                                    </label>
-                                    <div className="flex gap-1 pt-0.5">
-                                      <button
-                                        type="button"
-                                        onClick={() => saveTimes(s.id)}
-                                        disabled={adminBusy}
-                                        className="flex-1 inline-flex items-center justify-center gap-1 rounded bg-(--rs-primary-600) px-2 py-1 text-[10px] font-semibold text-white hover:bg-(--rs-primary-700) disabled:opacity-50"
-                                      >
-                                        {adminBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
-                                        Save
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => setEditingId(null)}
-                                        disabled={adminBusy}
-                                        className="rounded border border-(--rs-neutral-grey-200) px-2 py-1 text-[10px] font-semibold text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-100) disabled:opacity-50"
-                                      >
-                                        Cancel
-                                      </button>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <>
-                                    <div className="flex items-center gap-1 text-xs text-green-700 font-medium">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
-                                      In: {fmtTime(s.clockedInAt)}
-                                    </div>
-                                    {s.clockedOutAt ? (
-                                      <div className="flex items-center gap-1 text-xs text-red-600 font-medium">
-                                        <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
-                                        Out: {fmtTime(s.clockedOutAt)}
-                                      </div>
-                                    ) : (
-                                      <div className="text-xs text-orange-500 font-medium">Still clocked in</div>
-                                    )}
-                                    {s.durationSeconds != null && (
-                                      <div className="text-[10px] text-(--rs-neutral-grey-400)">{fmtSeconds(s.durationSeconds)}</div>
-                                    )}
-                                    {s.isOvertime && (
-                                      <div className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
-                                        OT{s.overtimeSeconds ? ` +${fmtSeconds(s.overtimeSeconds)}` : ''}
-                                      </div>
-                                    )}
-                                    {s.editedAt && s.editedByName && (
-                                      <div
-                                        className="flex items-center gap-1 text-[9px] text-(--rs-neutral-grey-400)"
-                                        title={auditTooltip(s.editedByName, s.editedAt)}
-                                      >
-                                        <History className="w-2.5 h-2.5 shrink-0" /> Edited
-                                      </div>
-                                    )}
-                                    {isAdmin && (
-                                      <div className="flex items-center gap-1 pt-1 border-t border-(--rs-neutral-grey-100) mt-1">
-                                        <button
-                                          type="button"
-                                          onClick={() => startEditTimes(s)}
-                                          disabled={adminBusy}
-                                          title="Edit clock-in / clock-out"
-                                          className="rounded p-1 text-(--rs-neutral-grey-500) hover:bg-(--rs-primary-50) hover:text-(--rs-primary-700) transition-colors"
-                                        >
-                                          <Pencil className="w-3 h-3" />
-                                        </button>
-                                        {!s.clockedOutAt && (
-                                          <button
-                                            type="button"
-                                            onClick={() => setPendingAction({ kind: 'forceOut', userId })}
-                                            disabled={adminBusy}
-                                            title="Force clock-out now"
-                                            aria-label="Force clock-out now"
-                                            className="rounded p-1 text-orange-500 hover:bg-orange-50 hover:text-orange-700 transition-colors"
-                                          >
-                                            <LogOut className="w-3 h-3" />
-                                          </button>
-                                        )}
-                                        <button
-                                          type="button"
-                                          onClick={() => setPendingAction({ kind: 'delete', id: s.id })}
-                                          disabled={adminBusy}
-                                          title="Delete entry"
-                                          aria-label="Delete clock-in session"
-                                          className="ml-auto rounded p-1 text-(--rs-neutral-grey-400) hover:bg-red-50 hover:text-red-600 transition-colors"
-                                        >
-                                          <Trash2 className="w-3 h-3" />
-                                        </button>
-                                      </div>
-                                    )}
-                                  </>
-                                )}
+                        {daySessions.map(s => {
+                          const crossing = crossesDay(s.clockedInAt, s.clockedOutAt);
+                          return (
+                            <div key={s.id} className="space-y-0.5 border-t border-(--rs-neutral-grey-100) first:border-t-0 first:pt-0 pt-1.5">
+                              <div className="flex items-center gap-1 text-xs text-green-700 font-medium">
+                                <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" />
+                                In: {fmtTime(s.clockedInAt)}
                               </div>
-                            );
-                          })
-                        )}
+                              {s.clockedOutAt ? (
+                                <div className="flex items-center gap-1 text-xs text-red-600 font-medium">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
+                                  Out: {fmtTime(s.clockedOutAt)}
+                                  {crossing && (
+                                    <span className="ml-0.5 rounded bg-amber-100 px-1 text-[9px] font-bold text-amber-700" title={`Clocks out ${fmtDayMonth(localDateOf(s.clockedOutAt))}`}>
+                                      +1d
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="text-xs text-orange-500 font-medium">Still clocked in</div>
+                              )}
+                              {s.durationSeconds != null && (
+                                <div className="text-[10px] text-(--rs-neutral-grey-400)">{fmtSeconds(s.durationSeconds)}</div>
+                              )}
+                              {s.isOvertime && (
+                                <div className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">
+                                  OT{s.overtimeSeconds ? ` +${fmtSeconds(s.overtimeSeconds)}` : ''}
+                                </div>
+                              )}
+                              {s.editedAt && s.editedByName && (
+                                <div
+                                  className="flex items-center gap-1 text-[9px] text-(--rs-neutral-grey-400)"
+                                  title={auditTooltip(s.editedByName, s.editedAt)}
+                                >
+                                  <History className="w-2.5 h-2.5 shrink-0" /> Edited
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
+                    ) : !incoming ? (
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1 text-xs text-(--rs-neutral-grey-400) font-medium">
+                          <span className="w-1.5 h-1.5 rounded-full bg-(--rs-neutral-grey-300) shrink-0" />
+                          In: -
+                        </div>
+                        <div className="flex items-center gap-1 text-xs text-(--rs-neutral-grey-400) font-medium">
+                          <span className="w-1.5 h-1.5 rounded-full bg-(--rs-neutral-grey-300) shrink-0" />
+                          Out: -
+                        </div>
+                      </div>
+                    ) : null
+                  ) : (
+                    <span className={`inline-block rounded border px-2 py-0.5 text-xs font-medium ${statusColor(day.status)}`}>
+                      {detailDayStatusLabel(day)}
+                    </span>
+                  )}
                 </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-3 rounded border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-xs text-(--rs-neutral-grey-600)">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-(--rs-neutral-grey-400)">Week notes</p>
+              {isAdmin && !notesEditing && (
+                <button
+                  type="button"
+                  onClick={openNotesEdit}
+                  title="Edit week notes"
+                  aria-label="Edit week notes"
+                  className="shrink-0 rounded p-0.5 text-(--rs-neutral-grey-300) hover:bg-(--rs-primary-50) hover:text-(--rs-primary-700) transition-colors"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
               )}
             </div>
+            {notesEditing ? (
+              <div className="space-y-1.5">
+                {notesError && <p className="text-red-600 text-[11px]">{notesError}</p>}
+                <textarea
+                  value={notesDraft}
+                  onChange={e => setNotesDraft(e.target.value)}
+                  disabled={notesBusy}
+                  rows={3}
+                  autoFocus
+                  placeholder="Reason for adjustment, leave context, etc."
+                  className="w-full rounded border border-(--rs-neutral-grey-200) bg-white px-2 py-1.5 text-xs text-(--rs-neutral-grey-700) outline-none focus:border-(--rs-primary-300) focus:ring-2 focus:ring-(--rs-primary-100)"
+                />
+                <div className="flex items-center justify-end gap-1.5">
+                  <Button variant="outline" size="sm" onClick={cancelNotesEdit} disabled={notesBusy}>Cancel</Button>
+                  <Button
+                    size="sm"
+                    onClick={saveNotes}
+                    disabled={notesBusy || (notesDraft ?? '') === (notes ?? '')}
+                    className="gap-1"
+                  >
+                    {notesBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                    Save
+                  </Button>
+                </div>
+              </div>
+            ) : notes?.trim() ? (
+              <p className="whitespace-pre-line">{notes}</p>
+            ) : (
+              <p className="italic text-(--rs-neutral-grey-400)">No attendance notes recorded for this week.</p>
+            )}
           </div>
         </div>
       </td>
     </tr>
+
+    <Dialog open={editingDay !== null} onOpenChange={open => { if (!open && !adminBusy) closeDayModal(); }}>
+      <DialogContent showCloseButton={!adminBusy} className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            Edit {editingDay ? `${editingDay.label} ${fmtDayMonth(editingDay.date)}` : ''}
+          </DialogTitle>
+          <DialogDescription>
+            Set this day&apos;s status. Clock-in / clock-out sessions can only be added while it&apos;s tagged Present or WFH.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div ref={dayModalBodyRef} className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+          {dayModalError && (
+            <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+              {dayModalError}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-semibold text-(--rs-neutral-grey-600) uppercase tracking-wider mb-1">
+              Status
+            </label>
+            <select
+              value={draftStatus}
+              onChange={e => setDraftStatus(e.target.value)}
+              disabled={adminBusy}
+              className={`w-full rounded border text-xs font-medium px-2 py-1.5 outline-none focus:ring-2 focus:ring-(--rs-primary-100) ${draftStatus ? statusColor(draftStatus) : 'bg-white text-(--rs-neutral-grey-500) border-(--rs-neutral-grey-200)'}`}
+            >
+              <option value="" disabled>Select status…</option>
+              {STATUS_OPTS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {draftStatus === 'present' || draftStatus === 'wfh' ? (
+            <div>
+              <label className="block text-xs font-semibold text-(--rs-neutral-grey-600) uppercase tracking-wider mb-1">
+                Clock-in / clock-out sessions
+              </label>
+              <div className="space-y-2">
+                {(() => {
+                  // Only the day's last (latest clock-in) session can plausibly
+                  // cross into the next day — earlier sessions always end same-day.
+                  const lastIdx = lastSessionIndex(draftSessions);
+                  return draftSessions.map((d, idx) => {
+                  const original = d.id != null ? entries.find(e => e.id === d.id) : undefined;
+                  return (
+                    <div key={d.id ?? `new-${idx}`} className="rounded border border-(--rs-neutral-grey-200) px-2.5 py-2 space-y-1.5">
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <label className="block text-[10px] text-(--rs-neutral-grey-500) font-semibold">
+                          Clock-in
+                          <input
+                            type="time"
+                            value={d.inTime}
+                            onChange={e => updateDraftSession(idx, 'inTime', e.target.value)}
+                            disabled={adminBusy}
+                            className="mt-0.5 block w-full rounded border border-(--rs-neutral-grey-200) px-1.5 py-1 text-xs"
+                          />
+                        </label>
+                        <label className="block text-[10px] text-(--rs-neutral-grey-500) font-semibold">
+                          Clock-out
+                          <input
+                            type="time"
+                            value={d.outTime}
+                            onChange={e => updateDraftSession(idx, 'outTime', e.target.value)}
+                            disabled={adminBusy}
+                            className="mt-0.5 block w-full rounded border border-(--rs-neutral-grey-200) px-1.5 py-1 text-xs"
+                          />
+                        </label>
+                      </div>
+                      {idx === lastIdx && (
+                        <label className="flex items-center gap-1.5 text-[10px] text-(--rs-neutral-grey-500) font-medium cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={d.outNextDay}
+                            onChange={e => setDraftSessionNextDay(idx, e.target.checked)}
+                            disabled={adminBusy}
+                            className="w-3 h-3 rounded accent-(--rs-primary-500)"
+                          />
+                          Clocks out the next day
+                        </label>
+                      )}
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {original && !original.clockedOutAt && (
+                            <span className="text-[10px] text-orange-500 font-medium shrink-0">Still clocked in</span>
+                          )}
+                          {original?.isOvertime && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 shrink-0">
+                              OT{original.overtimeSeconds ? ` +${fmtSeconds(original.overtimeSeconds)}` : ''}
+                            </span>
+                          )}
+                          {original?.editedAt && original?.editedByName && (
+                            <span
+                              className="flex items-center gap-1 text-[9px] text-(--rs-neutral-grey-400) truncate"
+                              title={auditTooltip(original.editedByName, original.editedAt)}
+                            >
+                              <History className="w-2.5 h-2.5 shrink-0" /> Edited
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {original && !original.clockedOutAt && (
+                            <button
+                              type="button"
+                              onClick={() => setPendingAction({ kind: 'forceOut', userId })}
+                              disabled={adminBusy}
+                              title="Force clock-out now"
+                              aria-label="Force clock-out now"
+                              className="rounded p-1 text-orange-500 hover:bg-orange-50 hover:text-orange-700 transition-colors"
+                            >
+                              <LogOut className="w-3 h-3" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => removeDraftSession(idx)}
+                            disabled={adminBusy}
+                            title="Remove this session"
+                            aria-label="Remove this session"
+                            className="rounded p-1 text-(--rs-neutral-grey-400) hover:bg-red-50 hover:text-red-600 transition-colors"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                  });
+                })()}
+
+                <button
+                  type="button"
+                  onClick={addDraftSession}
+                  disabled={adminBusy}
+                  className="w-full inline-flex items-center justify-center gap-1 rounded border border-dashed border-(--rs-neutral-grey-300) px-2 py-1.5 text-xs font-semibold text-(--rs-neutral-grey-500) hover:border-(--rs-primary-300) hover:text-(--rs-primary-700) transition-colors"
+                >
+                  <Plus className="w-3 h-3" /> Add session
+                </button>
+              </div>
+            </div>
+          ) : draftStatus ? (
+            <p className="text-xs text-(--rs-neutral-grey-500) italic">
+              {draftStatus === 'absent' ? 'Absent' : 'Leave'} days can&apos;t have clock-in/out sessions.
+            </p>
+          ) : null}
+        </div>
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={closeDayModal}
+            disabled={adminBusy}
+          >
+            Close
+          </Button>
+          <Button
+            onClick={handleDaySaveClick}
+            disabled={adminBusy || !draftStatus}
+            className="gap-1.5"
+          >
+            {adminBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <ConfirmDialog
       open={pendingAction !== null}
       onOpenChange={open => { if (!open) setPendingAction(null); }}
       destructive
       loading={adminBusy}
-      title={pendingAction?.kind === 'delete' ? 'Delete clock-in session?' : 'Force clock-out now?'}
+      title={pendingAction?.kind === 'statusTransition' ? "Delete this day's time logs?" : 'Force clock-out now?'}
       description={
-        pendingAction?.kind === 'delete'
-          ? 'This permanently removes the session and its hours from this week. This cannot be undone.'
+        pendingAction?.kind === 'statusTransition'
+          ? `Changing this day to ${draftStatus === 'absent' ? 'Absent' : 'Leave'} will permanently delete its clock-in/out sessions. This cannot be undone.`
           : "This ends the user's currently open session at the current time."
       }
-      confirmLabel={pendingAction?.kind === 'delete' ? 'Delete session' : 'Force clock-out'}
+      confirmLabel={pendingAction?.kind === 'statusTransition' ? 'Delete logs & save' : 'Force clock-out'}
       onConfirm={runPendingAction}
     />
     </>
@@ -712,7 +920,28 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
       .catch(() => { if (!cancelled) setWeekError('Failed to load attendance data.'); })
       .finally(() => { if (!cancelled) setWeekLoading(false); });
     return () => { cancelled = true; };
-  }, [weekStart, weekRefreshKey]);
+  }, [weekStart]);
+
+  // Re-fetches this week's roster + records, then bumps weekRefreshKey to
+  // remount the saved row's detail panel. Awaiting the fetch first (instead
+  // of just bumping the key and letting the effect above race it) ensures
+  // the remounted panel seeds its local drafts from fresh data rather than
+  // whatever was still in teamRecords at the moment of the save.
+  async function refreshWeekThenRemount() {
+    try {
+      const res = await fetch(`/api/attendance?week=${weekStart}`);
+      const d = await res.json() as { users?: TeamUser[]; records?: AttendanceRecord[]; timesheetsByDay?: Record<string, number>; openSessions?: Record<string, string>; allowanceByUser?: Record<string, number>; error?: string };
+      if (!d.error) {
+        setTeamUsers(d.users ?? []);
+        setTeamRecords(d.records ?? []);
+        setTimesheetsByDay(d.timesheetsByDay ?? {});
+        setOpenSessions(d.openSessions ?? {});
+        setAllowanceByUser(d.allowanceByUser ?? {});
+      }
+    } finally {
+      setWeekRefreshKey(k => k + 1);
+    }
+  }
 
   // Live USD→PHP rate for the payroll timesheet export.
   useEffect(() => {
@@ -1113,7 +1342,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                               detailDays={detailDays}
                               notes={rec?.notes ?? null}
                               isAdmin={isAdmin}
-                              onChanged={() => setWeekRefreshKey(k => k + 1)}
+                              onChanged={() => { void refreshWeekThenRemount(); }}
                               attendanceEditedByName={rec?.editedByName ?? null}
                               attendanceEditedAt={rec?.editedAt ?? null}
                             />

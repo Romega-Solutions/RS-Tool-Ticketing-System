@@ -6,6 +6,7 @@ import { getPhotoResolver } from '@/lib/orgchart';
 import { decideClockInAllowed } from '@/lib/overtime-policy';
 import { weeklySecondsForUser, weeklyAllowanceForUser, enforceUserOpenSession } from '@/lib/overtime-server';
 import { route, requireSession, parseBody, badRequest } from '@/lib/api';
+import { dayOfWeekYmd, phtToday, phtWeekStartOf } from '@/lib/pht';
 
 export const runtime = 'nodejs';
 
@@ -22,23 +23,12 @@ const clockInSchema = z.object({
   notes: z.string().optional(),
 });
 
-function getWeekMonday(d: Date): string {
-  const copy = new Date(d);
-  copy.setHours(0, 0, 0, 0);
-  const dow = copy.getDay();
-  copy.setDate(copy.getDate() + (dow === 0 ? -6 : 1 - dow));
-  const y = copy.getFullYear();
-  const m = String(copy.getMonth() + 1).padStart(2, '0');
-  const dd = String(copy.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
 async function autoMarkPresent(userId: number) {
   const now = new Date();
-  const dow = now.getDay();
+  const dow = dayOfWeekYmd(phtToday(now));
   if (dow === 0 || dow === 6) return;
   const col = DAY_COLS[dow - 1];
-  const weekStart = getWeekMonday(now);
+  const weekStart = phtWeekStartOf(now);
 
   const admin = createAdminClient();
   const { data: existing } = await admin
@@ -65,14 +55,6 @@ async function autoMarkPresent(userId: number) {
     });
     if (error) console.error('[autoMarkPresent] insert error:', error.message);
   }
-}
-
-function localDateStr(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
 }
 
 export const POST = route(async (req: Request) => {
@@ -144,7 +126,7 @@ export const POST = route(async (req: Request) => {
 
   const insertWithNotes = await admin
     .from('timesheets')
-    .insert({ user_id: session.id, clocked_in_at: now, date: localDateStr(), notes })
+    .insert({ user_id: session.id, clocked_in_at: now, date: phtToday(), notes })
     .select('id')
     .single();
 
@@ -155,7 +137,7 @@ export const POST = route(async (req: Request) => {
   if (insertErr && notes) {
     const fallbackInsert = await admin
       .from('timesheets')
-      .insert({ user_id: session.id, clocked_in_at: now, date: localDateStr() })
+      .insert({ user_id: session.id, clocked_in_at: now, date: phtToday() })
       .select('id')
       .single();
     inserted = fallbackInsert.data;
