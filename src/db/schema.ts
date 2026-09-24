@@ -519,6 +519,19 @@ export const workItemComments = pgTable('work_item_comments', {
   index('work_item_comments_parent_idx').on(t.parentId),
 ]);
 
+// "Related links" on a task — a titled URL (docs, PRs, designs, …). Adding or
+// removing one is logged to work_item_activity as link_added / link_removed.
+export const workItemLinks = pgTable('work_item_links', {
+  id:         serial('id').primaryKey(),
+  workItemId: integer('work_item_id').notNull().references(() => workItems.id, { onDelete: 'cascade' }),
+  title:      text('title').notNull(),
+  url:        text('url').notNull(),
+  createdBy:  integer('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:  text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  index('work_item_links_work_item_idx').on(t.workItemId),
+]);
+
 export const projectComments = pgTable('project_comments', {
   id:         serial('id').primaryKey(),
   projectId:  integer('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
@@ -562,7 +575,7 @@ export const workItemActivity = pgTable('work_item_activity', {
   id:         serial('id').primaryKey(),
   workItemId: integer('work_item_id').notNull().references(() => workItems.id, { onDelete: 'cascade' }),
   actorId:    integer('actor_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  action:     text('action').notNull(), // created | edited | state_changed | assigned | unassigned | commented | archived
+  action:     text('action').notNull(), // created | edited | state_changed | assigned | unassigned | commented | archived | restored | link_added | link_removed
   fromValue:  text('from_value'),
   toValue:    text('to_value'),
   createdAt:  text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
