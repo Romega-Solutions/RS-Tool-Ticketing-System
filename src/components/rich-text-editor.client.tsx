@@ -50,6 +50,9 @@ export interface RichTextEditorProps {
    *  entirely, tightens padding, and floats the emoji button inside the
    *  input instead of in a toolbar row. */
   hideToolbar?: boolean;
+  /** Chat-style send: Enter calls this, Shift+Enter inserts a newline. Enter
+   *  still picks a user while the @mention menu is open. */
+  onSubmit?: () => void;
 }
 
 const MIN_FONT_SIZE = 8;
@@ -227,6 +230,7 @@ export function RichTextEditor({
   mentionUsers = [],
   enableEmoji = false,
   hideToolbar = false,
+  onSubmit,
 }: RichTextEditorProps) {
   const initial = value ?? defaultValue ?? '';
   const [html, setHtml] = useState(initial);
@@ -243,6 +247,11 @@ export function RichTextEditor({
   const [menu, setMenu] = useState<MentionMenuState>(EMPTY_MENU);
   const menuRef = useRef<MentionMenuState>(EMPTY_MENU);
   const updateMenu = (next: MentionMenuState) => { menuRef.current = next; setMenu(next); };
+
+  // Read at keydown time by the once-created editor, so it always sees the
+  // caller's latest handler (and its current draft) without recreating the editor.
+  const onSubmitRef = useRef(onSubmit);
+  useEffect(() => { onSubmitRef.current = onSubmit; }, [onSubmit]);
 
   // Emoji picker.
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -326,6 +335,15 @@ export function RichTextEditor({
         class: hideToolbar
           ? `rs-richtext py-2 pl-3 text-sm text-(--rs-neutral-grey-800) ${enableEmoji ? 'pr-9' : 'pr-3'}`
           : 'rs-richtext px-4 py-3 text-sm text-(--rs-neutral-grey-800)',
+      },
+      // View props run before plugin props, so this sees Enter ahead of the
+      // mention suggestion plugin — hence the explicit open-menu check.
+      handleKeyDown: (_view, event) => {
+        if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return false;
+        if (!onSubmitRef.current || menuRef.current.open) return false;
+        event.preventDefault();
+        onSubmitRef.current();
+        return true;
       },
     },
     onUpdate: ({ editor }) => {

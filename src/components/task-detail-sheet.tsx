@@ -51,6 +51,7 @@ interface Comment {
 interface ActivityEntry {
   id: number; actor_name: string; action: string;
   from_value: string | null; to_value: string | null; created_at: string;
+  from_label?: string | null; to_label?: string | null;
 }
 interface ProjectMember {
   id: number; user_id: number; name: string; email: string; role: string;
@@ -117,6 +118,13 @@ export function TaskDetailSheet({
   // the Comments tab, scroll the comment into view, and flash a highlight.
   const [highlightCommentId, setHighlightCommentId] = useState<string | null>(null);
   const commentsListRef = useRef<HTMLDivElement>(null);
+  // Bumped after posting a top-level comment so the timeline follows it to the
+  // bottom, where it lands (the composer is pinned below the scroll area).
+  const [scrollToLatest, setScrollToLatest] = useState(0);
+  useEffect(() => {
+    if (scrollToLatest === 0) return;
+    commentsListRef.current?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [scrollToLatest]);
   const handledFocusRef = useRef<string | null>(null);
 
   // ── Resizable panel width ──────────────────────────────────────────────────
@@ -391,7 +399,8 @@ export function TaskDetailSheet({
   };
 
   const handlePostComment = async () => {
-    if (!item || isRichTextEmpty(newComment)) return;
+    // Enter-to-send can fire while a post is in flight; don't double-post.
+    if (!item || postingComment || isRichTextEmpty(newComment)) return;
     setPostingComment(true); setError('');
     try {
       // Send the editor HTML; the server parses @mention nodes (data-id) from it,
@@ -408,6 +417,7 @@ export function TaskDetailSheet({
       const created = (await res.json()) as Comment;
       setComments(prev => [...prev, created]);
       setNewComment('');
+      setScrollToLatest(n => n + 1);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed');
     } finally {
@@ -417,7 +427,7 @@ export function TaskDetailSheet({
 
   const handlePostReply = async (rootId: number) => {
     const draft = replyDrafts[rootId] ?? '';
-    if (!item || isRichTextEmpty(draft)) return;
+    if (!item || postingReplyTo != null || isRichTextEmpty(draft)) return;
     setPostingReplyTo(rootId); setError('');
     try {
       const res = await fetch(`/api/tickets/work-items/${item.id}/comments`, {
@@ -1082,6 +1092,7 @@ export function TaskDetailSheet({
                 enableMentions
                 enableEmoji
                 hideToolbar
+                onSubmit={handlePostComment}
                 mentionUsers={members.map(m => ({ id: m.user_id, name: m.name }))}
               />
             </div>
@@ -1296,6 +1307,7 @@ function ThreadPanel({
             enableMentions
             enableEmoji
             hideToolbar
+            onSubmit={onPost}
             mentionUsers={mentionUsers}
           />
         </div>
@@ -1351,15 +1363,47 @@ function ThreadMessage({
   );
 }
 
+// Edits are logged as `field:value` (see diffActivity in lib/tickets).
+function describeEdit(a: ActivityEntry): string {
+  const raw = a.to_value ?? a.from_value ?? '';
+  const sep = raw.indexOf(':');
+  const field = sep === -1 ? raw : raw.slice(0, sep);
+  const value = sep === -1 ? '' : raw.slice(sep + 1);
+  switch (field) {
+    case 'priority':
+      return `set priority to ${PRIORITIES.find(p => p.value === value)?.label ?? value}`;
+    case 'name':
+      return `renamed this task to "${value}"`;
+    case 'target_date':
+      return value ? `set the due date to ${fmtDay(value)}` : 'cleared the due date';
+    case 'description':
+      return 'edited the description';
+    case 'cycle':
+      return value ? `moved this to cycle ${a.to_label ?? value}` : 'removed this from its cycle';
+    case 'parent':
+      return value ? 'set the parent task' : 'removed the parent task';
+    default:
+      return raw ? `edited ${field}` : 'edited this task';
+  }
+}
+
+/** `YYYY-MM-DD` → "Sep 2, 2026", parsed as a calendar day (no timezone shift). */
+function fmtDay(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  if (!y || !m || !d) return ymd;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 function describeActivity(a: ActivityEntry, stateNameById: Map<string, string>, userNameById: Map<string, string>): string {
   const stateName = (id: string | null) => (id != null ? (stateNameById.get(id) ?? id) : '—');
-  const userName = (id: string | null) => (id != null ? (userNameById.get(id) ?? `user ${id}`) : 'someone');
+  const userName = (id: string | null, label?: string | null) =>
+    id != null ? (label ?? userNameById.get(id) ?? 'a former member') : 'someone';
   switch (a.action) {
     case 'created':       return `created this task`;
     case 'state_changed': return `moved from ${stateName(a.from_value)} to ${stateName(a.to_value)}`;
-    case 'edited':        return `edited ${a.to_value ?? a.from_value ?? 'field'}`;
-    case 'assigned':      return `assigned ${userName(a.to_value)}`;
-    case 'unassigned':    return `unassigned ${userName(a.from_value)}`;
+    case 'edited':        return describeEdit(a);
+    case 'assigned':      return `assigned ${userName(a.to_value, a.to_label)}`;
+    case 'unassigned':    return `unassigned ${userName(a.from_value, a.from_label)}`;
     case 'commented':     return `commented: "${(a.to_value ?? '').slice(0, 60)}${(a.to_value?.length ?? 0) > 60 ? '…' : ''}"`;
     case 'archived':      return `archived this task`;
     case 'restored':      return `restored this task`;

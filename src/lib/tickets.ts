@@ -839,6 +839,10 @@ export interface WorkItemActivityEntry {
   action: string;
   from_value: string | null;
   to_value: string | null;
+  /** Display names for id-valued from/to (assignee users, cycles), resolved
+   *  server-side so they read correctly even after the user leaves the project. */
+  from_label?: string | null;
+  to_label?: string | null;
   created_at: string;
 }
 
@@ -877,15 +881,51 @@ export async function getActivity(itemId: string): Promise<WorkItemActivityEntry
     .eq('work_item_id', Number(itemId))
     .order('created_at', { ascending: false });
   if (error) throw new PlaneApiError(500, `activity/${itemId}`);
-  return (data ?? []).map((r: Row) => ({
-    id: Number(r.id),
-    actor_id: Number(r.actor_id),
-    actor_name: String((r.users as Row | null)?.name ?? 'Unknown'),
-    action: String(r.action),
-    from_value: (r.from_value as string | null) ?? null,
-    to_value:   (r.to_value as string | null) ?? null,
-    created_at: String(r.created_at),
-  }));
+  const rows = data ?? [];
+
+  // Collect the ids hiding in from/to values: assignees are bare user ids,
+  // cycle edits are stored as `cycle:<id>`.
+  const userIds = new Set<number>();
+  const cycleIds = new Set<number>();
+  for (const r of rows as Row[]) {
+    for (const v of [r.from_value, r.to_value] as Array<string | null>) {
+      if (!v) continue;
+      if (r.action === 'assigned' || r.action === 'unassigned') {
+        if (/^\d+$/.test(v)) userIds.add(Number(v));
+      } else if (r.action === 'edited') {
+        const m = /^cycle:(\d+)$/.exec(v);
+        if (m) cycleIds.add(Number(m[1]));
+      }
+    }
+  }
+  const [users, cycles] = await Promise.all([
+    userIds.size ? sb.from('users').select('id, name').in('id', [...userIds]) : null,
+    cycleIds.size ? sb.from('cycles').select('id, name').in('id', [...cycleIds]) : null,
+  ]);
+  const userName = new Map((users?.data ?? []).map(u => [String(u.id), String(u.name)]));
+  const cycleName = new Map((cycles?.data ?? []).map(c => [`cycle:${c.id}`, String(c.name)]));
+  const label = (action: string, v: string | null): string | null => {
+    if (!v) return null;
+    if (action === 'assigned' || action === 'unassigned') return userName.get(v) ?? null;
+    return cycleName.get(v) ?? null;
+  };
+
+  return rows.map((r: Row) => {
+    const action = String(r.action);
+    const from_value = (r.from_value as string | null) ?? null;
+    const to_value   = (r.to_value as string | null) ?? null;
+    return {
+      id: Number(r.id),
+      actor_id: Number(r.actor_id),
+      actor_name: String((r.users as Row | null)?.name ?? 'Unknown'),
+      action,
+      from_value,
+      to_value,
+      from_label: label(action, from_value),
+      to_label: label(action, to_value),
+      created_at: String(r.created_at),
+    };
+  });
 }
 
 function firstNestedRow(value: unknown): Row | null {
