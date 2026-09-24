@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Loader2, Activity as ActivityIcon, FileText, ImagePlus, Save, Send, Trash2, X, MessageSquareReply, Maximize2, Minimize2, Eye, Lock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Activity as ActivityIcon, FileText, ImagePlus, Save, Send, Trash2, X, MessageSquareReply, Pencil, Maximize2, Minimize2, Eye, Lock } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { extractTaskDescriptionImageUrls } from '@/lib/task-description-images';
 import {
@@ -47,6 +47,8 @@ interface CycleRow {
 interface Comment {
   id: number; author_id: number; author_name: string; body: string;
   parent_id: number | null; created_at: string; updated_at: string;
+  edited_at: string | null; edited_by_name: string | null;
+  deleted_at: string | null; deleted_by_name: string | null;
 }
 interface ActivityEntry {
   id: number; actor_name: string; action: string;
@@ -76,6 +78,34 @@ const PRIORITY_DOT: Record<string, string> = {
 
 const THREAD_PANEL_WIDTH = 400;
 type ThreadPanelMode = 'outside' | 'split' | 'cover';
+
+/** Audit footprint timestamp: "Sep 20, 6:30pm". */
+function fmtFootprint(ts: string): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  const day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).replace(/\s?([AP])M$/, (_, p: string) => `${p.toLowerCase()}m`);
+  return `${day}, ${time}`;
+}
+
+// "Deleted by X on …" / "Edited by X on …" — the audit trail for a comment.
+function CommentFootprint({ comment, className = '' }: { comment: Comment; className?: string }) {
+  if (comment.deleted_at) {
+    return (
+      <p className={`text-xs italic text-(--rs-neutral-grey-500) ${className}`}>
+        Deleted by {comment.deleted_by_name ?? 'Unknown'} on {fmtFootprint(comment.deleted_at)}.
+      </p>
+    );
+  }
+  if (comment.edited_at) {
+    return (
+      <p className={`text-[11px] italic text-(--rs-neutral-grey-400) ${className}`}>
+        Edited by {comment.edited_by_name ?? 'Unknown'} on {fmtFootprint(comment.edited_at)}.
+      </p>
+    );
+  }
+  return null;
+}
 
 function fmt(ts: string): string {
   if (!ts) return '';
@@ -234,6 +264,7 @@ export function TaskDetailSheet({
   const openThread = openThreadId != null
     ? comments.find(c => c.id === openThreadId && c.parent_id == null) ?? null
     : null;
+  const liveCommentCount = comments.filter(c => !c.deleted_at).length;
   const timeline: TimelineEntry[] = [
     ...comments.filter(c => c.parent_id == null).map((comment): TimelineEntry => ({ kind: 'comment', id: `c${comment.id}`, ts: comment.created_at, comment })),
     ...activity
@@ -449,15 +480,44 @@ export function TaskDetailSheet({
     }
   };
 
+  // Deletes are soft: the comment stays in the timeline as a
+  // "Deleted by X on …" footprint, and its replies stay readable.
+  const refreshComments = async () => {
+    if (!item) return;
+    const res = await fetch(`/api/tickets/work-items/${item.id}/comments`);
+    if (res.ok) setComments((await res.json()) as Comment[]);
+  };
+
   const handleDeleteComment = async (commentId: number) => {
     if (!item) return;
+    if (!confirm('Delete this comment? The timeline will show that you deleted it.')) return;
+    setError('');
     const res = await fetch(`/api/tickets/work-items/${item.id}/comments/${commentId}`, {
       method: 'DELETE',
     });
-    // Deleting a thread root cascades to its replies server-side.
-    if (!res.ok) return;
-    setComments(prev => prev.filter(c => c.id !== commentId && c.parent_id !== commentId));
-    if (openThreadId === commentId) setOpenThreadId(null);
+    if (!res.ok) {
+      const d = (await res.json().catch(() => ({}))) as { error?: string };
+      setError(d.error ?? 'Failed to delete comment');
+      return;
+    }
+    await refreshComments();
+  };
+
+  const handleEditComment = async (commentId: number, html: string): Promise<boolean> => {
+    if (!item || isRichTextEmpty(html)) return false;
+    setError('');
+    const res = await fetch(`/api/tickets/work-items/${item.id}/comments/${commentId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: html }),
+    });
+    if (!res.ok) {
+      const d = (await res.json().catch(() => ({}))) as { error?: string };
+      setError(d.error ?? 'Failed to edit comment');
+      return false;
+    }
+    await refreshComments();
+    return true;
   };
 
   const handleArchive = async () => {
@@ -617,8 +677,9 @@ export function TaskDetailSheet({
       onDraftChange={html => setReplyDrafts(prev => ({ ...prev, [openThread.id]: html }))}
       posting={postingReplyTo === openThread.id}
       onPost={() => handlePostReply(openThread.id)}
-      canDelete={c => c.author_id === currentUserId || isAdmin}
+      canModify={c => !c.deleted_at && (c.author_id === currentUserId || isAdmin)}
       onDelete={c => handleDeleteComment(c.id)}
+      onEdit={(c, html) => handleEditComment(c.id, html)}
       highlightCommentId={highlightCommentId}
       mentionUsers={members.map(m => ({ id: m.user_id, name: m.name }))}
     />
@@ -687,9 +748,9 @@ export function TaskDetailSheet({
             >
               <Icon className="w-3.5 h-3.5" />
               {label}
-              {key === 'activity' && comments.length > 0 && (
+              {key === 'activity' && liveCommentCount > 0 && (
                 <span className="text-xs bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-600) px-1.5 py-0.5 rounded-full ml-1">
-                  {comments.length}
+                  {liveCommentCount}
                 </span>
               )}
             </button>
@@ -1054,10 +1115,12 @@ export function TaskDetailSheet({
                     <CommentBubble
                       comment={entry.comment}
                       isOwn={entry.comment.author_id === currentUserId}
-                      canDelete={entry.comment.author_id === currentUserId || isAdmin}
+                      canModify={!entry.comment.deleted_at && (entry.comment.author_id === currentUserId || isAdmin)}
                       highlighted={highlightCommentId === String(entry.comment.id) || openThreadId === entry.comment.id}
                       onDelete={() => handleDeleteComment(entry.comment.id)}
+                      onEdit={html => handleEditComment(entry.comment.id, html)}
                       onReply={() => setOpenThreadId(entry.comment.id)}
+                      mentionUsers={members.map(m => ({ id: m.user_id, name: m.name }))}
                     />
                     <ThreadSummary
                       replies={repliesByRoot.get(entry.comment.id) ?? []}
@@ -1127,58 +1190,147 @@ function Field({ label, children }: { label: React.ReactNode; children: React.Re
 }
 
 function CommentBubble({
-  comment, isOwn, canDelete, highlighted, onDelete, onReply,
+  comment, isOwn, canModify, highlighted, onDelete, onEdit, onReply, mentionUsers,
 }: {
   comment: Comment;
   isOwn: boolean;
-  canDelete: boolean;
+  canModify: boolean;
   highlighted: boolean;
   onDelete: () => void;
+  onEdit: (html: string) => Promise<boolean>;
   onReply: () => void;
+  mentionUsers: Array<{ id: number; name: string }>;
 }) {
+  const [editing, setEditing] = useState(false);
+
+  // Deleted: only the footprint remains, in the comment's original spot.
+  if (comment.deleted_at) {
+    return (
+      <div
+        data-comment-id={comment.id}
+        className={`flex px-1 py-1 ${isOwn ? 'justify-end' : 'pl-[34px]'} ${
+          highlighted ? 'rounded-md ring-2 ring-(--rs-accent-300)' : ''
+        }`}
+      >
+        <CommentFootprint comment={comment} />
+      </div>
+    );
+  }
+
   return (
     <div
       data-comment-id={comment.id}
       className={`group flex items-end gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}
     >
       {!isOwn && <PersonAvatar name={comment.author_name} size={26} className="mb-4 shrink-0" />}
-      <div className={`flex min-w-0 max-w-[78%] flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
+      <div className={`flex min-w-0 ${editing ? 'w-full' : 'max-w-[78%]'} flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
         {!isOwn && (
           <span className="mb-0.5 px-1 text-xs font-medium text-(--rs-neutral-grey-600)">
             {comment.author_name}
           </span>
         )}
-        <div className={`flex items-center gap-1 ${isOwn ? 'flex-row-reverse' : ''}`}>
-          <div
-            className={`min-w-0 rounded-2xl px-3.5 py-2 text-sm leading-relaxed transition-colors duration-500 ${
-              isOwn
-                ? 'rounded-br-md bg-(--rs-primary-500) text-white'
-                : 'rounded-bl-md bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-900)'
-            } ${highlighted ? 'ring-2 ring-(--rs-accent-300) ring-offset-1' : ''}`}
-          >
-            <RichText html={comment.body} className="text-sm leading-relaxed" />
-          </div>
-          <button
-            onClick={onReply}
-            title="Reply in thread"
-            aria-label="Reply in thread"
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-(--rs-neutral-grey-400) opacity-0 transition-opacity hover:bg-(--rs-primary-50) hover:text-(--rs-primary-600) focus-visible:opacity-100 group-hover:opacity-100"
-          >
-            <MessageSquareReply className="h-3.5 w-3.5" />
-          </button>
-          {canDelete && (
-            <button
-              onClick={onDelete}
-              title="Delete"
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-(--rs-neutral-grey-400) opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
+        {editing ? (
+          <CommentEditForm
+            initial={comment.body}
+            mentionUsers={mentionUsers}
+            onCancel={() => setEditing(false)}
+            onSave={async html => { if (await onEdit(html)) setEditing(false); }}
+          />
+        ) : (
+          <div className={`flex items-center gap-1 ${isOwn ? 'flex-row-reverse' : ''}`}>
+            <div
+              className={`min-w-0 rounded-2xl px-3.5 py-2 text-sm leading-relaxed transition-colors duration-500 ${
+                isOwn
+                  ? 'rounded-br-md bg-(--rs-primary-500) text-white'
+                  : 'rounded-bl-md bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-900)'
+              } ${highlighted ? 'ring-2 ring-(--rs-accent-300) ring-offset-1' : ''}`}
             >
-              <X className="h-3 w-3" />
+              <RichText html={comment.body} className="text-sm leading-relaxed" />
+            </div>
+            <button
+              onClick={onReply}
+              title="Reply in thread"
+              aria-label="Reply in thread"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-(--rs-neutral-grey-400) opacity-0 transition-opacity hover:bg-(--rs-primary-50) hover:text-(--rs-primary-600) focus-visible:opacity-100 group-hover:opacity-100"
+            >
+              <MessageSquareReply className="h-3.5 w-3.5" />
             </button>
-          )}
-        </div>
+            {canModify && (
+              <button
+                onClick={() => setEditing(true)}
+                title="Edit"
+                aria-label="Edit comment"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-(--rs-neutral-grey-400) opacity-0 transition-opacity hover:bg-(--rs-primary-50) hover:text-(--rs-primary-600) focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            )}
+            {canModify && (
+              <button
+                onClick={onDelete}
+                title="Delete"
+                aria-label="Delete comment"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-(--rs-neutral-grey-400) opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        )}
         <span className="mt-0.5 px-1 text-[11px] text-(--rs-neutral-grey-400)">
           {fmt(comment.created_at)}
         </span>
+        <CommentFootprint comment={comment} className="px-1" />
+      </div>
+    </div>
+  );
+}
+
+// Inline editor that replaces a comment while it's being edited.
+function CommentEditForm({
+  initial, mentionUsers, onCancel, onSave,
+}: {
+  initial: string;
+  mentionUsers: Array<{ id: number; name: string }>;
+  onCancel: () => void;
+  onSave: (html: string) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (saving || isRichTextEmpty(draft)) return;
+    setSaving(true);
+    try { await onSave(draft); } finally { setSaving(false); }
+  };
+  return (
+    <div className="w-full rounded-lg border border-(--rs-neutral-grey-200) bg-white p-2">
+      <RichTextEditor
+        value={draft}
+        onChange={setDraft}
+        bodyClassName="max-h-40 overflow-y-auto"
+        enableMentions
+        enableEmoji
+        hideToolbar
+        onSubmit={save}
+        mentionUsers={mentionUsers}
+      />
+      <div className="mt-2 flex justify-end gap-2">
+        <button
+          onClick={onCancel}
+          disabled={saving}
+          className="rounded-md px-2.5 py-1 text-xs font-medium text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-100)"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={save}
+          disabled={saving || isRichTextEmpty(draft)}
+          className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40"
+          style={{ background: 'var(--rs-primary-500)' }}
+        >
+          {saving && <Loader2 className="h-3 w-3 animate-spin" />}
+          Save
+        </button>
       </div>
     </div>
   );
@@ -1225,7 +1377,7 @@ function ThreadSummary({
 // composer — Slack's thread pane / Google Chat's in-line thread panel.
 function ThreadPanel({
   root, replies, mode, onClose, draft, onDraftChange, posting, onPost,
-  canDelete, onDelete, highlightCommentId, mentionUsers,
+  canModify, onDelete, onEdit, highlightCommentId, mentionUsers,
 }: {
   root: Comment;
   replies: Comment[];
@@ -1235,8 +1387,9 @@ function ThreadPanel({
   onDraftChange: (html: string) => void;
   posting: boolean;
   onPost: () => void;
-  canDelete: (c: Comment) => boolean;
+  canModify: (c: Comment) => boolean;
   onDelete: (c: Comment) => void;
+  onEdit: (c: Comment, html: string) => Promise<boolean>;
   highlightCommentId: string | null;
   mentionUsers: Array<{ id: number; name: string }>;
 }) {
@@ -1279,8 +1432,10 @@ function ThreadPanel({
         <ThreadMessage
           comment={root}
           highlighted={highlightCommentId === String(root.id)}
-          canDelete={canDelete(root)}
+          canModify={canModify(root)}
           onDelete={() => onDelete(root)}
+          onEdit={html => onEdit(root, html)}
+          mentionUsers={mentionUsers}
         />
         <div className="my-2 flex items-center gap-2 px-2 text-[11px] text-(--rs-neutral-grey-400)">
           <span>{replies.length === 0 ? 'No replies yet' : `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`}</span>
@@ -1291,49 +1446,60 @@ function ThreadPanel({
             key={reply.id}
             comment={reply}
             highlighted={highlightCommentId === String(reply.id)}
-            canDelete={canDelete(reply)}
+            canModify={canModify(reply)}
             onDelete={() => onDelete(reply)}
+            onEdit={html => onEdit(reply, html)}
+            mentionUsers={mentionUsers}
           />
         ))}
       </div>
 
-      <div className="flex items-end gap-2 border-t border-(--rs-neutral-grey-100) px-4 py-3">
-        <div className="min-w-0 flex-1">
-          <RichTextEditor
-            value={draft}
-            onChange={onDraftChange}
-            placeholder="Reply…"
-            bodyClassName="max-h-32 overflow-y-auto"
-            enableMentions
-            enableEmoji
-            hideToolbar
-            onSubmit={onPost}
-            mentionUsers={mentionUsers}
-          />
+      {root.deleted_at ? (
+        <p className="border-t border-(--rs-neutral-grey-100) px-4 py-3 text-xs italic text-(--rs-neutral-grey-500)">
+          This comment was deleted, so the thread is closed to new replies.
+        </p>
+      ) : (
+        <div className="flex items-end gap-2 border-t border-(--rs-neutral-grey-100) px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <RichTextEditor
+              value={draft}
+              onChange={onDraftChange}
+              placeholder="Reply…"
+              bodyClassName="max-h-32 overflow-y-auto"
+              enableMentions
+              enableEmoji
+              hideToolbar
+              onSubmit={onPost}
+              mentionUsers={mentionUsers}
+            />
+          </div>
+          <button
+            onClick={onPost}
+            disabled={posting || isRichTextEmpty(draft)}
+            aria-label="Post reply"
+            title="Post reply"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-40"
+            style={{ background: 'var(--rs-primary-500)' }}
+          >
+            {posting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </button>
         </div>
-        <button
-          onClick={onPost}
-          disabled={posting || isRichTextEmpty(draft)}
-          aria-label="Post reply"
-          title="Post reply"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-40"
-          style={{ background: 'var(--rs-primary-500)' }}
-        >
-          {posting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-        </button>
-      </div>
+      )}
     </aside>
   );
 }
 
 function ThreadMessage({
-  comment, highlighted, canDelete, onDelete,
+  comment, highlighted, canModify, onDelete, onEdit, mentionUsers,
 }: {
   comment: Comment;
   highlighted: boolean;
-  canDelete: boolean;
+  canModify: boolean;
   onDelete: () => void;
+  onEdit: (html: string) => Promise<boolean>;
+  mentionUsers: Array<{ id: number; name: string }>;
 }) {
+  const [editing, setEditing] = useState(false);
   return (
     <div
       data-comment-id={comment.id}
@@ -1347,17 +1513,37 @@ function ThreadMessage({
           <span className="text-sm font-semibold text-(--rs-neutral-grey-900)">{comment.author_name}</span>
           <span className="text-[11px] text-(--rs-neutral-grey-400)">{fmt(comment.created_at)}</span>
         </div>
-        <RichText html={comment.body} className="text-sm leading-relaxed text-(--rs-neutral-grey-900)" />
+        {comment.deleted_at ? null : editing ? (
+          <CommentEditForm
+            initial={comment.body}
+            mentionUsers={mentionUsers}
+            onCancel={() => setEditing(false)}
+            onSave={async html => { if (await onEdit(html)) setEditing(false); }}
+          />
+        ) : (
+          <RichText html={comment.body} className="text-sm leading-relaxed text-(--rs-neutral-grey-900)" />
+        )}
+        <CommentFootprint comment={comment} className="mt-0.5" />
       </div>
-      {canDelete && (
-        <button
-          onClick={onDelete}
-          title="Delete"
-          aria-label="Delete"
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-(--rs-neutral-grey-400) opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 focus-visible:opacity-100 group-hover:opacity-100"
-        >
-          <X className="h-3 w-3" />
-        </button>
+      {canModify && !editing && (
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            onClick={() => setEditing(true)}
+            title="Edit"
+            aria-label="Edit comment"
+            className="flex h-6 w-6 items-center justify-center rounded-full text-(--rs-neutral-grey-400) opacity-0 transition-opacity hover:bg-(--rs-primary-50) hover:text-(--rs-primary-600) focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            <Pencil className="h-3 w-3" />
+          </button>
+          <button
+            onClick={onDelete}
+            title="Delete"
+            aria-label="Delete comment"
+            className="flex h-6 w-6 items-center justify-center rounded-full text-(--rs-neutral-grey-400) opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 focus-visible:opacity-100 group-hover:opacity-100"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
       )}
     </div>
   );
