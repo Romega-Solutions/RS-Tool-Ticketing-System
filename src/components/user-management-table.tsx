@@ -9,6 +9,7 @@ import { SendSetupEmailDialog, type SetupEmailTarget } from '@/components/send-s
 import { createClient } from '@/lib/supabase/client';
 import { roleDisplayLabel } from '@/lib/rbac';
 import { formatPhtRange, pacificRange } from '@/lib/schedule';
+import { changeView } from '@/app/actions/view-actions';
 
 export type UserRow = {
   id: number;
@@ -523,6 +524,10 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
     }
   };
 
+  const handleImpersonate = async(user:UserRow) =>{
+    await changeView(user.id) 
+  }
+
   // Name + Actions are always shown; colSpan for the empty row counts them too.
   const totalColSpan = visibleCols.size + 2;
 
@@ -823,6 +828,14 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
 
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {currentUserId !== user.id &&(
+                        <Button size="sm" variant="ghost"
+                          className="h-7 px-2.5 text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-900)"
+                          onClick={() => handleImpersonate(user)}>
+                          <Eye className="w-3.5 h-3.5 mr-1" />
+                          View
+                        </Button>
+                        )}
                         <Button size="sm" variant="ghost"
                           className="h-7 px-2.5 text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-900)"
                           onClick={() => openProfile(user)}>
@@ -920,8 +933,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                     {ROLE_OPTIONS.map(r => <option key={r} value={r}>{roleDisplayLabel(r)}</option>)}
                   </select>
                 </Field>
-                <Field label="Department">
-                  <select value={newForm.team} onChange={e => setNewForm(f => ({ ...f, team: e.target.value }))}
+                <Field label="Department" required>
+                  <select required value={newForm.team} onChange={e => setNewForm(f => ({ ...f, team: e.target.value }))}
                     className={inputCls}>
                     <option value="">— Select —</option>
                     {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
@@ -930,8 +943,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Job Title">
-                  <input value={newForm.jobTitle} onChange={e => setNewForm(f => ({ ...f, jobTitle: e.target.value }))}
+                <Field label="Job Title" required>
+                  <input required value={newForm.jobTitle} onChange={e => setNewForm(f => ({ ...f, jobTitle: e.target.value }))}
                     className={inputCls} placeholder="e.g. Software Engineer" />
                 </Field>
                 <Field label="Member Code">
@@ -941,8 +954,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Approved Hours / week">
-                  <input type="number" min={1} max={60} inputMode="numeric"
+                <Field label="Approved Hours / week" required>
+                  <input required type="number" min={1} max={60} inputMode="numeric"
                     value={newForm.approvedHoursPerWeek} onChange={e => setNewForm(f => ({ ...f, approvedHoursPerWeek: e.target.value }))}
                     className={`${inputCls} tabular-nums`} placeholder="15" />
                 </Field>
@@ -957,12 +970,12 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Field label="Schedule start (PHT)">
-                  <input type="time" value={newForm.schedulePhtStart}
+                <Field label="Schedule start (PHT)" required>
+                  <input required type="time" value={newForm.schedulePhtStart}
                     onChange={e => setNewForm(f => ({ ...f, schedulePhtStart: e.target.value }))} className={inputCls} />
                 </Field>
-                <Field label="Schedule end (PHT)">
-                  <input type="time" value={newForm.schedulePhtEnd}
+                <Field label="Schedule end (PHT)" required>
+                  <input required type="time" value={newForm.schedulePhtEnd}
                     onChange={e => setNewForm(f => ({ ...f, schedulePhtEnd: e.target.value }))} className={inputCls} />
                 </Field>
               </div>
@@ -982,8 +995,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                 </Field>
               </div>
 
-              <Field label="Google Drive File (link)">
-                <input type="url" value={newForm.driveUrl}
+              <Field label="Google Drive File (link)" required>
+                <input required type="url" value={newForm.driveUrl}
                   onChange={e => setNewForm(f => ({ ...f, driveUrl: e.target.value }))}
                   className={inputCls} placeholder="https://drive.google.com/…" />
               </Field>

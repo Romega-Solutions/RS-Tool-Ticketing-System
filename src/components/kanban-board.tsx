@@ -265,38 +265,25 @@ function AddTaskForm({
   projectId: string;
   onAdd: (stateId: string, item: KanbanItem) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [value, setValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
 
-  const openForm = () => {
-    setOpen(true);
-    setTimeout(() => inputRef.current?.focus(), 40);
-  };
-
-  const close = () => { setOpen(false); setValue(''); setError(''); };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!value.trim()) return;
+  const handleClick = async () => {
     setLoading(true);
     setError('');
     try {
       const res = await fetch('/api/tickets/work-items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, name: value.trim(), state: stateId, priority: 'none' }),
+        body: JSON.stringify({ projectId, name: 'Untitled task', state: stateId, priority: 'none' }),
       });
       if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
         setError(data.error ?? 'Failed to create task');
         return;
       }
       const created = (await res.json()) as KanbanItem;
-      onAdd(stateId, created);
-      close();
+      onAdd(stateId, created); // handleTaskAdded adds the card and opens the sheet
     } catch {
       setError('Request failed');
     } finally {
@@ -304,50 +291,114 @@ function AddTaskForm({
     }
   };
 
-  if (!open) {
-    return (
-      <button
-        onClick={openForm}
-        className="flex min-h-10 w-full items-center gap-1.5 rounded-md px-2 py-2 text-xs text-(--rs-neutral-grey-400) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-700)"
-      >
-        <Plus className="w-3.5 h-3.5" /> Add task
-      </button>
-    );
-  }
-
   return (
-    <form onSubmit={handleSubmit} className="space-y-2 pt-1">
-      <input
-        ref={inputRef}
-        value={value}
-        onChange={e => setValue(e.target.value)}
-        onKeyDown={e => e.key === 'Escape' && close()}
-        placeholder="Task title…"
-        className="w-full text-sm px-2.5 py-1.5 border border-(--rs-primary-300) rounded-md outline-none focus:ring-2 focus:ring-offset-0 bg-white"
-        style={{ boxShadow: 'none' }}
-      />
-      {error && <p className="text-xs text-red-500">{error}</p>}
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={loading || !value.trim()}
-          className="flex min-h-9 items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium text-white transition-opacity disabled:opacity-50"
-          style={{ background: 'var(--rs-primary-500)' }}
-        >
-          {loading && <Loader2 className="w-3 h-3 animate-spin" />}
-          Add
-        </button>
-        <button
-          type="button"
-          onClick={close}
-          className="min-h-9 rounded-md px-2.5 py-1 text-xs text-(--rs-neutral-grey-500) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-800)"
-        >
-          Cancel
-        </button>
-      </div>
-    </form>
+    <div>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={loading}
+        className="flex min-h-10 w-full items-center gap-1.5 rounded-md px-2 py-2 text-xs text-(--rs-neutral-grey-400) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-700) disabled:opacity-50"
+      >
+        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+        Add task
+      </button>
+      {error && <p className="px-2 text-xs text-red-500">{error}</p>}
+    </div>
   );
 }
+
+// function AddTaskForm({
+//   stateId,
+//   projectId,
+//   onAdd,
+// }: {
+//   stateId: string;
+//   projectId: string;
+//   onAdd: (stateId: string, item: KanbanItem) => void;
+// }) {
+//   const [open, setOpen] = useState(false);
+//   const [value, setValue] = useState('');
+//   const [loading, setLoading] = useState(false);
+//   const [error, setError] = useState('');
+//   const inputRef = useRef<HTMLInputElement>(null);
+
+//   const openForm = () => {
+//     setOpen(true);
+//     setTimeout(() => inputRef.current?.focus(), 40);
+//   };
+
+//   const close = () => { setOpen(false); setValue(''); setError(''); };
+
+//   const handleSubmit = async (e: React.FormEvent) => {
+//     e.preventDefault();
+//     if (!value.trim()) return;
+//     setLoading(true);
+//     setError('');
+//     try {
+//       const res = await fetch('/api/tickets/work-items', {
+//         method: 'POST',
+//         headers: { 'Content-Type': 'application/json' },
+//         body: JSON.stringify({ projectId, name: value.trim(), state: stateId, priority: 'none' }),
+//       });
+//       if (!res.ok) {
+//         const data = (await res.json()) as { error?: string };
+//         setError(data.error ?? 'Failed to create task');
+//         return;
+//       }
+//       const created = (await res.json()) as KanbanItem;
+//       onAdd(stateId, created);
+//       close();
+//     } catch {
+//       setError('Request failed');
+//     } finally {
+//       setLoading(false);
+//     }
+//   };
+
+//   if (!open) {
+//     return (
+//       <button
+//         onClick={openForm}
+//         className="flex min-h-10 w-full items-center gap-1.5 rounded-md px-2 py-2 text-xs text-(--rs-neutral-grey-400) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-700)"
+//       >
+//         <Plus className="w-3.5 h-3.5" /> Add task
+//       </button>
+//     );
+//   }
+
+//   return (
+//     <form onSubmit={handleSubmit} className="space-y-2 pt-1">
+//       <input
+//         ref={inputRef}
+//         value={value}
+//         onChange={e => setValue(e.target.value)}
+//         onKeyDown={e => e.key === 'Escape' && close()}
+//         placeholder="Task title…"
+//         className="w-full text-sm px-2.5 py-1.5 border border-(--rs-primary-300) rounded-md outline-none focus:ring-2 focus:ring-offset-0 bg-white"
+//         style={{ boxShadow: 'none' }}
+//       />
+//       {error && <p className="text-xs text-red-500">{error}</p>}
+//       <div className="flex gap-2">
+//         <button
+//           type="submit"
+//           disabled={loading || !value.trim()}
+//           className="flex min-h-9 items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium text-white transition-opacity disabled:opacity-50"
+//           style={{ background: 'var(--rs-primary-500)' }}
+//         >
+//           {loading && <Loader2 className="w-3 h-3 animate-spin" />}
+//           Add
+//         </button>
+//         <button
+//           type="button"
+//           onClick={close}
+//           className="min-h-9 rounded-md px-2.5 py-1 text-xs text-(--rs-neutral-grey-500) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-800)"
+//         >
+//           Cancel
+//         </button>
+//       </div>
+//     </form>
+//   );
+// }
 
 // ── Droppable column ───────────────────────────────────────────────────────────
 
@@ -824,11 +875,7 @@ export function KanbanBoard({
   };
 
   const handleTaskAdded = (stateId: string, item: KanbanItem) => {
-    setItemsByState(prev => {
-      const next = new Map(prev);
-      next.set(stateId, [...(next.get(stateId) ?? []), item]);
-      return next;
-    });
+    openItem(item.id);
   };
 
   return (

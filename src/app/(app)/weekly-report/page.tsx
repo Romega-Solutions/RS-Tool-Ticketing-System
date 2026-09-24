@@ -6,6 +6,8 @@ import { CeoReportsOverview } from '@/components/ceo-reports-overview';
 import { ExcelExportPanel } from '@/components/weekly-report-export';
 import { TabSwitcher } from '@/components/weekly-report-tabs';
 
+export const dynamic = 'force-dynamic';
+
 export default async function WeeklyReportPage() {
   const sessionUser = await getSession();
   const role = sessionUser?.role ?? 'ic';

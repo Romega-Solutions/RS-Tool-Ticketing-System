@@ -5,15 +5,34 @@ import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { AlertCircle, MessageSquare, Settings } from 'lucide-react';
 import { KanbanBoard } from '@/components/kanban-board';
+import { BoardSearch } from '@/components/board-search';
 
 const EXCLUDED_GROUPS = new Set(['cancelled', 'canceled']);
 
+// Fields on a work item that the search box looks at. Keep the ones that exist
+// on your enriched work item type (e.g. drop 'title' if you only have 'name').
+const SEARCH_FIELDS = ['name', 'title', 'description_stripped'] as const;
+
+function matchesQuery(item: object, query: string) {
+  const record = item as Record<string, unknown>;
+  return SEARCH_FIELDS.some(field => {
+    const value = record[field];
+    return typeof value === 'string' && value.toLowerCase().includes(query);
+  });
+}
+
 export default async function ProjectBoardPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ q?: string | string[] }>;
 }) {
   const { id } = await params;
+  const { q } = await searchParams;
+  const rawQuery = Array.isArray(q) ? q[0] : q;
+  const query = (rawQuery ?? '').trim().toLowerCase();
+
   const session = await getSession();
   if (!session) redirect('/login');   // Projects is a Workspace tool — open to all
 
@@ -48,6 +67,9 @@ export default async function ProjectBoardPage({
     loadError = err instanceof Error ? err.message : 'Failed to load board';
   }
 
+  // Filtering here means every state column only receives matching cards.
+  const visibleItems = query ? items.filter(item => matchesQuery(item, query)) : items;
+
   return (
     <div className="space-y-5 overflow-x-hidden">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -56,7 +78,9 @@ export default async function ProjectBoardPage({
             {projectName || 'Project Board'}
           </h1>
           <p className="text-(--rs-neutral-grey-500) text-sm mt-1 max-w-2xl">
-            {items.length} work item{items.length !== 1 ? 's' : ''}
+            {query
+              ? `${visibleItems.length} of ${items.length} work item${items.length !== 1 ? 's' : ''} match`
+              : `${items.length} work item${items.length !== 1 ? 's' : ''}`}
             {!loadError && ' · Scroll sideways to review states · Drag cards to move them'}
           </p>
         </div>
@@ -92,10 +116,22 @@ export default async function ProjectBoardPage({
       )}
 
       {states.length > 0 && (
+        <BoardSearch />
+      )}
+
+      {states.length > 0 && query && visibleItems.length === 0 && (
+        <p className="text-(--rs-neutral-grey-500) text-sm">
+          No tasks match &ldquo;{rawQuery?.trim()}&rdquo;. Try a different word or clear the search.
+        </p>
+      )}
+
+      {states.length > 0 && (
         <div className="max-w-full overflow-hidden">
+          {/* key resets the board's internal card state whenever the search changes */}
           <KanbanBoard
+            key={query}
             states={states}
-            initialItems={items}
+            initialItems={visibleItems}
             projectId={id}
             currentUserId={session.id}
             isAdmin={session.role === 'admin'}

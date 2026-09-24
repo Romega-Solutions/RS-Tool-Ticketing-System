@@ -1,12 +1,14 @@
 'use client';
 
 import { useTransition } from 'react';
-import { Star, Trash2, Eye, EyeOff } from 'lucide-react';
+import { Star, Trash2, Eye, EyeOff, Bell } from 'lucide-react';
 import {
   updateCandidateStatus,
   updateCandidateRating,
   deleteCandidate,
   updateCandidatePublicTalent,
+  sendCandidateFormReminder,
+  type RecruitmentReminderKind,
 } from './actions';
 
 // SOP's 11 status stages. Keep in sync with ALLOWED_STATUSES in actions.ts.
@@ -144,6 +146,41 @@ export function CandidatePublicTalentToggle({
     >
       {isPublic ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
       {isPublic ? 'Public' : 'Publish'}
+    </button>
+  );
+}
+
+export function CandidateReminderButton({
+  candidateId,
+  kind,
+  count = 1,
+}: {
+  candidateId: number;
+  kind: RecruitmentReminderKind;
+  count?: number;
+}) {
+  const [isPending, start] = useTransition();
+  const target = kind === 'background_check'
+    ? 'background-check form'
+    : kind === 'reference_check'
+      ? `reference form${count === 1 ? '' : 's'} (${count})`
+      : `employment-verification form${count === 1 ? '' : 's'} (${count})`;
+  return (
+    <button
+      type="button"
+      disabled={isPending}
+      title={`Remind the outstanding ${target}. The original Jotform link is unchanged.`}
+      onClick={() => {
+        if (!confirm(`Send a linkless reminder for the outstanding ${kind.replace(/_/g, ' ')}?`)) return;
+        start(async () => {
+          try { await sendCandidateFormReminder(candidateId, kind); }
+          catch (err) { alert(err instanceof Error ? err.message : 'Could not send reminder'); }
+        });
+      }}
+      className="inline-flex items-center gap-1 rounded-md border border-(--rs-accent-200) bg-(--rs-accent-50) px-2 py-1 text-[11px] font-semibold text-(--rs-accent-800) hover:bg-(--rs-accent-100) disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {isPending ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-current/30 border-t-current" /> : <Bell className="h-3 w-3" />}
+      {isPending ? 'Sending…' : 'Remind'}
     </button>
   );
 }

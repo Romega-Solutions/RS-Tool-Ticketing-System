@@ -4,6 +4,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { TaskCard } from '@/components/task-card';
 import { OnboardingBanner } from './onboarding-banner';
 
+export const dynamic = 'force-dynamic';
+
 export type TaskWithProject = PlaneWorkItem & {
   _projectName: string;
   _projectIdentifier: string;

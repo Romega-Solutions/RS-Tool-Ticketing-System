@@ -4,6 +4,8 @@ import { canAccessAdmin } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { RatesClient, type RateUser } from '@/components/rates-client';
 
+export const dynamic = 'force-dynamic';
+
 export default async function RatesPage() {
   const session = await getSession();
   if (!session || !canAccessAdmin(session.role)) redirect('/dashboard');
