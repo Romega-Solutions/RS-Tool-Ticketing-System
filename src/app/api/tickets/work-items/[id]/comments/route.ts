@@ -50,7 +50,7 @@ export const POST = route(async (req: Request, { params }: { params: Promise<{ i
   const parentId = body.parent_id ?? null;
   if (parentId != null) {
     const parent = await getComment(String(parentId));
-    if (!parent || parent.work_item_id !== Number(id)) throw badRequest('parent comment not found');
+    if (!parent || parent.work_item_id !== Number(id) || parent.deleted) throw badRequest('parent comment not found');
     if (parent.parent_id != null) throw badRequest('cannot reply to a reply');
   }
 

@@ -607,28 +607,56 @@ export interface WorkItemComment {
   author_name: string;
   // Thread root this is a reply to; null for top-level comments.
   parent_id: number | null;
+  /** Empty once the comment is deleted — only the footprint is kept. */
   body: string;
   created_at: string;
   updated_at: string;
+  edited_at: string | null;
+  edited_by_name: string | null;
+  deleted_at: string | null;
+  deleted_by_name: string | null;
 }
 
 export async function getComments(itemId: string): Promise<WorkItemComment[]> {
   const sb = createAdminClient();
   const { data, error } = await sb.from('work_item_comments')
-    .select('id, work_item_id, author_id, parent_id, body, created_at, updated_at, users(name)')
+    .select('id, work_item_id, author_id, parent_id, body, created_at, updated_at, edited_at, edited_by, deleted_at, deleted_by, users(name)')
     .eq('work_item_id', Number(itemId))
     .order('created_at');
   if (error) throw new PlaneApiError(500, `comments/${itemId}`);
-  return (data ?? []).map((r: Row) => ({
-    id: Number(r.id),
-    work_item_id: Number(r.work_item_id),
-    author_id: Number(r.author_id),
-    author_name: String((r.users as Row | null)?.name ?? 'Unknown'),
-    parent_id: r.parent_id != null ? Number(r.parent_id) : null,
-    body: String(r.body),
-    created_at: String(r.created_at),
-    updated_at: String(r.updated_at),
-  }));
+  const rows = (data ?? []) as Row[];
+
+  // Editors / deleters may differ from the author (admins), so resolve their
+  // names separately rather than through a second, ambiguous users() embed.
+  const actorIds = new Set<number>();
+  for (const r of rows) {
+    if (r.edited_by != null) actorIds.add(Number(r.edited_by));
+    if (r.deleted_by != null) actorIds.add(Number(r.deleted_by));
+  }
+  const nameById = new Map<number, string>();
+  if (actorIds.size) {
+    const { data: users } = await sb.from('users').select('id, name').in('id', [...actorIds]);
+    for (const u of (users ?? []) as Row[]) nameById.set(Number(u.id), String(u.name));
+  }
+  const actorName = (id: unknown) => (id != null ? nameById.get(Number(id)) ?? 'a former member' : null);
+
+  return rows.map((r: Row) => {
+    const deleted = r.deleted_at != null;
+    return {
+      id: Number(r.id),
+      work_item_id: Number(r.work_item_id),
+      author_id: Number(r.author_id),
+      author_name: String((r.users as Row | null)?.name ?? 'Unknown'),
+      parent_id: r.parent_id != null ? Number(r.parent_id) : null,
+      body: deleted ? '' : String(r.body),
+      created_at: String(r.created_at),
+      updated_at: String(r.updated_at),
+      edited_at: r.edited_at != null ? String(r.edited_at) : null,
+      edited_by_name: r.edited_at != null ? actorName(r.edited_by) : null,
+      deleted_at: deleted ? String(r.deleted_at) : null,
+      deleted_by_name: deleted ? actorName(r.deleted_by) : null,
+    };
+  });
 }
 
 export async function createComment(
@@ -651,30 +679,40 @@ export async function createComment(
   return found;
 }
 
-export async function updateComment(commentId: string, body: string): Promise<void> {
+export async function updateComment(commentId: string, body: string, editorId: number): Promise<void> {
   const sb = createAdminClient();
+  const now = new Date().toISOString();
   const { error } = await sb.from('work_item_comments')
-    .update({ body, updated_at: new Date().toISOString() })
-    .eq('id', Number(commentId));
+    .update({ body, updated_at: now, edited_at: now, edited_by: editorId })
+    .eq('id', Number(commentId))
+    .is('deleted_at', null);
   if (error) throw new PlaneApiError(502, `comments/${commentId}`);
 }
 
-export async function deleteComment(commentId: string): Promise<void> {
+/** Soft delete: keeps the row (and its thread replies) so the timeline can
+ *  show who deleted it and when. The body is blanked so it can't be recovered
+ *  through the API. */
+export async function deleteComment(commentId: string, deleterId: number): Promise<void> {
   const sb = createAdminClient();
-  const { error } = await sb.from('work_item_comments').delete().eq('id', Number(commentId));
+  const now = new Date().toISOString();
+  const { error } = await sb.from('work_item_comments')
+    .update({ body: '', updated_at: now, deleted_at: now, deleted_by: deleterId })
+    .eq('id', Number(commentId))
+    .is('deleted_at', null);
   if (error) throw new PlaneApiError(502, `comments/${commentId}`);
 }
 
-export async function getComment(commentId: string): Promise<{ id: number; author_id: number; work_item_id: number; parent_id: number | null } | null> {
+export async function getComment(commentId: string): Promise<{ id: number; author_id: number; work_item_id: number; parent_id: number | null; deleted: boolean } | null> {
   const sb = createAdminClient();
   const { data } = await sb.from('work_item_comments')
-    .select('id, author_id, work_item_id, parent_id').eq('id', Number(commentId)).maybeSingle();
+    .select('id, author_id, work_item_id, parent_id, deleted_at').eq('id', Number(commentId)).maybeSingle();
   if (!data) return null;
   return {
     id: Number(data.id),
     author_id: Number(data.author_id),
     work_item_id: Number(data.work_item_id),
     parent_id: data.parent_id != null ? Number(data.parent_id) : null,
+    deleted: data.deleted_at != null,
   };
 }
 
