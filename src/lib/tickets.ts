@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { mapOrgDeptToAppTeam } from '@/lib/orgchart';
 import { unstable_cache } from 'next/cache';
 import { projectStatesTag, projectLabelsTag, projectCyclesTag, USERS_LIST_TAG } from '@/lib/cache-tags';
+import type { SessionUser } from '@/lib/session';
 
 export interface PlaneProject {
   id: string;
@@ -126,10 +127,30 @@ function mapState(r: Row): PlaneState {
   };
 }
 
+/** Who a project listing is being built for. Omit for system/unscoped reads. */
+export type ProjectViewer = Pick<SessionUser, 'id' | 'role'>;
+
+/**
+ * Project ids a viewer may see in listings. `null` = unrestricted.
+ * Global admins (incl. CEO/Founder, which normalize to 'admin') see every
+ * project; everyone else (lead/ic/intern) only sees projects they're a
+ * project_members row on (any project role).
+ */
+export async function getVisibleProjectIds(viewer: ProjectViewer): Promise<number[] | null> {
+  if (viewer.role === 'admin') return null;
+  const sb = createAdminClient();
+  const { data, error } = await sb.from('project_members')
+    .select('project_id').eq('user_id', viewer.id);
+  if (error) throw new PlaneApiError(500, 'project-members/visible');
+  return (data ?? []).map(r => Number((r as Row).project_id));
+}
+
 export async function getProjects(
-  opts?: { team?: string | null; archived?: 0 | 1 },
+  opts?: { team?: string | null; archived?: 0 | 1; viewer?: ProjectViewer },
 ): Promise<PlaneProject[]> {
   const sb = createAdminClient();
+  const visibleIds = opts?.viewer ? await getVisibleProjectIds(opts.viewer) : null;
+  if (visibleIds && visibleIds.length === 0) return [];
   // Default to active projects; pass `archived: 1` for the Archived tab.
   const archived = opts?.archived ?? 0;
   let q = sb.from('projects')
@@ -138,6 +159,7 @@ export async function getProjects(
     .order('name');
   // Empty string or `null` is treated as "no filter".
   if (opts?.team) q = q.eq('team', opts.team);
+  if (visibleIds) q = q.in('id', visibleIds);
   const { data, error } = await q;
   if (error) throw new PlaneApiError(500, 'projects');
   return (data ?? []).map(mapProject);
@@ -1002,13 +1024,20 @@ export function describeDashboardActivity(a: DashboardActivityEntry): string {
   }
 }
 
-export async function getDashboardProjectActivity(limit = 8): Promise<DashboardActivityEntry[]> {
+export async function getDashboardProjectActivity(
+  limit = 8,
+  viewer?: ProjectViewer,
+): Promise<DashboardActivityEntry[]> {
   const sb = createAdminClient();
   const cappedLimit = normalizeActivityLimit(limit);
+  const visibleIds = viewer ? await getVisibleProjectIds(viewer) : null;
+  if (visibleIds && visibleIds.length === 0) return [];
 
-  const { data, error } = await sb.from('work_item_activity')
+  let q = sb.from('work_item_activity')
     .select('id, work_item_id, actor_id, action, from_value, to_value, created_at, users(name), work_items!inner(id, project_id, sequence_id, name, archived, projects(id, name, identifier, archived))')
-    .in('action', ['created', 'state_changed'])
+    .in('action', ['created', 'state_changed']);
+  if (visibleIds) q = q.in('work_items.project_id', visibleIds);
+  const { data, error } = await q
     .order('created_at', { ascending: false })
     .limit(cappedLimit * 3);
   if (error) throw new PlaneApiError(500, 'dashboard-activity');
@@ -1468,12 +1497,15 @@ export interface ProjectActivityEntry {
  * event. Sorted newest-first. Optionally scoped to a team to match the page.
  */
 export async function getProjectActivity(
-  opts?: { team?: string | null },
+  opts?: { team?: string | null; viewer?: ProjectViewer },
 ): Promise<ProjectActivityEntry[]> {
   const sb = createAdminClient();
+  const visibleIds = opts?.viewer ? await getVisibleProjectIds(opts.viewer) : null;
+  if (visibleIds && visibleIds.length === 0) return [];
   let q = sb.from('projects')
     .select('id, name, identifier, team, created_at, archived_at');
   if (opts?.team) q = q.eq('team', opts.team);
+  if (visibleIds) q = q.in('id', visibleIds);
   const { data, error } = await q;
   if (error) throw new PlaneApiError(500, 'project-activity');
 

@@ -70,9 +70,13 @@ export default async function ProjectsPage({
 
   try {
     if (tab === 'activity') {
-      activity = await getProjectActivity({ team: effectiveTeam });
+      activity = await getProjectActivity({ team: effectiveTeam, viewer: session });
     } else {
-      projects = await getProjects({ team: effectiveTeam, archived: tab === 'archived' ? 1 : 0 });
+      projects = await getProjects({
+        team: effectiveTeam,
+        archived: tab === 'archived' ? 1 : 0,
+        viewer: session,
+      });
       const results = await Promise.all(
         projects.map(async p => {
           const [items, states] = await Promise.all([
@@ -104,7 +108,9 @@ export default async function ProjectsPage({
       ? 'Created and archived project events, newest first.'
       : effectiveTeam
       ? `Showing ${effectiveTeam} team projects.`
-      : 'All active projects in the Romega Solutions workspace.';
+      : session.role === 'admin'
+      ? 'All active projects in the Romega Solutions workspace.'
+      : "Active projects you're a member of.";
 
   const currentTabLabel = TABS.find(t => t.key === tab)!.label;
 

@@ -9,6 +9,7 @@ import { SendSetupEmailDialog, type SetupEmailTarget } from '@/components/send-s
 import { createClient } from '@/lib/supabase/client';
 import { roleDisplayLabel } from '@/lib/rbac';
 import { formatPhtRange, pacificRange } from '@/lib/schedule';
+import { usePersistedJson } from '@/lib/use-persisted-json';
 
 export type UserRow = {
   id: number;
@@ -138,6 +139,18 @@ const FILTERS_KEY = 'usersTableFilters:v1';
 type PersistedFilters = { roles: string[]; teams: string[]; active: ActiveFilter };
 const DEFAULT_FILTERS: PersistedFilters = { roles: [], teams: [], active: 'active' };
 
+const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every(x => typeof x === 'string');
+const parseCols = (stored: unknown): ColKey[] =>
+  isStringArray(stored) ? stored.filter((k): k is ColKey => COLUMNS.some(c => c.key === k)) : DEFAULT_VISIBLE;
+const parseFilters = (stored: unknown): PersistedFilters => {
+  const s = (stored ?? {}) as Partial<Record<keyof PersistedFilters, unknown>>;
+  return {
+    roles: isStringArray(s.roles) ? s.roles : [],
+    teams: isStringArray(s.teams) ? s.teams : [],
+    active: s.active === 'all' || s.active === 'active' || s.active === 'inactive' ? s.active : DEFAULT_FILTERS.active,
+  };
+};
+
 function formatUsd(value: number | null): string {
   if (value == null) return '';
   return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -151,12 +164,13 @@ function fmtDate(value: string | null): string {
   return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-// ISO timestamp → short 'Jan 5' for the "setup email sent" badge.
+// ISO timestamp → short 'Jan 5' (PHT) for the "setup email sent" badge. Fixed
+// timezone so the server (UTC on Vercel) and browser render the same text.
 function fmtSent(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'Asia/Manila' });
 }
 
 // Derived PST/PDT range label for a PHT window, or '—'.
@@ -212,70 +226,27 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
   const markSetupSent = (userId: number, sentAt: string) =>
     setUserList(prev => prev.map(u => u.id === userId ? { ...u, setupEmailSentAt: sentAt } : u));
 
-  // Column show/hide. Lazy init from localStorage (client only) — mirrors the
-  // taskPanelWidth pattern: no effect → no setState-in-effect, server falls back
-  // to the default set.
-  const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(() => {
-    if (typeof window === 'undefined') return new Set(DEFAULT_VISIBLE);
-    try {
-      const raw = localStorage.getItem(COLS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as string[];
-        const valid = parsed.filter((k): k is ColKey => COLUMNS.some(c => c.key === k));
-        return new Set(valid);
-      }
-    } catch { /* keep defaults */ }
-    return new Set(DEFAULT_VISIBLE);
-  });
+  // Column show/hide, persisted in localStorage. The server and hydration
+  // render use DEFAULT_VISIBLE; the stored set applies right after.
+  const [storedCols, setStoredCols] = usePersistedJson(COLS_KEY, DEFAULT_VISIBLE, parseCols);
+  const visibleCols = useMemo(() => new Set(storedCols), [storedCols]);
   const [colsMenuOpen, setColsMenuOpen] = useState(false);
-  const persistCols = (next: Set<ColKey>) => {
-    setVisibleCols(next);
-    try { localStorage.setItem(COLS_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
-  };
   const toggleCol = (key: ColKey) => {
     const next = new Set(visibleCols);
     if (next.has(key)) next.delete(key); else next.add(key);
-    persistCols(next);
+    setStoredCols([...next]);
   };
   const show = (key: ColKey) => visibleCols.has(key);
 
-  // Filters (role / team / active). Lazy init from localStorage, same pattern
-  // as visibleCols above — falls back to DEFAULT_FILTERS (active-only) when
-  // nothing is persisted yet.
-  const [filterRoles, setFilterRoles] = useState<Set<string>>(() => {
-    if (typeof window === 'undefined') return new Set(DEFAULT_FILTERS.roles);
-    try {
-      const raw = localStorage.getItem(FILTERS_KEY);
-      if (raw) return new Set((JSON.parse(raw) as PersistedFilters).roles ?? []);
-    } catch { /* keep defaults */ }
-    return new Set(DEFAULT_FILTERS.roles);
-  });
-  const [filterTeams, setFilterTeams] = useState<Set<string>>(() => {
-    if (typeof window === 'undefined') return new Set(DEFAULT_FILTERS.teams);
-    try {
-      const raw = localStorage.getItem(FILTERS_KEY);
-      if (raw) return new Set((JSON.parse(raw) as PersistedFilters).teams ?? []);
-    } catch { /* keep defaults */ }
-    return new Set(DEFAULT_FILTERS.teams);
-  });
-  const [filterActive, setFilterActive] = useState<ActiveFilter>(() => {
-    if (typeof window === 'undefined') return DEFAULT_FILTERS.active;
-    try {
-      const raw = localStorage.getItem(FILTERS_KEY);
-      if (raw) {
-        const parsed = (JSON.parse(raw) as PersistedFilters).active;
-        if (parsed === 'all' || parsed === 'active' || parsed === 'inactive') return parsed;
-      }
-    } catch { /* keep defaults */ }
-    return DEFAULT_FILTERS.active;
-  });
+  // Filters (role / team / active), persisted like the columns above — falls
+  // back to DEFAULT_FILTERS (active-only) when nothing is persisted yet.
+  const [storedFilters, setStoredFilters] = usePersistedJson(FILTERS_KEY, DEFAULT_FILTERS, parseFilters);
+  const filterRoles = useMemo(() => new Set(storedFilters.roles), [storedFilters]);
+  const filterTeams = useMemo(() => new Set(storedFilters.teams), [storedFilters]);
+  const filterActive = storedFilters.active;
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
-  const persistFilters = (roles: Set<string>, teams: Set<string>, active: ActiveFilter) => {
-    setFilterRoles(roles);
-    setFilterTeams(teams);
-    setFilterActive(active);
-    try { localStorage.setItem(FILTERS_KEY, JSON.stringify({ roles: [...roles], teams: [...teams], active })); } catch { /* ignore */ }
-  };
+  const persistFilters = (roles: Set<string>, teams: Set<string>, active: ActiveFilter) =>
+    setStoredFilters({ roles: [...roles], teams: [...teams], active });
   const toggleFilterRole = (role: string) => {
     const next = new Set(filterRoles);
     if (next.has(role)) next.delete(role); else next.add(role);
@@ -558,7 +529,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
           {filterMenuOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setFilterMenuOpen(false)} />
-              <div className="absolute left-0 z-20 mt-1 w-64 rounded-xl border border-(--rs-neutral-grey-200) bg-white shadow-lg p-1.5">
+              <div className="absolute right-0 z-20 mt-1 w-64 rounded-xl border border-(--rs-neutral-grey-200) bg-white shadow-lg p-1.5">
                 <div className="flex items-center justify-between px-2 py-1.5">
                   <p className="text-[11px] font-bold uppercase tracking-wider text-(--rs-neutral-grey-400)">Status</p>
                   {activeFilterCount > 0 && (
