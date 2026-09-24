@@ -58,6 +58,7 @@ const ROLE_BADGE: Record<string, string> = {
 };
 
 type EditState = {
+  name: string; username: string; email: string; jobTitle: string;
   role: string; isActive: boolean; team: string; memberCode: string; hourlyRateUsd: string;
   dateOfBirth: string; startDate: string; endDate: string; driveUrl: string;
   approvedHoursPerWeek: string; schedulePhtStart: string; schedulePhtEnd: string;
@@ -159,6 +160,9 @@ function pstLabel(start: string | null, end: string | null): { range: string; zo
 // surface in the editor dialog before submit (dates YYYY-MM-DD, http(s) drive
 // URL, rate ≥ 0, approved hours 1–60). Returns an error string, or null if valid.
 function validateEditForm(f: EditState): string | null {
+  if (!f.name.trim()) return 'Full name is required';
+  if (!/^[a-z0-9_.-]{2,64}$/.test(f.username.trim().toLowerCase())) return 'Username must be 2–64 chars: letters, numbers, _ . -';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())) return 'Enter a valid email address';
   const dateRe = /^\d{4}-\d{2}-\d{2}$/;
   const dateChecks: [string, string][] = [
     ['Date of birth', f.dateOfBirth],
@@ -262,7 +266,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
   }, []);
 
   // Edit existing user — the editor lives inside the profile dialog (profileUser).
-  const [editForm, setEditForm]     = useState<EditState>({ role: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '', dateOfBirth: '', startDate: '', endDate: '', driveUrl: '', approvedHoursPerWeek: '15', schedulePhtStart: '', schedulePhtEnd: '' });
+  const [editForm, setEditForm]     = useState<EditState>({ name: '', username: '', email: '', jobTitle: '', role: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '', dateOfBirth: '', startDate: '', endDate: '', driveUrl: '', approvedHoursPerWeek: '15', schedulePhtStart: '', schedulePhtEnd: '' });
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState('');
 
@@ -292,6 +296,10 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
     setProfileUser(user);
     setError('');
     setEditForm({
+      name: user.name,
+      username: user.username,
+      email: user.email,
+      jobTitle: user.jobTitle ?? '',
       role: user.role,
       isActive: user.isActive,
       team: user.team ?? '',
@@ -323,6 +331,10 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id:            userId,
+          name:          editForm.name.trim(),
+          username:      editForm.username.trim().toLowerCase(),
+          email:         editForm.email.trim().toLowerCase(),
+          jobTitle:      editForm.jobTitle.trim() || null,
           role:          editForm.role,
           isActive:      editForm.isActive ? 1 : 0,
           team:          editForm.team.trim() || null,
@@ -864,7 +876,6 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
               <>
                 <DialogHeader>
                   <DialogTitle>{profileUser.name}</DialogTitle>
-                  {/* Identity — sourced from the org chart, not editable here. */}
                   <p className="text-sm text-(--rs-neutral-grey-500)">{profileUser.username} · {profileUser.email}</p>
                   {profileUser.jobTitle && (
                     <p className="text-xs text-(--rs-neutral-grey-400)">{profileUser.jobTitle}</p>
@@ -908,6 +919,29 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                 ) : (
                   <>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-4">
+                      <Field label="Full Name (legal)">
+                        <input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                          aria-label="Full name" className={inputCls} />
+                      </Field>
+                      <Field label="Job Title (per contract)">
+                        <input value={editForm.jobTitle} onChange={e => setEditForm(f => ({ ...f, jobTitle: e.target.value }))}
+                          aria-label="Job title" className={inputCls} />
+                      </Field>
+                      <Field label="Username">
+                        <input value={editForm.username} onChange={e => setEditForm(f => ({ ...f, username: e.target.value }))}
+                          aria-label="Username" autoCapitalize="none" spellCheck={false} className={`${inputCls} font-mono`} />
+                      </Field>
+                      <div>
+                        <Field label="Email">
+                          <input type="email" value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
+                            aria-label="Email" className={inputCls} />
+                        </Field>
+                        {editForm.email.trim().toLowerCase() !== profileUser.email.toLowerCase() && (
+                          <p className="mt-1.5 text-xs text-amber-700">
+                            This also changes their login email — they&apos;ll sign in with the new address. Attendance, tasks, and other history stay attached.
+                          </p>
+                        )}
+                      </div>
                       <Field label="Role">
                         <select value={editForm.role} onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))} className={inputCls}>
                           {ROLE_OPTIONS.map(r => <option key={r} value={r}>{roleDisplayLabel(r)}</option>)}

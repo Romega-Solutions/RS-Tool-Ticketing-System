@@ -21,10 +21,11 @@ const notificationPrefsSchema = z.object({
   taskAdded:    z.boolean().optional(),
 });
 
+// Identity (name, email, team, job title) is admin-owned and intentionally
+// absent here — legal names and contract job titles are set by HR via
+// PATCH /api/admin/users. Unknown keys are stripped by zod, so older clients
+// that still send them are silently ignored rather than applied.
 const profileUpdateSchema = z.object({
-  name: z.string().optional(),
-  team: z.string().nullable().optional(),
-  jobTitle: z.string().nullable().optional(),
   password: z.string().optional(),
   reminderEnabled: z.boolean().optional(),
   reminderIntervalMinutes: z.union([z.number(), z.string()]).optional(),
@@ -79,18 +80,10 @@ export const PUT = route(async (req: Request) => {
   const session = await requireSession();
   const body = await parseBody(req, profileUpdateSchema);
 
-  const name = String(body.name || '').trim();
-  const team = String(body.team || '').trim();
-  const jobTitle = String(body.jobTitle || '').trim();
   const password = String(body.password || '');
-
-  if (!name) throw badRequest('Name is required');
 
   const VALID_INTERVALS = [30, 60, 120, 180];
   const payload: Record<string, string | number | null> = {
-    name,
-    team: team || null,
-    job_title: jobTitle || null,
     updated_at: new Date().toISOString(),
   };
 
