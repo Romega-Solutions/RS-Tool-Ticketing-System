@@ -10,6 +10,7 @@ import {
   buildStateLookup,
   enrichWorkItems,
 } from '@/lib/tickets';
+import type { ProjectViewer } from '@/lib/tickets';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { addDaysYmd, dayOfWeekYmd, phtToday, phtWeekStartOf } from '@/lib/pht';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -124,6 +125,7 @@ export default async function DashboardPage() {
 
       <Suspense fallback={<TicketsSkeleton />}>
         <TicketsSection
+          viewer={sessionUser ? { id: sessionUser.id, role: sessionUser.role } : null}
           userId={sessionUser ? String(sessionUser.id) : null}
           userEmail={sessionUser?.email ?? null}
         />
@@ -363,7 +365,7 @@ function SectionHeading({ id, title, description, action }: { id: string; title:
   );
 }
 
-async function TicketsSection({ userId, userEmail }: { userId: string | null; userEmail: string | null }) {
+async function TicketsSection({ viewer, userId, userEmail }: { viewer: ProjectViewer | null; userId: string | null; userEmail: string | null }) {
   let projects: Awaited<ReturnType<typeof getProjects>> = [];
   let members: Awaited<ReturnType<typeof getWorkspaceMembers>> = [];
   let recentActivity: Awaited<ReturnType<typeof getDashboardProjectActivity>> = [];
@@ -372,7 +374,11 @@ async function TicketsSection({ userId, userEmail }: { userId: string | null; us
   let activityError: string | null = null;
 
   try {
-    [projects, members] = await Promise.all([getProjects(), getWorkspaceMembers()]);
+    // Non-admins only see projects they're a member of; with no session, nothing.
+    [projects, members] = await Promise.all([
+      viewer ? getProjects({ viewer }) : Promise.resolve([]),
+      getWorkspaceMembers(),
+    ]);
     const [byProject, activityRows] = await Promise.all([
       Promise.all(
         projects.map(async p => {
@@ -389,7 +395,7 @@ async function TicketsSection({ userId, userEmail }: { userId: string | null; us
           }));
         }),
       ),
-      getDashboardProjectActivity(6)
+      (viewer ? getDashboardProjectActivity(6, viewer) : Promise.resolve([]))
         .then(rows => ({ rows, error: null as string | null }))
         .catch(err => ({
           rows: [],

@@ -5,8 +5,9 @@
 //   viewer → view + comment/@mention only
 //   member → viewer + create/edit items (NOT due date, NOT assignees) ; no settings
 //   lead   → member + due date + assignees + project settings (everything)
-// Global ADMINS bypass and are always treated as project leads. Everyone else
-// (including org/team leads) is governed by their stored project role.
+// Global ADMINS (incl. CEO/Founder) bypass and are always treated as project
+// leads. Everyone else (including org/team leads) is governed by their stored
+// project role — a non-member has no access at all.
 
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { SessionUser } from '@/lib/session';
@@ -57,9 +58,9 @@ export function normalizeProjectRole(role: unknown): ProjectRole {
 
 /**
  * Effective project role for a user. Global admins bypass (always 'lead').
- * Everyone else is governed by their project_members.role. A non-member on a
- * project that HAS members gets null (no access). Legacy projects with zero
- * recorded members fail open to 'lead' (pre-membership behaviour).
+ * Everyone else is governed by their project_members.role; a non-member gets
+ * null (no access) — including on legacy projects with zero recorded members,
+ * which are admin-only until someone is added.
  */
 export async function getProjectRole(user: SessionUser, projectId: number | string): Promise<ProjectRole | null> {
   if (user.role === 'admin') return 'lead';
@@ -68,11 +69,7 @@ export async function getProjectRole(user: SessionUser, projectId: number | stri
   const { data: pm } = await sb
     .from('project_members').select('role')
     .eq('project_id', pid).eq('user_id', user.id).maybeSingle();
-  if (pm) return normalizeProjectRole(pm.role);
-
-  const { count } = await sb
-    .from('project_members').select('id', { count: 'exact', head: true }).eq('project_id', pid);
-  return (count ?? 0) === 0 ? 'lead' : null;   // legacy fail-open
+  return pm ? normalizeProjectRole(pm.role) : null;
 }
 
 /** Resolve the full capability set for a user on a project in one call. */
