@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Pencil, X, Loader2, UserPlus, Eye, EyeOff, Users, UserMinus, RotateCcw, FileText, ArrowUp, ArrowDown, ChevronsUpDown, SlidersHorizontal, Mail, MailCheck } from 'lucide-react';
+import { Pencil, X, Loader2, UserPlus, Eye, EyeOff, Users, UserMinus, RotateCcw, FileText, ArrowUp, ArrowDown, ChevronsUpDown, SlidersHorizontal, Mail, MailCheck, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -130,6 +130,15 @@ const COLUMNS: { key: ColKey; label: string }[] = [
 const DEFAULT_VISIBLE: ColKey[] = ['role', 'team', 'approvedHoursPerWeek', 'isActive'];
 const COLS_KEY = 'usersTableColumns:v1';
 
+// ── Filters (role / team / active) ──────────────────────────────────────────
+// Mirrors the column show/hide persistence pattern. Active defaults to
+// 'active' so removed users are hidden until an admin opts in to see them.
+type ActiveFilter = 'all' | 'active' | 'inactive';
+const NO_TEAM = '__no_team__';
+const FILTERS_KEY = 'usersTableFilters:v1';
+type PersistedFilters = { roles: string[]; teams: string[]; active: ActiveFilter };
+const DEFAULT_FILTERS: PersistedFilters = { roles: [], teams: [], active: 'active' };
+
 function formatUsd(value: number | null): string {
   if (value == null) return '';
   return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -231,6 +240,72 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
   };
   const show = (key: ColKey) => visibleCols.has(key);
 
+  // Filters (role / team / active). Lazy init from localStorage, same pattern
+  // as visibleCols above — falls back to DEFAULT_FILTERS (active-only) when
+  // nothing is persisted yet.
+  const [filterRoles, setFilterRoles] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set(DEFAULT_FILTERS.roles);
+    try {
+      const raw = localStorage.getItem(FILTERS_KEY);
+      if (raw) return new Set((JSON.parse(raw) as PersistedFilters).roles ?? []);
+    } catch { /* keep defaults */ }
+    return new Set(DEFAULT_FILTERS.roles);
+  });
+  const [filterTeams, setFilterTeams] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set(DEFAULT_FILTERS.teams);
+    try {
+      const raw = localStorage.getItem(FILTERS_KEY);
+      if (raw) return new Set((JSON.parse(raw) as PersistedFilters).teams ?? []);
+    } catch { /* keep defaults */ }
+    return new Set(DEFAULT_FILTERS.teams);
+  });
+  const [filterActive, setFilterActive] = useState<ActiveFilter>(() => {
+    if (typeof window === 'undefined') return DEFAULT_FILTERS.active;
+    try {
+      const raw = localStorage.getItem(FILTERS_KEY);
+      if (raw) {
+        const parsed = (JSON.parse(raw) as PersistedFilters).active;
+        if (parsed === 'all' || parsed === 'active' || parsed === 'inactive') return parsed;
+      }
+    } catch { /* keep defaults */ }
+    return DEFAULT_FILTERS.active;
+  });
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+  const persistFilters = (roles: Set<string>, teams: Set<string>, active: ActiveFilter) => {
+    setFilterRoles(roles);
+    setFilterTeams(teams);
+    setFilterActive(active);
+    try { localStorage.setItem(FILTERS_KEY, JSON.stringify({ roles: [...roles], teams: [...teams], active })); } catch { /* ignore */ }
+  };
+  const toggleFilterRole = (role: string) => {
+    const next = new Set(filterRoles);
+    if (next.has(role)) next.delete(role); else next.add(role);
+    persistFilters(next, filterTeams, filterActive);
+  };
+  const toggleFilterTeam = (team: string) => {
+    const next = new Set(filterTeams);
+    if (next.has(team)) next.delete(team); else next.add(team);
+    persistFilters(filterRoles, next, filterActive);
+  };
+  const setFilterActivePersisted = (active: ActiveFilter) => persistFilters(filterRoles, filterTeams, active);
+  const clearFilters = () => persistFilters(new Set(), new Set(), 'all');
+
+  // Distinct roles/teams actually present in the data, for the filter menu.
+  const availableRoles = useMemo(
+    () => Array.from(new Set(userList.map(u => u.role))).sort((a, b) => roleDisplayLabel(a).localeCompare(roleDisplayLabel(b))),
+    [userList],
+  );
+  const availableTeams = useMemo(
+    () => Array.from(new Set(userList.map(u => u.team || NO_TEAM))).sort((a, b) => {
+      if (a === NO_TEAM) return 1;
+      if (b === NO_TEAM) return -1;
+      return a.localeCompare(b);
+    }),
+    [userList],
+  );
+  const activeFilterCount =
+    filterRoles.size + filterTeams.size + (filterActive !== 'all' ? 1 : 0);
+
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase
@@ -271,15 +346,24 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'name', dir: 'asc' });
   const toggleSort = (key: SortKey) =>
     setSort(s => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  const filteredUsers = useMemo(() => {
+    return userList.filter(u => {
+      if (filterActive === 'active' && !u.isActive) return false;
+      if (filterActive === 'inactive' && u.isActive) return false;
+      if (filterRoles.size > 0 && !filterRoles.has(u.role)) return false;
+      if (filterTeams.size > 0 && !filterTeams.has(u.team || NO_TEAM)) return false;
+      return true;
+    });
+  }, [userList, filterActive, filterRoles, filterTeams]);
   const sortedUsers = useMemo(() => {
     const dirMul = sort.dir === 'asc' ? 1 : -1;
-    return [...userList].sort((a, b) => {
+    return [...filteredUsers].sort((a, b) => {
       // Removed (inactive) users always sink to the very bottom — they keep their
       // grayed-out row but never sort in among the active users.
       if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
       return compareUsers(a, b, sort.key) * dirMul;
     });
-  }, [userList, sort]);
+  }, [filteredUsers, sort]);
 
   // Create new user
   const [showCreate, setShowCreate]       = useState(false);
@@ -465,6 +549,80 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       )}
 
       <div className="flex justify-end gap-2">
+        {/* Filter menu (role / team / active) */}
+        <div className="relative">
+          <Button variant="outline" onClick={() => setFilterMenuOpen(o => !o)} className="gap-2">
+            <Filter className="w-4 h-4" />
+            Filter
+            {activeFilterCount > 0 && (
+              <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-(--rs-primary-500) text-white text-[11px] font-semibold leading-none">
+                {activeFilterCount}
+              </span>
+            )}
+          </Button>
+          {filterMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setFilterMenuOpen(false)} />
+              <div className="absolute left-0 z-20 mt-1 w-64 rounded-xl border border-(--rs-neutral-grey-200) bg-white shadow-lg p-1.5">
+                <div className="flex items-center justify-between px-2 py-1.5">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-(--rs-neutral-grey-400)">Status</p>
+                  {activeFilterCount > 0 && (
+                    <button type="button" onClick={clearFilters} className="text-[11px] font-medium text-(--rs-primary-600) hover:text-(--rs-primary-700)">
+                      Clear all
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-1 px-2 pb-2">
+                  {(['active', 'inactive', 'all'] as ActiveFilter[]).map(opt => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setFilterActivePersisted(opt)}
+                      className={`flex-1 rounded-lg border px-2 py-1 text-xs font-medium capitalize transition-colors ${
+                        filterActive === opt
+                          ? 'border-(--rs-primary-300) bg-(--rs-primary-50) text-(--rs-primary-700)'
+                          : 'border-(--rs-neutral-grey-200) text-(--rs-neutral-grey-600) hover:bg-(--rs-neutral-grey-50)'
+                      }`}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+
+                <p className="px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider text-(--rs-neutral-grey-400) border-t border-(--rs-neutral-grey-100)">Role</p>
+                <div className="max-h-40 overflow-y-auto">
+                  {availableRoles.map(role => (
+                    <label key={role} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-(--rs-neutral-grey-50) cursor-pointer text-sm text-(--rs-neutral-grey-700)">
+                      <input
+                        type="checkbox"
+                        checked={filterRoles.has(role)}
+                        onChange={() => toggleFilterRole(role)}
+                        className="w-4 h-4 rounded accent-(--rs-primary-500)"
+                      />
+                      {roleDisplayLabel(role)}
+                    </label>
+                  ))}
+                </div>
+
+                <p className="px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider text-(--rs-neutral-grey-400) border-t border-(--rs-neutral-grey-100)">Team</p>
+                <div className="max-h-40 overflow-y-auto">
+                  {availableTeams.map(team => (
+                    <label key={team} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-(--rs-neutral-grey-50) cursor-pointer text-sm text-(--rs-neutral-grey-700)">
+                      <input
+                        type="checkbox"
+                        checked={filterTeams.has(team)}
+                        onChange={() => toggleFilterTeam(team)}
+                        className="w-4 h-4 rounded accent-(--rs-primary-500)"
+                      />
+                      {team === NO_TEAM ? 'No team' : team}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
         {/* Columns show/hide menu */}
         <div className="relative">
           <Button variant="outline" onClick={() => setColsMenuOpen(o => !o)} className="gap-2">
@@ -712,10 +870,10 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                 );
               })}
 
-              {userList.length === 0 && (
+              {sortedUsers.length === 0 && (
                 <tr>
                   <td colSpan={totalColSpan} className="px-4 py-10 text-center text-(--rs-neutral-grey-400) italic text-sm">
-                    No users found.
+                    {userList.length === 0 ? 'No users found.' : 'No users match the current filters.'}
                   </td>
                 </tr>
               )}

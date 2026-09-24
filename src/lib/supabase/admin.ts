@@ -11,3 +11,22 @@ export function createAdminClient() {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }
+
+// Find a Supabase Auth user by email. supabase-js admin has no direct email
+// lookup, so we paginate listUsers. Used both to recover orphaned auth
+// accounts and to locate the auth record that needs updating when a
+// public.users row's email changes.
+export async function findAuthUserByEmail(
+  admin: ReturnType<typeof createAdminClient>,
+  email: string,
+): Promise<{ id: string } | null> {
+  const target = email.toLowerCase();
+  for (let page = 1; page <= 25; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+    if (error || !data.users.length) return null;
+    const hit = data.users.find((u) => (u.email ?? '').toLowerCase() === target);
+    if (hit) return { id: hit.id };
+    if (data.users.length < 200) return null;
+  }
+  return null;
+}
