@@ -7,8 +7,7 @@ export type AuditAction =
   | 'user.reactivated'
   | 'user.tool_access_changed'
   | 'user.setup_email_sent'
-  | 'user.updated'
-  | 'user.self_profile_updated';
+  | 'user.updated';
 
 // Best-effort audit write: logs failures but NEVER throws — an audit insert must
 // not break the admin action it records.
@@ -66,10 +65,6 @@ export function describeAudit(action: string, details: Record<string, unknown> |
     }
     case 'user.setup_email_sent': return 'Sent an account-setup email';
     case 'user.updated':      return 'Updated a user account';
-    case 'user.self_profile_updated': {
-      const fields = Array.isArray(details?.fields) ? (details.fields as unknown[]) : [];
-      return fields.length ? `Updated their own profile (${fields.join(', ')})` : 'Updated their own profile';
-    }
     default:                  return `Admin action: ${action}`;
   }
 }
