@@ -1,4 +1,5 @@
 import { SAFETY_CEILING_SECONDS, computeOvertime } from './utils';
+import { addDaysYmd, phtWeekStartOf } from './pht';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Pure overtime policy. All thresholds and decisions live here with no I/O,
@@ -115,28 +116,13 @@ export function isClockInCapLocked(input: ClockInCapLockInput): boolean {
   return input.weekSecondsBefore >= input.allowanceSeconds;
 }
 
-/** Monday (local) of the week containing `date`, as YYYY-MM-DD. */
+/** Monday (PHT) of the Mon–Sun week containing the instant `date`, as YYYY-MM-DD. */
 export function weekStartMonday(date: Date): string {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  const dow = d.getDay();
-  d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
+  return phtWeekStartOf(date);
 }
 
-/** The 7 Mon–Sun local date strings for the week containing `date`. */
+/** The 7 Mon–Sun PHT date strings for the week containing the instant `date`. */
 export function weekDates(date: Date): string[] {
-  const monday = new Date(weekStartMonday(date) + 'T00:00:00');
-  const out: string[] = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday.getTime() + i * 86400000);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    out.push(`${y}-${m}-${dd}`);
-  }
-  return out;
+  const monday = weekStartMonday(date);
+  return Array.from({ length: 7 }, (_, i) => addDaysYmd(monday, i));
 }

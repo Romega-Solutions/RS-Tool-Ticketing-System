@@ -152,13 +152,13 @@ describe('isClockInCapLocked — UI mirror of the clock-in gate', () => {
 
 describe('weekStartMonday', () => {
   it('returns the Monday for a midweek date', () => {
-    expect(weekStartMonday(new Date('2026-06-03T12:00:00'))).toBe('2026-06-01');
+    expect(weekStartMonday(new Date('2026-06-03T12:00:00+08:00'))).toBe('2026-06-01');
   });
   it('returns the same day for a Monday', () => {
-    expect(weekStartMonday(new Date('2026-06-01T09:00:00'))).toBe('2026-06-01');
+    expect(weekStartMonday(new Date('2026-06-01T09:00:00+08:00'))).toBe('2026-06-01');
   });
   it('maps Sunday back to the prior Monday', () => {
-    expect(weekStartMonday(new Date('2026-06-07T09:00:00'))).toBe('2026-06-01');
+    expect(weekStartMonday(new Date('2026-06-07T09:00:00+08:00'))).toBe('2026-06-01');
   });
 });
 

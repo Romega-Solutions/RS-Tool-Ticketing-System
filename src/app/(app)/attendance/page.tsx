@@ -3,6 +3,8 @@ import { hasToolAccess, defaultLandingPath } from '@/lib/rbac';
 import { redirect } from 'next/navigation';
 import { AttendanceClient } from './attendance-client';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AttendancePage() {
   const session = await getSession();
   if (!session || !hasToolAccess('attendance', session.role, session.toolAccess)) {

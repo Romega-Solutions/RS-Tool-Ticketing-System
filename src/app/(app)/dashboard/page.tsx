@@ -11,6 +11,7 @@ import {
   enrichWorkItems,
 } from '@/lib/tickets';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { addDaysYmd, dayOfWeekYmd, phtToday, phtWeekStartOf } from '@/lib/pht';
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Activity, AlertCircle, ArrowRight, CalendarDays, CheckCircle2, Circle, Clock, FileText, Flag, Users } from "lucide-react";
@@ -19,6 +20,8 @@ import { HoursChart } from '@/components/hours-chart';
 import { FxRateWidget } from '@/components/fx-rate-widget';
 import { WeeklyHoursCard } from '@/components/weekly-hours-card';
 import { LearningBanner } from '@/components/lms/learning-banner';
+
+export const dynamic = 'force-dynamic';
 
 function stateGroup(item: { state_detail?: { group?: string } }) {
   return (item.state_detail?.group ?? '').toLowerCase();
@@ -45,15 +48,11 @@ const PRIORITY_TONE: Record<string, { label: string; dot: string; text: string }
 };
 
 function getWeekStart(): string {
-  const d = new Date();
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d.toISOString().split('T')[0];
+  return phtWeekStartOf(new Date());
 }
 
 function getTodayDayName(): string {
-  return ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][new Date().getDay()];
+  return ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][dayOfWeekYmd(phtToday())];
 }
 
 type AttStatusRow = {
@@ -82,7 +81,7 @@ export default async function DashboardPage() {
   
   const approvedHoursPerWeek = data?.approved_hours_per_week;
 
-  const isFriday = new Date().getDay() === 5;
+  const isFriday = dayOfWeekYmd(phtToday()) === 5;
 
   return (
     <div className="space-y-6 overflow-x-hidden">
@@ -260,8 +259,8 @@ async function HoursSection({ userId }: { userId: number | null }) {
     try {
       const admin    = createAdminClient();
       const weekStart = getWeekStart();
-      const today    = new Date().toISOString().split('T')[0];
-      const monthAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const today    = phtToday();
+      const monthAgo = addDaysYmd(today, -28);
 
       const { data: tsRows } = await admin
         .from('timesheets')
@@ -273,26 +272,16 @@ async function HoursSection({ userId }: { userId: number | null }) {
 
       const rows = (tsRows ?? []) as { date: string; duration_seconds: number }[];
 
-      const wkDates = DAY_NAMES.map((_, i) => {
-        const d = new Date(weekStart);
-        d.setDate(d.getDate() + i);
-        return d.toISOString().split('T')[0];
-      });
+      const wkDates = DAY_NAMES.map((_, i) => addDaysYmd(weekStart, i));
       weeklyData = DAY_NAMES.map((day, i) => {
         const secs = rows.filter(r => r.date === wkDates[i]).reduce((s, r) => s + (r.duration_seconds ?? 0), 0);
         return { day, hours: Math.round((secs / 3600) * 10) / 10 };
       });
       totalWeekHours = Math.round(weeklyData.reduce((s, d) => s + d.hours, 0) * 10) / 10;
 
-      const wkStarts = Array.from({ length: 4 }, (_, i) => {
-        const ms = new Date(weekStart);
-        ms.setDate(ms.getDate() - (3 - i) * 7);
-        return ms.toISOString().split('T')[0];
-      });
+      const wkStarts = Array.from({ length: 4 }, (_, i) => addDaysYmd(weekStart, -(3 - i) * 7));
       monthlyData = wkStarts.map((ws, i) => {
-        const we = new Date(ws);
-        we.setDate(we.getDate() + 7);
-        const weStr = we.toISOString().split('T')[0];
+        const weStr = addDaysYmd(ws, 7);
         const secs = rows.filter(r => r.date >= ws && r.date < weStr).reduce((s, r) => s + (r.duration_seconds ?? 0), 0);
         return { week: `Wk ${i + 1}`, hours: Math.round((secs / 3600) * 10) / 10 };
       });

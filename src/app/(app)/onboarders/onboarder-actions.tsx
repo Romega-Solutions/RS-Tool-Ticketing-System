@@ -3,11 +3,13 @@
 import { useState, useTransition } from 'react';
 import {
   Mail, Send, FileSignature, CheckCircle2, RefreshCw, MailWarning,
-  MessageSquare, PenSquare,
+  MessageSquare, PenSquare, Bell, Clock,
 } from 'lucide-react';
+import { formatReminderSentAt } from '@/lib/format';
 import {
   sendBgCheckEmail,
   sendWelcomeEmail,
+  sendOnboardingFormReminder,
   sendReferenceRequest,
   sendEmploymentVerification,
   markSowSent,
@@ -112,16 +114,57 @@ export function SendBgCheckButton({ id }: { id: number }) {
   );
 }
 
-export function SendWelcomeButton({ id, type }: { id: number; type: string }) {
+export function SendWelcomeButton({
+  id,
+  type,
+  alreadySubmitted,
+}: {
+  id: number;
+  type: string;
+  alreadySubmitted: boolean;
+}) {
   return (
     <ActionButton
       onClick={() => sendWelcomeEmail(id)}
-      label={`Send welcome (${type})`}
+      label={alreadySubmitted ? 'Onboarding form received' : `Confirm & send welcome (${type})`}
       icon={<Mail className="w-3.5 h-3.5" />}
-      variant="primary"
+      variant={alreadySubmitted ? 'subtle' : 'primary'}
       size="md"
-      confirm={`Send the ${type} welcome email (SOP §5) now?`}
+      confirm={`Confirm the handoff and send the ${type} welcome email now? This assigns the Friday onboarding cohort.`}
+      disabled={alreadySubmitted}
     />
+  );
+}
+
+export function SendOnboardingFormReminderButton({
+  id,
+  initialSentAt,
+  lastSentAt,
+}: {
+  id: number;
+  initialSentAt: string | null;
+  lastSentAt: string | null;
+}) {
+  const mostRecentSentAt = [initialSentAt, lastSentAt]
+    .filter((value): value is string => Boolean(value))
+    .sort()
+    .at(-1) ?? null;
+  const formattedLastSentAt = formatReminderSentAt(mostRecentSentAt);
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <ActionButton
+        onClick={() => sendOnboardingFormReminder(id)}
+        label="Send form reminder"
+        icon={<Bell className="w-3.5 h-3.5" />}
+        variant="outline"
+        confirm="Send a reminder without changing the original onboarding-form link?"
+      />
+      {formattedLastSentAt && (
+        <span className="inline-flex items-center gap-1 text-[10px] text-(--rs-neutral-grey-500)">
+          <Clock className="h-3 w-3" /> Last sent {formattedLastSentAt}
+        </span>
+      )}
+    </div>
   );
 }
 

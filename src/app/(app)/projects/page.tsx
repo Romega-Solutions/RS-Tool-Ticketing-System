@@ -16,6 +16,8 @@ import { ProjectCard } from '@/components/project-card.client';
 import { ProjectActivityFeed } from '@/components/project-activity-feed';
 import { cn } from '@/lib/utils';
 
+export const dynamic = 'force-dynamic';
+
 const TABS = [
   { key: 'active', label: 'Active' },
   { key: 'archived', label: 'Archived' },
