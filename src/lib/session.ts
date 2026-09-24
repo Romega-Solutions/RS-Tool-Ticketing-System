@@ -14,6 +14,7 @@ export type SessionUser = {
   jobTitle: string | null;
   isOnboarding: boolean;
   toolAccess: string[];
+  approvedHours:number;
 };
 
 // Bounds how long a single getSession() call can take. Without this, a slow
@@ -51,7 +52,7 @@ async function fetchSessionResult(): Promise<SessionResult> {
   const admin = createAdminClient();
   const { data: dbUser } = await admin
     .from('users')
-    .select('id, email, name, username, role, team, job_title, is_active, is_onboarding, tool_access')
+    .select('id, email, name, username, role, team, job_title, is_active, is_onboarding, tool_access, approved_hours_per_week')
     .eq('email', user.email)
     .maybeSingle();
 
@@ -62,6 +63,7 @@ async function fetchSessionResult(): Promise<SessionResult> {
     reason: null,
     user: {
       id: dbUser.id,
+      approvedHours:dbUser.approved_hours_per_week,
       email: dbUser.email,
       name: dbUser.name,
       username: dbUser.username,
