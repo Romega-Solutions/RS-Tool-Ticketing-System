@@ -13,6 +13,7 @@ import {
 import { isAllowedTaskImageUpload } from '@/lib/task-image-uploads';
 import { RichTextEditor } from '@/components/rich-text-editor.client';
 import { RichText } from '@/components/rich-text';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { PersonAvatar } from '@/components/person-avatar';
 import { sanitizeRichText, isRichTextEmpty } from '@/lib/sanitize';
 import type { ProjectCaps } from '@/lib/permissions';
@@ -248,6 +249,9 @@ export function TaskDetailSheet({
   const [openThreadId, setOpenThreadId] = useState<number | null>(null);
   const [replyDrafts, setReplyDrafts] = useState<Record<number, string>>({});
   const [postingReplyTo, setPostingReplyTo] = useState<number | null>(null);
+  // Comment awaiting delete confirmation in the modal.
+  const [pendingDeleteCommentId, setPendingDeleteCommentId] = useState<number | null>(null);
+  const [deletingComment, setDeletingComment] = useState(false);
 
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const descriptionImageUrls = extractTaskDescriptionImageUrls(description);
@@ -488,19 +492,25 @@ export function TaskDetailSheet({
     if (res.ok) setComments((await res.json()) as Comment[]);
   };
 
-  const handleDeleteComment = async (commentId: number) => {
-    if (!item) return;
-    if (!confirm('Delete this comment? The timeline will show that you deleted it.')) return;
+  const handleDeleteComment = async () => {
+    const commentId = pendingDeleteCommentId;
+    if (!item || commentId == null) return;
     setError('');
-    const res = await fetch(`/api/tickets/work-items/${item.id}/comments/${commentId}`, {
-      method: 'DELETE',
-    });
-    if (!res.ok) {
-      const d = (await res.json().catch(() => ({}))) as { error?: string };
-      setError(d.error ?? 'Failed to delete comment');
-      return;
+    setDeletingComment(true);
+    try {
+      const res = await fetch(`/api/tickets/work-items/${item.id}/comments/${commentId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(d.error ?? 'Failed to delete comment');
+        return;
+      }
+      await refreshComments();
+    } finally {
+      setDeletingComment(false);
+      setPendingDeleteCommentId(null);
     }
-    await refreshComments();
   };
 
   const handleEditComment = async (commentId: number, html: string): Promise<boolean> => {
@@ -678,7 +688,7 @@ export function TaskDetailSheet({
       posting={postingReplyTo === openThread.id}
       onPost={() => handlePostReply(openThread.id)}
       canModify={c => !c.deleted_at && (c.author_id === currentUserId || isAdmin)}
-      onDelete={c => handleDeleteComment(c.id)}
+      onDelete={c => setPendingDeleteCommentId(c.id)}
       onEdit={(c, html) => handleEditComment(c.id, html)}
       highlightCommentId={highlightCommentId}
       mentionUsers={members.map(m => ({ id: m.user_id, name: m.name }))}
@@ -1117,7 +1127,7 @@ export function TaskDetailSheet({
                       isOwn={entry.comment.author_id === currentUserId}
                       canModify={!entry.comment.deleted_at && (entry.comment.author_id === currentUserId || isAdmin)}
                       highlighted={highlightCommentId === String(entry.comment.id) || openThreadId === entry.comment.id}
-                      onDelete={() => handleDeleteComment(entry.comment.id)}
+                      onDelete={() => setPendingDeleteCommentId(entry.comment.id)}
                       onEdit={html => handleEditComment(entry.comment.id, html)}
                       onReply={() => setOpenThreadId(entry.comment.id)}
                       mentionUsers={members.map(m => ({ id: m.user_id, name: m.name }))}
@@ -1175,6 +1185,16 @@ export function TaskDetailSheet({
         {threadPanel && threadMode !== 'outside' && threadPanel}
         </div>
         {threadPanel && threadMode === 'outside' && threadPanel}
+        <ConfirmDialog
+          open={pendingDeleteCommentId != null}
+          onOpenChange={o => { if (!o) setPendingDeleteCommentId(null); }}
+          title="Delete this comment?"
+          description="The timeline will show that you deleted it. Replies in its thread stay visible."
+          confirmLabel="Delete"
+          destructive
+          loading={deletingComment}
+          onConfirm={handleDeleteComment}
+        />
       </SheetContent>
     </Sheet>
   );
@@ -1203,16 +1223,21 @@ function CommentBubble({
 }) {
   const [editing, setEditing] = useState(false);
 
-  // Deleted: only the footprint remains, in the comment's original spot.
+  // Deleted: an empty outlined bubble holding the footprint stays in the
+  // comment's original spot.
   if (comment.deleted_at) {
     return (
       <div
         data-comment-id={comment.id}
-        className={`flex px-1 py-1 ${isOwn ? 'justify-end' : 'pl-[34px]'} ${
-          highlighted ? 'rounded-md ring-2 ring-(--rs-accent-300)' : ''
-        }`}
+        className={`flex ${isOwn ? 'justify-end' : 'pl-[34px]'}`}
       >
-        <CommentFootprint comment={comment} />
+        <div
+          className={`max-w-[78%] rounded-2xl border border-(--rs-neutral-grey-200) px-3.5 py-2 ${
+            isOwn ? 'rounded-br-md' : 'rounded-bl-md'
+          } ${highlighted ? 'ring-2 ring-(--rs-accent-300) ring-offset-1' : ''}`}
+        >
+          <CommentFootprint comment={comment} />
+        </div>
       </div>
     );
   }
@@ -1272,7 +1297,7 @@ function CommentBubble({
                 aria-label="Delete comment"
                 className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-(--rs-neutral-grey-400) opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 focus-visible:opacity-100 group-hover:opacity-100"
               >
-                <X className="h-3 w-3" />
+                <Trash2 className="h-3 w-3" />
               </button>
             )}
           </div>
@@ -1541,7 +1566,7 @@ function ThreadMessage({
             aria-label="Delete comment"
             className="flex h-6 w-6 items-center justify-center rounded-full text-(--rs-neutral-grey-400) opacity-0 transition-opacity hover:bg-red-50 hover:text-red-500 focus-visible:opacity-100 group-hover:opacity-100"
           >
-            <X className="h-3 w-3" />
+            <Trash2 className="h-3 w-3" />
           </button>
         </div>
       )}
