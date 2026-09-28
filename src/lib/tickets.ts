@@ -620,10 +620,10 @@ export interface WorkItemComment {
 export async function getComments(itemId: string): Promise<WorkItemComment[]> {
   const sb = createAdminClient();
   const { data, error } = await sb.from('work_item_comments')
-    .select('id, work_item_id, author_id, parent_id, body, created_at, updated_at, edited_at, edited_by, deleted_at, deleted_by, users(name)')
+    .select('id, work_item_id, author_id, parent_id, body, created_at, updated_at, edited_at, edited_by, deleted_at, deleted_by, users!author_id(name)')
     .eq('work_item_id', Number(itemId))
     .order('created_at');
-  if (error) throw new PlaneApiError(500, `comments/${itemId}`);
+  if (error) throw new PlaneApiError(500, `comments/${itemId}: ${error.message}`);
   const rows = (data ?? []) as Row[];
 
   // Editors / deleters may differ from the author (admins), so resolve their
