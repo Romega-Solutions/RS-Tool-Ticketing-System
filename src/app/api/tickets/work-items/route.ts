@@ -3,13 +3,17 @@ import { z } from 'zod';
 import {
   createWorkItem,
   patchWorkItem,
+  applyLabel,
+  getLabels,
   getWorkItemDetail,
   getWorkItems,
   diffActivity,
   logActivity,
 } from '@/lib/tickets';
 import { canEditWorkItem, canViewProject, canCreateWorkItem, getProjectCaps } from '@/lib/permissions';
+import { notifyTaskAssigned } from '@/lib/notifications';
 import { route, requireSession, parseBody, badRequest, forbidden, notFound } from '@/lib/api';
+import { sanitizeRichText, isRichTextEmpty } from '@/lib/sanitize';
 
 export const runtime = 'nodejs';
 
@@ -21,6 +25,13 @@ const createSchema = z.object({
   name: z.string().trim().min(1, 'name is required'),
   state: z.string().optional(),
   priority: z.string().optional(),
+  // Optional details so a task can be fully set up in one step instead of
+  // create → open → edit.
+  description: z.string().nullable().optional(),
+  target_date: z.string().nullable().optional(),
+  cycle_id: z.number().nullable().optional(),
+  assigneeUserIds: z.array(z.number()).optional(),
+  labelIds: z.array(z.number().int().positive()).optional(),
 });
 
 const patchSchema = z.object({
@@ -52,17 +63,58 @@ export const GET = route(async (req: Request) => {
   }
 });
 
-// POST /api/tickets/work-items  { projectId, name, state?, priority? }
+// POST /api/tickets/work-items
+//   { projectId, name, state?, priority?, description?, target_date?, cycle_id?, assigneeUserIds?, labelIds? }
 export const POST = route(async (req: Request) => {
   const session = await requireSession();
 
-  const { projectId, name, state, priority } = await parseBody(req, createSchema);
+  const { projectId, name, state, priority, labelIds, ...details } = await parseBody(req, createSchema);
   if (!(await canCreateWorkItem(session, Number(projectId)))) throw forbidden();
+
+  // Same field-level gate as PATCH: Members can't set due date or assignees.
+  const caps = await getProjectCaps(session, Number(projectId));
+  if (!caps.canEditDates) delete details.target_date;
+  if (!caps.canEditAssignees) delete details.assigneeUserIds;
+  if (typeof details.description === 'string') {
+    details.description = isRichTextEmpty(details.description)
+      ? null
+      : sanitizeRichText(details.description);
+  }
 
   try {
     const created = await createWorkItem(projectId, { name, state, priority, createdBy: session.id });
-    await logActivity(Number(created.id), session.id, 'created', null, name);
-    return NextResponse.json(created);
+    const itemId = created.id;
+    await logActivity(Number(itemId), session.id, 'created', null, name);
+
+    const patch = Object.fromEntries(
+      Object.entries(details).filter(([, v]) => v != null && !(Array.isArray(v) && v.length === 0)),
+    ) as typeof details;
+    if (Object.keys(patch).length === 0 && !labelIds?.length) {
+      return NextResponse.json(created);
+    }
+
+    if (Object.keys(patch).length > 0) await patchWorkItem(itemId, patch);
+
+    if (labelIds?.length) {
+      const projectLabelIds = new Set((await getLabels(projectId)).map(l => Number(l.id)));
+      for (const labelId of new Set(labelIds)) {
+        if (projectLabelIds.has(labelId)) await applyLabel(itemId, labelId);
+      }
+    }
+
+    // Best-effort assignment notifications (self-assign is dropped downstream).
+    if (patch.assigneeUserIds?.length) {
+      await Promise.all(patch.assigneeUserIds.map((uid) =>
+        notifyTaskAssigned({
+          userId:   uid,
+          actorId:  session.id,
+          workItem: { id: itemId, projectId, name },
+        }).catch(() => { /* bell/email is secondary to the create */ }),
+      ));
+    }
+
+    const list = await getWorkItems(projectId);
+    return NextResponse.json(list.find(w => w.id === String(itemId)) ?? created);
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Failed to create work item' },

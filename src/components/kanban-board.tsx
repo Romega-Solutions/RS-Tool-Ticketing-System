@@ -19,10 +19,11 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Archive, GripVertical, Hash, Loader2, Plus, X } from 'lucide-react';
+import { AlertTriangle, Archive, GripVertical, Hash, Loader2, Maximize2, Plus, X } from 'lucide-react';
 import { ProjectArchiveDrawer } from '@/components/project-archive-drawer';
 import { PersonAvatar } from '@/components/person-avatar';
 import { TaskDetailSheet, type SheetWorkItem } from '@/components/task-detail-sheet';
+import { CreateTaskDialog, type CreateTaskDefaults } from '@/components/create-task-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { ProjectCaps } from '@/lib/permissions';
 import {
@@ -260,10 +261,12 @@ function AddTaskForm({
   stateId,
   projectId,
   onAdd,
+  onExpand,
 }: {
   stateId: string;
   projectId: string;
   onAdd: (stateId: string, item: KanbanItem) => void;
+  onExpand: (defaults: CreateTaskDefaults) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState('');
@@ -344,6 +347,14 @@ function AddTaskForm({
         >
           Cancel
         </button>
+        <button
+          type="button"
+          onClick={() => { onExpand({ stateId, name: value.trim() }); close(); }}
+          title="Open the full form to set description, assignees, due date and more"
+          className="ml-auto flex min-h-9 items-center gap-1 rounded-md px-2.5 py-1 text-xs text-(--rs-primary-700) transition-colors hover:bg-(--rs-primary-50)"
+        >
+          <Maximize2 className="h-3 w-3" /> Add details
+        </button>
       </div>
     </form>
   );
@@ -357,6 +368,7 @@ function KanbanColumn({
   activeId,
   projectId,
   onAdd,
+  onExpandAdd,
   onOpen,
   canMove,
   canCreate,
@@ -369,6 +381,7 @@ function KanbanColumn({
   activeId: string | null;
   projectId: string;
   onAdd: (stateId: string, item: KanbanItem) => void;
+  onExpandAdd: (defaults: CreateTaskDefaults) => void;
   onOpen: (id: string) => void;
   canMove: boolean;
   canCreate: boolean;
@@ -487,7 +500,7 @@ function KanbanColumn({
         {/* Add task — members + leads only */}
         {canCreate && (
           <div className="mt-2 border-t border-(--rs-neutral-grey-200) pt-2">
-            <AddTaskForm stateId={state.id} projectId={projectId} onAdd={onAdd} />
+            <AddTaskForm stateId={state.id} projectId={projectId} onAdd={onAdd} onExpand={onExpandAdd} />
           </div>
         )}
       </div>
@@ -553,6 +566,9 @@ export function KanbanBoard({
     setFocusCommentId(null);
     setOpenItemId(id);
   }, []);
+
+  // Full create-task dialog; null = closed. Seeded with the column + any typed title.
+  const [createDefaults, setCreateDefaults] = useState<CreateTaskDefaults | null>(null);
 
   // Archive: the project Archive drawer + the Done-column bulk-clear action.
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -823,6 +839,12 @@ export function KanbanBoard({
     setMovingItemId(null);
   };
 
+  // "New task" from the toolbar lands in the first not-yet-started column.
+  const defaultCreateStateId = useMemo(() => {
+    const g = (s: KanbanState) => s.group.toLowerCase();
+    return (states.find(s => g(s) === 'unstarted') ?? states.find(s => g(s) === 'backlog') ?? states[0])?.id ?? '';
+  }, [states]);
+
   const handleTaskAdded = (stateId: string, item: KanbanItem) => {
     setItemsByState(prev => {
       const next = new Map(prev);
@@ -835,6 +857,17 @@ export function KanbanBoard({
     <div className="max-w-full overflow-hidden" role="region" aria-label="Project Kanban board">
       {/* Filter bar */}
       <div className="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-2 sm:mx-0 sm:flex-wrap sm:px-0">
+        {caps.canCreateItem && states.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setCreateDefaults({ stateId: defaultCreateStateId })}
+            className="flex min-h-10 flex-none items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-400) cursor-pointer"
+            style={{ background: 'var(--rs-primary-500)' }}
+          >
+            <Plus className="h-3.5 w-3.5" /> New task
+          </button>
+        )}
+
         <select
           aria-label="Filter tasks by assignee"
           value={filters.assignee}
@@ -964,6 +997,7 @@ export function KanbanBoard({
                 activeId={activeItem?.id ?? movingItemId}
                 projectId={projectId}
                 onAdd={handleTaskAdded}
+                onExpandAdd={setCreateDefaults}
                 onOpen={openItem}
                 canMove={caps.canEditItem}
                 canCreate={caps.canCreateItem}
@@ -991,6 +1025,19 @@ export function KanbanBoard({
         caps={caps}
         onSaved={(updated) => applySheetUpdate(updated)}
         onArchived={(id) => removeItemFromBoard(id)}
+      />
+
+      <CreateTaskDialog
+        open={createDefaults !== null}
+        onOpenChange={(o) => { if (!o) setCreateDefaults(null); }}
+        defaults={createDefaults ?? { stateId: defaultCreateStateId }}
+        projectId={projectId}
+        states={states}
+        members={members}
+        labels={labels}
+        cycles={cycles}
+        caps={caps}
+        onCreated={handleTaskAdded}
       />
 
       <ProjectArchiveDrawer
