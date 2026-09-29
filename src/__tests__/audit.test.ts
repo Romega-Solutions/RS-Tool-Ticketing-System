@@ -32,6 +32,12 @@ describe('describeAudit', () => {
   it('describes account creation', () => {
     expect(describeAudit('user.created', null)).toBe('Created a user account');
   });
+  it('describes identity changes by field', () => {
+    expect(describeAudit('user.identity_changed', {
+      email: { from: 'a@gmail.com', to: 'a@romega-solutions.com' },
+      jobTitle: { from: 'Intern', to: 'Analyst' },
+    })).toBe("Changed a user's email, job title");
+  });
   it('handles unknown actions', () => {
     expect(describeAudit('user.frobnicated', null)).toBe('Admin action: user.frobnicated');
   });

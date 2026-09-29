@@ -88,10 +88,11 @@ export async function GET(request: NextRequest) {
     }
     isNewUser = true;
   } else if (orgProfile) {
+    // Only the department follows the org chart on sign-in. Name and job
+    // title are admin-owned (legal name / contract title) once the account
+    // exists, so they're never overwritten here.
     await admin.from('users').update({
-      name:       orgProfile.name,
       team:       orgProfile.team,
-      job_title:  orgProfile.jobTitle,
       updated_at: new Date().toISOString(),
     }).eq('email', email);
   }
