@@ -19,7 +19,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Archive, GripVertical, Hash, Loader2, Plus, X } from 'lucide-react';
+import { AlertTriangle, Archive, GripVertical, Hash, Loader2, Plus, Search, X } from 'lucide-react';
 import { ProjectArchiveDrawer } from '@/components/project-archive-drawer';
 import { PersonAvatar } from '@/components/person-avatar';
 import { TaskDetailSheet, type SheetWorkItem } from '@/components/task-detail-sheet';
@@ -588,6 +588,7 @@ export function KanbanBoard({
 
   // ── Filter state (URL-synced via window.location, optional for SSR safety) ──
   const [filters, setFilters] = useState<{
+    search: string;
     assignee: string;
     label: string;
     priority: string;
@@ -595,9 +596,10 @@ export function KanbanBoard({
     dueSoon: boolean;
     mine: boolean;
   }>(() => {
-    if (typeof window === 'undefined') return { assignee: '', label: '', priority: '', cycle: '', dueSoon: false, mine: false };
+    if (typeof window === 'undefined') return { search: '', assignee: '', label: '', priority: '', cycle: '', dueSoon: false, mine: false };
     const sp = new URLSearchParams(window.location.search);
     return {
+      search:   sp.get('q')        ?? '',
       assignee: sp.get('assignee') ?? '',
       label:    sp.get('label')    ?? '',
       priority: sp.get('priority') ?? '',
@@ -611,6 +613,7 @@ export function KanbanBoard({
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const sp = new URLSearchParams();
+    if (filters.search.trim()) sp.set('q', filters.search.trim());
     if (filters.assignee) sp.set('assignee', filters.assignee);
     if (filters.label)    sp.set('label',    filters.label);
     if (filters.priority) sp.set('priority', filters.priority);
@@ -645,7 +648,16 @@ export function KanbanBoard({
     return new Set<string>(me ? [me.email, String(me.user_id)] : [String(currentUserId)]);
   }, [members, currentUserId]);
 
+  // Search matches the title or the ticket number ("12", "#12", "PROJ-12").
+  const searchTerm = filters.search.trim().toLowerCase();
+  const searchNumber = searchTerm.match(/^(?:#|[a-z0-9]+-)?(\d+)$/)?.[1];
+
   const filterMatch = (item: KanbanItem): boolean => {
+    if (searchTerm) {
+      const nameHit = item.name.toLowerCase().includes(searchTerm);
+      const numberHit = searchNumber !== undefined && String(item.sequence_id) === searchNumber;
+      if (!nameHit && !numberHit) return false;
+    }
     if (filters.assignee && !item.assignees.includes(filters.assignee)) return false;
     if (filters.label && !item.label_ids?.includes(Number(filters.label))) return false;
     if (filters.priority && item.priority !== filters.priority) return false;
@@ -663,12 +675,12 @@ export function KanbanBoard({
   };
 
   const activeFilterCount =
-    Number(!!filters.assignee) + Number(!!filters.label) +
+    Number(!!searchTerm) + Number(!!filters.assignee) + Number(!!filters.label) +
     Number(!!filters.priority) + Number(!!filters.cycle) +
     Number(filters.dueSoon) + Number(filters.mine);
 
   const clearFilters = () =>
-    setFilters({ assignee: '', label: '', priority: '', cycle: '', dueSoon: false, mine: false });
+    setFilters({ search: '', assignee: '', label: '', priority: '', cycle: '', dueSoon: false, mine: false });
 
   const findItemAndState = useCallback((itemId: string): [KanbanItem | null, string] => {
     for (const [sid, items] of itemsByState) {
@@ -835,6 +847,19 @@ export function KanbanBoard({
     <div className="max-w-full overflow-hidden" role="region" aria-label="Project Kanban board">
       {/* Filter bar */}
       <div className="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-2 sm:mx-0 sm:flex-wrap sm:px-0">
+        <div className="relative min-w-48 flex-none sm:w-56">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-(--rs-neutral-grey-400)" />
+          <input
+            type="search"
+            aria-label="Search tasks"
+            placeholder="Search tasks…"
+            value={filters.search}
+            onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
+            onKeyDown={e => { if (e.key === 'Escape') setFilters(f => ({ ...f, search: '' })); }}
+            className="min-h-10 w-full rounded-md border border-(--rs-neutral-grey-200) bg-white py-2 pl-8 pr-2.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-400)"
+          />
+        </div>
+
         <select
           aria-label="Filter tasks by assignee"
           value={filters.assignee}
