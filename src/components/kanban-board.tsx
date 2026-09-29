@@ -839,12 +839,6 @@ export function KanbanBoard({
     setMovingItemId(null);
   };
 
-  // "New task" from the toolbar lands in the first not-yet-started column.
-  const defaultCreateStateId = useMemo(() => {
-    const g = (s: KanbanState) => s.group.toLowerCase();
-    return (states.find(s => g(s) === 'unstarted') ?? states.find(s => g(s) === 'backlog') ?? states[0])?.id ?? '';
-  }, [states]);
-
   const handleTaskAdded = (stateId: string, item: KanbanItem) => {
     setItemsByState(prev => {
       const next = new Map(prev);
@@ -857,17 +851,6 @@ export function KanbanBoard({
     <div className="max-w-full overflow-hidden" role="region" aria-label="Project Kanban board">
       {/* Filter bar */}
       <div className="-mx-4 mb-3 flex gap-2 overflow-x-auto px-4 pb-2 sm:mx-0 sm:flex-wrap sm:px-0">
-        {caps.canCreateItem && states.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setCreateDefaults({ stateId: defaultCreateStateId })}
-            className="flex min-h-10 flex-none items-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-400) cursor-pointer"
-            style={{ background: 'var(--rs-primary-500)' }}
-          >
-            <Plus className="h-3.5 w-3.5" /> New task
-          </button>
-        )}
-
         <select
           aria-label="Filter tasks by assignee"
           value={filters.assignee}
@@ -1030,7 +1013,7 @@ export function KanbanBoard({
       <CreateTaskDialog
         open={createDefaults !== null}
         onOpenChange={(o) => { if (!o) setCreateDefaults(null); }}
-        defaults={createDefaults ?? { stateId: defaultCreateStateId }}
+        defaults={createDefaults ?? { stateId: '' }}
         projectId={projectId}
         states={states}
         members={members}
