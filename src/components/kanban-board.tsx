@@ -19,7 +19,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Archive, GripVertical, Hash, Loader2, Maximize2, Plus, X } from 'lucide-react';
+import { AlertTriangle, Archive, GripVertical, Hash, Loader2, Plus, X } from 'lucide-react';
 import { ProjectArchiveDrawer } from '@/components/project-archive-drawer';
 import { PersonAvatar } from '@/components/person-avatar';
 import { TaskDetailSheet, type SheetWorkItem } from '@/components/task-detail-sheet';
@@ -255,108 +255,23 @@ function DraggableCard({ item, isActive, onOpen, canMove }: { item: KanbanItem; 
   );
 }
 
-// ── Inline add-task form ───────────────────────────────────────────────────────
+// ── Add-task button (opens the full create dialog for this column) ──────────────
 
-function AddTaskForm({
+function AddTaskButton({
   stateId,
-  projectId,
-  onAdd,
-  onExpand,
+  onCreate,
 }: {
   stateId: string;
-  projectId: string;
-  onAdd: (stateId: string, item: KanbanItem) => void;
-  onExpand: (defaults: CreateTaskDefaults) => void;
+  onCreate: (defaults: CreateTaskDefaults) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [value, setValue] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const openForm = () => {
-    setOpen(true);
-    setTimeout(() => inputRef.current?.focus(), 40);
-  };
-
-  const close = () => { setOpen(false); setValue(''); setError(''); };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!value.trim()) return;
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch('/api/tickets/work-items', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, name: value.trim(), state: stateId, priority: 'none' }),
-      });
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
-        setError(data.error ?? 'Failed to create task');
-        return;
-      }
-      const created = (await res.json()) as KanbanItem;
-      onAdd(stateId, created);
-      close();
-    } catch {
-      setError('Request failed');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (!open) {
-    return (
-      <button
-        onClick={openForm}
-        className="flex min-h-10 w-full items-center gap-1.5 rounded-md px-2 py-2 text-xs text-(--rs-neutral-grey-400) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-700)"
-      >
-        <Plus className="w-3.5 h-3.5" /> Add task
-      </button>
-    );
-  }
-
   return (
-    <form onSubmit={handleSubmit} className="space-y-2 pt-1">
-      <input
-        ref={inputRef}
-        value={value}
-        onChange={e => setValue(e.target.value)}
-        onKeyDown={e => e.key === 'Escape' && close()}
-        placeholder="Task title…"
-        className="w-full text-sm px-2.5 py-1.5 border border-(--rs-primary-300) rounded-md outline-none focus:ring-2 focus:ring-offset-0 bg-white"
-        style={{ boxShadow: 'none' }}
-      />
-      {error && <p className="text-xs text-red-500">{error}</p>}
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={loading || !value.trim()}
-          className="flex min-h-9 items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium text-white transition-opacity disabled:opacity-50"
-          style={{ background: 'var(--rs-primary-500)' }}
-        >
-          {loading && <Loader2 className="w-3 h-3 animate-spin" />}
-          Add
-        </button>
-        <button
-          type="button"
-          onClick={close}
-          className="min-h-9 rounded-md px-2.5 py-1 text-xs text-(--rs-neutral-grey-500) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-800)"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={() => { onExpand({ stateId, name: value.trim() }); close(); }}
-          title="Open the full form to set description, assignees, due date and more"
-          className="ml-auto flex min-h-9 items-center gap-1 rounded-md px-2.5 py-1 text-xs text-(--rs-primary-700) transition-colors hover:bg-(--rs-primary-50)"
-        >
-          <Maximize2 className="h-3 w-3" /> Add details
-        </button>
-      </div>
-    </form>
+    <button
+      type="button"
+      onClick={() => onCreate({ stateId })}
+      className="flex min-h-10 w-full items-center gap-1.5 rounded-md px-2 py-2 text-xs text-(--rs-neutral-grey-400) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-700)"
+    >
+      <Plus className="w-3.5 h-3.5" /> Add task
+    </button>
   );
 }
 
@@ -366,9 +281,7 @@ function KanbanColumn({
   state,
   items,
   activeId,
-  projectId,
-  onAdd,
-  onExpandAdd,
+  onCreate,
   onOpen,
   canMove,
   canCreate,
@@ -379,9 +292,7 @@ function KanbanColumn({
   state: KanbanState;
   items: KanbanItem[];
   activeId: string | null;
-  projectId: string;
-  onAdd: (stateId: string, item: KanbanItem) => void;
-  onExpandAdd: (defaults: CreateTaskDefaults) => void;
+  onCreate: (defaults: CreateTaskDefaults) => void;
   onOpen: (id: string) => void;
   canMove: boolean;
   canCreate: boolean;
@@ -500,7 +411,7 @@ function KanbanColumn({
         {/* Add task — members + leads only */}
         {canCreate && (
           <div className="mt-2 border-t border-(--rs-neutral-grey-200) pt-2">
-            <AddTaskForm stateId={state.id} projectId={projectId} onAdd={onAdd} onExpand={onExpandAdd} />
+            <AddTaskButton stateId={state.id} onCreate={onCreate} />
           </div>
         )}
       </div>
@@ -978,9 +889,7 @@ export function KanbanBoard({
                 state={state}
                 items={(itemsByState.get(state.id) ?? []).filter(filterMatch)}
                 activeId={activeItem?.id ?? movingItemId}
-                projectId={projectId}
-                onAdd={handleTaskAdded}
-                onExpandAdd={setCreateDefaults}
+                onCreate={setCreateDefaults}
                 onOpen={openItem}
                 canMove={caps.canEditItem}
                 canCreate={caps.canCreateItem}
