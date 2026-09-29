@@ -514,6 +514,13 @@ export const workItemComments = pgTable('work_item_comments', {
   body:       text('body').notNull(),
   createdAt:  text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt:  text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  // Audit trail: edits and (soft) deletes are shown in the task timeline as
+  // "Edited by X on …" / "Deleted by X on …". A deleted comment keeps its row
+  // but its body is never served again.
+  editedAt:   text('edited_at'),
+  editedBy:   integer('edited_by').references(() => users.id, { onDelete: 'set null' }),
+  deletedAt:  text('deleted_at'),
+  deletedBy:  integer('deleted_by').references(() => users.id, { onDelete: 'set null' }),
 }, (t) => [
   index('work_item_comments_work_item_idx').on(t.workItemId),
   index('work_item_comments_parent_idx').on(t.parentId),
