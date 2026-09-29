@@ -18,7 +18,7 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertTriangle, Archive, GripVertical, Hash, Loader2, Plus, Search, X } from 'lucide-react';
 import { ProjectArchiveDrawer } from '@/components/project-archive-drawer';
 import { PersonAvatar } from '@/components/person-avatar';
@@ -586,7 +586,10 @@ export function KanbanBoard({
     }
   }
 
-  // ── Filter state (URL-synced via window.location, optional for SSR safety) ──
+  // ── Filter state (URL-synced) ──
+  // Seeded from useSearchParams, not window.location, so the server render and the
+  // hydrating client agree — otherwise filters in a shared link are dropped on load.
+  const initialParams = useSearchParams();
   const [filters, setFilters] = useState<{
     search: string;
     assignee: string;
@@ -596,8 +599,7 @@ export function KanbanBoard({
     dueSoon: boolean;
     mine: boolean;
   }>(() => {
-    if (typeof window === 'undefined') return { search: '', assignee: '', label: '', priority: '', cycle: '', dueSoon: false, mine: false };
-    const sp = new URLSearchParams(window.location.search);
+    const sp = initialParams;
     return {
       search:   sp.get('q')        ?? '',
       assignee: sp.get('assignee') ?? '',
