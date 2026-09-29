@@ -159,15 +159,16 @@ export default function ProfilePage() {
     return () => { active = false; clearInterval(id); };
   }, [user?.hourlyRateUsd]);
 
-  // Single read-only identity, sourced from the org chart with a graceful
-  // fallback to the stored account values when there is no org chart match.
+  // Single read-only identity. Name, email and job title are admin-owned
+  // (legal name / company email / contract title), so the stored account
+  // values win; the org chart only fills gaps and supplies reporting line.
   const identity = {
     linked:     Boolean(orgProfile),
-    name:       orgProfile?.name          ?? user?.name      ?? '',
-    title:      orgProfile?.title         ?? user?.jobTitle  ?? null,
-    department: orgProfile?.department    ?? user?.team      ?? null,
+    name:       user?.name                ?? orgProfile?.name       ?? '',
+    title:      user?.jobTitle            ?? orgProfile?.title      ?? null,
+    department: orgProfile?.department    ?? user?.team             ?? null,
     reportsTo:  orgProfile?.reportsToName ?? null,
-    email:      orgProfile?.email         ?? user?.email     ?? '',
+    email:      user?.email               ?? orgProfile?.email      ?? '',
   };
 
   const handleOrgSync = async () => {
@@ -192,12 +193,8 @@ export default function ProfilePage() {
     e.preventDefault();
     setSaving(true); setError(''); setSuccess('');
     try {
-      // Identity is read-only; we still send it so the DB stays in sync with
-      // the org chart. The API requires a non-empty name.
+      // Identity is admin-owned and not sent — only preferences + password.
       const payload = {
-        name:     identity.name || user?.name || '',
-        team:     identity.department,
-        jobTitle: identity.title,
         password: form.password,
         reminderEnabled: form.reminderEnabled,
         reminderIntervalMinutes: form.reminderIntervalMinutes,
@@ -340,6 +337,9 @@ export default function ProfilePage() {
                 <InfoRow label="Username"   value={user?.username ?? null} />
                 <InfoRow label="Role"       value={user?.role ?? null} />
               </div>
+              <p className="mt-1.5 text-[11px] text-(--rs-neutral-grey-400)">
+                Name, username, email, and job title are managed by HR — contact an admin to change them.
+              </p>
 
               {!identity.linked && !orgLoading && (
                 <p className="mt-1.5 text-[11px] text-(--rs-neutral-grey-400)">
