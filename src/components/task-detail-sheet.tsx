@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Loader2, Activity as ActivityIcon, FileText, ImagePlus, Save, Send, Trash2, X, MessageSquareReply, Maximize2, Minimize2, Eye, Lock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2, Activity as ActivityIcon, FileText, ImagePlus, Save, Send, Trash2, X, MessageSquareReply, Maximize2, Minimize2, Eye, Lock, Link2, ExternalLink } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { extractTaskDescriptionImageUrls } from '@/lib/task-description-images';
 import {
@@ -16,6 +16,7 @@ import { RichText } from '@/components/rich-text';
 import { PersonAvatar } from '@/components/person-avatar';
 import { sanitizeRichText, isRichTextEmpty } from '@/lib/sanitize';
 import type { ProjectCaps } from '@/lib/permissions';
+import { decodeLinkActivity, linkDisplayText, normalizeLinkUrl, LINK_TITLE_MAX } from '@/lib/work-item-links';
 
 // ── Shape we get from /api/tickets/work-items/[id] ─────────────────────────
 export interface SheetWorkItem {
@@ -39,6 +40,10 @@ export interface SheetWorkItem {
 interface SubIssueRow {
   id: number; sequence_id: number; name: string;
   state_name: string | null; state_color: string | null; state_group: string | null;
+}
+interface LinkRow {
+  id: number; title: string; url: string;
+  created_by_name: string | null; created_at: string;
 }
 interface CycleRow {
   id: number; name: string; start_date: string; end_date: string;
@@ -195,6 +200,11 @@ export function TaskDetailSheet({
   const [children, setChildren] = useState<SubIssueRow[]>([]);
   const [newSub, setNewSub] = useState('');
   const [addingSub, setAddingSub] = useState(false);
+  const [links, setLinks] = useState<LinkRow[]>([]);
+  const [newLinkTitle, setNewLinkTitle] = useState('');
+  const [newLinkUrl, setNewLinkUrl] = useState('');
+  const [addingLink, setAddingLink] = useState(false);
+  const [linkError, setLinkError] = useState('');
 
   // Editable form fields
   const [name, setName] = useState('');
@@ -287,17 +297,22 @@ export function TaskDetailSheet({
       setComments(comRes.ok ? ((await comRes.json()) as Comment[]) : []);
       setActivity(actRes.ok ? ((await actRes.json()) as ActivityEntry[]) : []);
 
-      const [memRes, labRes, cycRes, kidRes] = await Promise.all([
+      const [memRes, labRes, cycRes, kidRes, linkRes] = await Promise.all([
         fetch(`/api/tickets/projects/${detail.project_id}/members`),
         fetch(`/api/tickets/projects/${detail.project_id}/labels`),
         fetch(`/api/tickets/projects/${detail.project_id}/cycles`),
         fetch(`/api/tickets/work-items/${id}/children`),
+        fetch(`/api/tickets/work-items/${id}/links`),
       ]);
       setMembers(memRes.ok ? ((await memRes.json()) as ProjectMember[]) : []);
       setProjectLabels(labRes.ok ? ((await labRes.json()) as Array<{ id: number; name: string; color: string }>) : []);
       setProjectCycles(cycRes.ok ? ((await cycRes.json()) as CycleRow[]) : []);
       setChildren(kidRes.ok ? ((await kidRes.json()) as SubIssueRow[]) : []);
+      setLinks(linkRes.ok ? ((await linkRes.json()) as LinkRow[]) : []);
       setNewSub('');
+      setNewLinkTitle('');
+      setNewLinkUrl('');
+      setLinkError('');
       setNewComment('');
       setOpenThreadId(null);
       setReplyDrafts({});
@@ -527,6 +542,47 @@ export function TaskDetailSheet({
         if (lab) setItem(prev => prev ? { ...prev, labels: [...prev.labels, lab] } : prev);
       }
     }
+  };
+
+  const refreshActivity = async (id: string) => {
+    const res = await fetch(`/api/tickets/work-items/${id}/activity`);
+    if (res.ok) setActivity((await res.json()) as ActivityEntry[]);
+  };
+
+  const addLink = async () => {
+    if (!item || !newLinkUrl.trim()) return;
+    if (!normalizeLinkUrl(newLinkUrl)) {
+      setLinkError('Enter a valid http(s) URL.');
+      return;
+    }
+    setAddingLink(true);
+    setLinkError('');
+    try {
+      const res = await fetch(`/api/tickets/work-items/${item.id}/links`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newLinkTitle.trim(), url: newLinkUrl.trim() }),
+      });
+      if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        setLinkError(d.error ?? 'Could not add link.');
+        return;
+      }
+      const created = (await res.json()) as LinkRow;
+      setLinks(prev => [...prev, created]);
+      setNewLinkTitle('');
+      setNewLinkUrl('');
+      await refreshActivity(item.id);
+    } finally {
+      setAddingLink(false);
+    }
+  };
+
+  const removeLink = async (linkId: number) => {
+    if (!item) return;
+    const res = await fetch(`/api/tickets/work-items/${item.id}/links?linkId=${linkId}`, { method: 'DELETE' });
+    if (!res.ok) return;
+    setLinks(prev => prev.filter(l => l.id !== linkId));
+    await refreshActivity(item.id);
   };
 
   const addSubIssue = async () => {
@@ -950,6 +1006,83 @@ export function TaskDetailSheet({
                 )}
               </Field>
 
+              <Field label={`Related links${links.length > 0 ? ` (${links.length})` : ''}`}>
+                {links.length > 0 && (
+                  <ul className="space-y-1 mb-2">
+                    {links.map(l => (
+                      <li
+                        key={l.id}
+                        className="group flex min-h-10 items-center gap-2 rounded-md border border-transparent px-2 text-xs hover:border-(--rs-neutral-grey-200) hover:bg-(--rs-neutral-grey-50)"
+                      >
+                        <Link2 className="h-3.5 w-3.5 shrink-0 text-(--rs-neutral-grey-400)" aria-hidden="true" />
+                        <a
+                          href={l.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={l.url}
+                          className="flex min-w-0 flex-1 items-center gap-1.5 text-(--rs-primary-700) hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300)"
+                        >
+                          <span className="truncate">{linkDisplayText(l.title, l.url)}</span>
+                          {l.title && (
+                            <span className="hidden truncate text-(--rs-neutral-grey-400) sm:inline">
+                              {linkDisplayText('', l.url)}
+                            </span>
+                          )}
+                          <ExternalLink className="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />
+                        </a>
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => void removeLink(l.id)}
+                            aria-label={`Remove link ${linkDisplayText(l.title, l.url)}`}
+                            className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-(--rs-neutral-grey-400) hover:bg-red-50 hover:text-red-600"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {links.length === 0 && !canEdit && (
+                  <p className="text-xs text-(--rs-neutral-grey-400) italic">No related links.</p>
+                )}
+                {canEdit && (
+                  <>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <input
+                        value={newLinkTitle}
+                        onChange={e => setNewLinkTitle(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && addLink()}
+                        placeholder="Text (optional)"
+                        aria-label="Link text"
+                        maxLength={LINK_TITLE_MAX}
+                        className="min-h-10 rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-xs focus:border-(--rs-primary-400) focus:outline-none sm:w-2/5"
+                      />
+                      <input
+                        value={newLinkUrl}
+                        onChange={e => { setNewLinkUrl(e.target.value); setLinkError(''); }}
+                        onKeyDown={e => e.key === 'Enter' && addLink()}
+                        placeholder="https://…"
+                        aria-label="Link URL"
+                        inputMode="url"
+                        className="min-h-10 flex-1 rounded-md border border-(--rs-neutral-grey-200) bg-white px-2.5 py-2 text-xs focus:border-(--rs-primary-400) focus:outline-none"
+                      />
+                      <button
+                        onClick={addLink}
+                        disabled={addingLink || !newLinkUrl.trim()}
+                        className="flex min-h-10 items-center justify-center gap-1 rounded-md px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+                        style={{ background: 'var(--rs-primary-500)' }}
+                      >
+                        {addingLink ? <Loader2 className="w-3 h-3 animate-spin" /> : <Link2 className="w-3 h-3" />}
+                        Add
+                      </button>
+                    </div>
+                    {linkError && <p className="mt-1 text-xs text-red-600">{linkError}</p>}
+                  </>
+                )}
+              </Field>
+
               <Field label={`Sub-issues${children.length > 0 ? ` (${children.length})` : ''}`}>
                 {children.length > 0 && (
                   <div className="space-y-1 mb-2">
@@ -1071,7 +1204,7 @@ export function TaskDetailSheet({
                     <ActivityIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
                     <span>
                       <span className="font-medium text-(--rs-neutral-grey-500)">{entry.activity.actor_name}</span>{' '}
-                      {describeActivity(entry.activity, stateNameById, userNameById)} · {fmt(entry.activity.created_at)}
+                      <ActivityText activity={entry.activity} stateNameById={stateNameById} userNameById={userNameById} /> · {fmt(entry.activity.created_at)}
                     </span>
                   </div>
                 ),
@@ -1407,6 +1540,37 @@ function describeActivity(a: ActivityEntry, stateNameById: Map<string, string>, 
     case 'commented':     return `commented: "${(a.to_value ?? '').slice(0, 60)}${(a.to_value?.length ?? 0) > 60 ? '…' : ''}"`;
     case 'archived':      return `archived this task`;
     case 'restored':      return `restored this task`;
+    case 'link_added':    return `added a link`;
+    case 'link_removed':  return `removed a link`;
     default:              return a.action;
   }
+}
+
+// Link activity names the link itself (clickable), so the timeline reads
+// "added the link Design spec" rather than a bare "added a link".
+function ActivityText({ activity, stateNameById, userNameById }: {
+  activity: ActivityEntry;
+  stateNameById: Map<string, string>;
+  userNameById: Map<string, string>;
+}) {
+  if (activity.action === 'link_added' || activity.action === 'link_removed') {
+    const link = decodeLinkActivity(activity.action === 'link_added' ? activity.to_value : activity.from_value);
+    if (link) {
+      return (
+        <>
+          {activity.action === 'link_added' ? 'added the link ' : 'removed the link '}
+          <a
+            href={link.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={link.url}
+            className="font-medium text-(--rs-primary-600) hover:underline"
+          >
+            {linkDisplayText(link.title, link.url)}
+          </a>
+        </>
+      );
+    }
+  }
+  return <>{describeActivity(activity, stateNameById, userNameById)}</>;
 }

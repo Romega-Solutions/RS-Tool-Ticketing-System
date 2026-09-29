@@ -37,6 +37,8 @@ function describeTicket(action: string): string {
     case 'unassigned':    return 'Unassigned a work item';
     case 'commented':     return 'Commented on a work item';
     case 'archived':      return 'Archived a work item';
+    case 'link_added':    return 'Added a link to a work item';
+    case 'link_removed':  return 'Removed a link from a work item';
     default:              return `Work item ${action}`;
   }
 }
