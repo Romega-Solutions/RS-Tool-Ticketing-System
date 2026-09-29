@@ -41,7 +41,7 @@ export function TaskSearch() {
         value={value}
         onChange={e => setValue(e.target.value)}
         onKeyDown={e => { if (e.key === 'Escape') setValue(''); }}
-        className="min-h-10 w-full rounded-md border border-(--rs-neutral-grey-200) bg-white py-2 pl-8 pr-2.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-400)"
+        className="min-h-10 w-full rounded-md border border-(--rs-neutral-grey-200) bg-white py-2 pl-8 pr-2.5 text-sm focus:outline-none"
       />
     </div>
   );

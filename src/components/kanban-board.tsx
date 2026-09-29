@@ -858,7 +858,7 @@ export function KanbanBoard({
             value={filters.search}
             onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
             onKeyDown={e => { if (e.key === 'Escape') setFilters(f => ({ ...f, search: '' })); }}
-            className="min-h-10 w-full rounded-md border border-(--rs-neutral-grey-200) bg-white py-2 pl-8 pr-2.5 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-400)"
+            className="min-h-10 w-full rounded-md border border-(--rs-neutral-grey-200) bg-white py-2 pl-8 pr-2.5 text-xs focus:outline-none"
           />
         </div>
 
