@@ -3,6 +3,7 @@ import { getProjects, getProjectStates, getWorkItems, buildStateLookup, enrichWo
 import { Card, CardContent } from "@/components/ui/card";
 import { TaskCard } from '@/components/task-card';
 import { OnboardingBanner } from './onboarding-banner';
+import { TaskSearch } from './task-search';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,10 +25,14 @@ const BACKLOG_GROUPS = new Set(['backlog', 'todo']);
 export default async function MyTasksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; priority?: string; dueSoon?: string }>;
+  searchParams: Promise<{ tab?: string; priority?: string; dueSoon?: string; q?: string }>;
 }) {
-  const { tab = 'active', priority = '', dueSoon = '' } = await searchParams;
+  const { tab = 'active', priority = '', dueSoon = '', q = '' } = await searchParams;
   const dueSoonOn = dueSoon === '1';
+  const search = q.trim();
+  const searchTerm = search.toLowerCase();
+  // "12", "#12", or "PROJ-12" → match the ticket number.
+  const searchNumber = searchTerm.match(/^(?:#|([a-z0-9]+)-)?(\d+)$/);
   const sessionUser = await getSession();
 
   let activeTasks:    TaskWithProject[] = [];
@@ -63,8 +68,17 @@ export default async function MyTasksPage({
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
       const dueSoonCutoff = Date.now() + 7 * 24 * 60 * 60 * 1000;
 
-      const passesFilters = (i: PlaneWorkItem) => {
+      const passesFilters = (i: TaskWithProject) => {
         if (priority && i.priority !== priority) return false;
+        if (searchTerm) {
+          const textHit =
+            i.name.toLowerCase().includes(searchTerm) ||
+            i._projectName.toLowerCase().includes(searchTerm);
+          const numberHit = !!searchNumber &&
+            String(i.sequence_id) === searchNumber[2] &&
+            (!searchNumber[1] || i._projectIdentifier.toLowerCase() === searchNumber[1]);
+          if (!textHit && !numberHit) return false;
+        }
         if (dueSoonOn) {
           if (!i.target_date) return false;
           if (new Date(i.target_date + 'T00:00:00').getTime() > dueSoonCutoff) return false;
@@ -114,13 +128,15 @@ export default async function MyTasksPage({
 
       {sessionUser && !loadError && (
         <>
-          {/* Filter chips */}
+          {/* Search + filter chips */}
           <div className="flex flex-wrap items-center gap-2">
+            <TaskSearch />
             {['urgent','high','medium','low'].map(p => {
               const on = priority === p;
               const qs = new URLSearchParams({ tab });
               if (!on) qs.set('priority', p);
               if (dueSoonOn) qs.set('dueSoon', '1');
+              if (search) qs.set('q', search);
               return (
                 <a
                   key={p}
@@ -139,6 +155,7 @@ export default async function MyTasksPage({
               const qs = new URLSearchParams({ tab });
               if (priority) qs.set('priority', priority);
               if (!dueSoonOn) qs.set('dueSoon', '1');
+              if (search) qs.set('q', search);
               return (
                 <a
                   href={`?${qs.toString()}`}
@@ -154,7 +171,7 @@ export default async function MyTasksPage({
             })()}
             {(priority || dueSoonOn) && (
               <a
-                href={`?tab=${tab}`}
+                href={`?tab=${tab}${search ? `&q=${encodeURIComponent(search)}` : ''}`}
                 className="text-xs text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-800) underline"
               >
                 Clear filters
@@ -167,7 +184,7 @@ export default async function MyTasksPage({
             {tabs.map(t => (
               <a
                 key={t.key}
-                href={`?tab=${t.key}${priority ? `&priority=${priority}` : ''}${dueSoonOn ? '&dueSoon=1' : ''}`}
+                href={`?tab=${t.key}${priority ? `&priority=${priority}` : ''}${dueSoonOn ? '&dueSoon=1' : ''}${search ? `&q=${encodeURIComponent(search)}` : ''}`}
                 className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
                   tab === t.key
                     ? 'border-(--rs-primary-500) text-(--rs-primary-600)'
@@ -192,7 +209,9 @@ export default async function MyTasksPage({
             <CardContent className="p-4">
               {currentTasks.length === 0 ? (
                 <p className="text-(--rs-neutral-grey-400) italic text-sm text-center py-10">
-                  {tab === 'active'
+                  {search
+                    ? `No tasks match “${search}”.`
+                    : tab === 'active'
                     ? "No active tasks — you're all clear!"
                     : tab === 'backlog'
                     ? 'No backlog tasks.'
