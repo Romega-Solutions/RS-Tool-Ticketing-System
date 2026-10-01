@@ -78,12 +78,15 @@ export const POST = route(async (req: Request) => {
   // used by the weekly OT badge / browser guardrail. The open row (null
   // duration) is naturally excluded.
   const weekSecondsBefore = await weeklySecondsForUser(admin, session.id, nowDate);
+  // .limit(1), not .maybeSingle(): with duplicate open rows maybeSingle errors,
+  // which used to read as "no session" and insert yet another open row.
   const { data: existingWithNotes, error: existingError } = await admin
     .from('timesheets')
     .select('id, clocked_in_at, notes')
     .eq('user_id', session.id)
     .is('clocked_out_at', null)
-    .maybeSingle();
+    .order('clocked_in_at', { ascending: false })
+    .limit(1);
 
   const existing = existingError
     ? await admin
@@ -91,9 +94,10 @@ export const POST = route(async (req: Request) => {
         .select('id, clocked_in_at')
         .eq('user_id', session.id)
         .is('clocked_out_at', null)
-        .maybeSingle()
-        .then(result => result.data)
-    : existingWithNotes;
+        .order('clocked_in_at', { ascending: false })
+        .limit(1)
+        .then(result => result.data?.[0] ?? null)
+    : (existingWithNotes?.[0] ?? null);
 
   if (existing) {
     clockIn({ userId: session.id, name: session.name, role: session.role, team: session.team, clockedInAt: existing.clocked_in_at, weekSecondsBefore, photoUrl });

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getOnline, getMyEntry, clockIn } from '@/lib/presence';
+import { getOnline, getMyEntry, clockIn, clockOut } from '@/lib/presence';
 import { getPhotoResolver } from '@/lib/orgchart';
 import { weeklySecondsForUser, weeklyAllowanceForUser, enforceUserOpenSession, maybeSweepOpenSessions } from '@/lib/overtime-server';
 import type { AppRole } from '@/lib/rbac';
@@ -21,42 +21,42 @@ export const GET = route(async () => {
   // anyone is using the app — not only at the daily cron.
   await maybeSweepOpenSessions(admin, now);
 
-  const online = getOnline(session.role, session.team, session.id);
   const [weekSecondsBefore, weekAllowanceSeconds] = await Promise.all([
     weeklySecondsForUser(admin, session.id, now),
     weeklyAllowanceForUser(admin, session.id, now),
   ]);
 
-  const myEntry = getMyEntry(session.id);
+  // The DB is the source of truth for this user's own session. The in-memory
+  // presence map is per-instance, so it can still hold an entry after the user
+  // clocked out (or the cron closed the session) on another instance.
   let openSession: { timesheetId: number; clockedInAt: string; notes: string | null } | null = null;
-
-  if (myEntry) {
-    openSession = { timesheetId: -1, clockedInAt: myEntry.clockedInAt, notes: null };
-  } else {
-    const photoUrl = (await getPhotoResolver())({ name: session.name, email: session.email });
-    const { data: openWithNotes, error } = await admin
-      .from('timesheets')
-      .select('id, clocked_in_at, notes')
-      .eq('user_id', session.id)
-      .is('clocked_out_at', null)
-      .maybeSingle();
-
-    if (error) {
-      const { data: openFallback } = await admin
+  const { data: openRows, error } = await admin
+    .from('timesheets')
+    .select('id, clocked_in_at, notes')
+    .eq('user_id', session.id)
+    .is('clocked_out_at', null)
+    .order('clocked_in_at', { ascending: false })
+    .limit(1);
+  const open = error
+    ? (await admin
         .from('timesheets')
         .select('id, clocked_in_at')
         .eq('user_id', session.id)
         .is('clocked_out_at', null)
-        .maybeSingle();
-      if (openFallback) {
-        openSession = { timesheetId: openFallback.id, clockedInAt: openFallback.clocked_in_at, notes: null };
-        clockIn({ userId: session.id, name: session.name, role: session.role as AppRole, team: session.team, clockedInAt: openFallback.clocked_in_at, weekSecondsBefore, photoUrl });
-      }
-    } else if (openWithNotes) {
-      openSession = { timesheetId: openWithNotes.id, clockedInAt: openWithNotes.clocked_in_at, notes: openWithNotes.notes ?? null };
-      clockIn({ userId: session.id, name: session.name, role: session.role as AppRole, team: session.team, clockedInAt: openWithNotes.clocked_in_at, weekSecondsBefore, photoUrl });
+        .order('clocked_in_at', { ascending: false })
+        .limit(1)).data?.[0]
+    : openRows?.[0];
+
+  if (open) {
+    openSession = { timesheetId: open.id, clockedInAt: open.clocked_in_at, notes: 'notes' in open ? ((open.notes as string | null) ?? null) : null };
+    if (!getMyEntry(session.id)) {
+      const photoUrl = (await getPhotoResolver())({ name: session.name, email: session.email });
+      clockIn({ userId: session.id, name: session.name, role: session.role as AppRole, team: session.team, clockedInAt: open.clocked_in_at, weekSecondsBefore, photoUrl });
     }
+  } else {
+    clockOut(session.id);
   }
 
+  const online = getOnline(session.role, session.team, session.id);
   return NextResponse.json({ online, openSession, weekSecondsBefore, weekAllowanceSeconds });
 });
