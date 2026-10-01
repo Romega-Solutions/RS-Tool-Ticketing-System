@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getSession } from '@/lib/session';
+import { cookies } from 'next/headers';
+import { getSession, VIEW_AS_COOKIE } from '@/lib/session';
 
 export const runtime = 'nodejs';
 
@@ -15,7 +16,8 @@ export async function POST() {
       const { data: open } = await admin
         .from('timesheets')
         .select('id, clocked_in_at')
-        .eq('user_id', session.id)
+        // While viewing as someone, the clock-in guard is about the real admin.
+        .eq('user_id', session.impersonatedBy ?? session.id)
         .is('clocked_out_at', null)
         .maybeSingle();
 
@@ -28,6 +30,7 @@ export async function POST() {
     }
 
     await supabase.auth.signOut();
+    (await cookies()).delete(VIEW_AS_COOKIE);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Logout error:', error);
