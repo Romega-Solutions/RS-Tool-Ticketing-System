@@ -3,7 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { clockOut } from '@/lib/presence';
 import { computeOvertime } from '@/lib/utils';
 import { weeklySecondsForUser, baseWeeklySecondsForUser } from '@/lib/overtime-server';
-import { route, requireSession, badRequest } from '@/lib/api';
+import { route, requireSession } from '@/lib/api';
 
 export const runtime = 'nodejs';
 
@@ -11,16 +11,30 @@ export const POST = route(async () => {
   const session = await requireSession();
 
   const admin = createAdminClient();
-  const { data: open } = await admin
+  // Fetch every open row, not .maybeSingle(): a user with duplicate open rows
+  // would otherwise error out and be stuck clocked in forever.
+  const { data: openRows, error: openError } = await admin
     .from('timesheets')
     .select('id, clocked_in_at')
     .eq('user_id', session.id)
     .is('clocked_out_at', null)
-    .maybeSingle();
+    .order('clocked_in_at', { ascending: true });
 
-  if (!open) {
-    throw badRequest('No open clock-in session found');
+  if (openError) {
+    console.error('[clock-out] lookup error:', openError.message);
+    return NextResponse.json({ error: 'Failed to look up your session' }, { status: 500 });
   }
+
+  if (!openRows || openRows.length === 0) {
+    // Already closed (another tab, the cron, or an admin). Clear any stale
+    // in-memory presence so the UI settles on "clocked out".
+    clockOut(session.id);
+    return NextResponse.json({ alreadyClockedOut: true, durationSeconds: 0, isOvertime: false, overtimeSeconds: 0 });
+  }
+
+  // The earliest row is the real session; any later duplicates are closed with
+  // zero duration so they don't double-count hours.
+  const [open, ...duplicates] = openRows;
 
   const nowDate = new Date();
   const now = nowDate.toISOString();
@@ -33,7 +47,7 @@ export const POST = route(async () => {
   ]);
   const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds, baseSeconds);
 
-  await admin
+  const { error: updateError } = await admin
     .from('timesheets')
     .update({
       clocked_out_at: now,
@@ -42,6 +56,19 @@ export const POST = route(async () => {
       overtime_seconds: isOvertime ? overtimeSeconds : null,
     })
     .eq('id', open.id);
+
+  if (updateError) {
+    console.error('[clock-out] update error:', updateError.message);
+    return NextResponse.json({ error: 'Failed to clock out. Please try again.' }, { status: 500 });
+  }
+
+  if (duplicates.length > 0) {
+    const { error: dupError } = await admin
+      .from('timesheets')
+      .update({ clocked_out_at: now, duration_seconds: 0, is_overtime: 0, overtime_seconds: null })
+      .in('id', duplicates.map(d => d.id));
+    if (dupError) console.error('[clock-out] duplicate close error:', dupError.message);
+  }
 
   clockOut(session.id);
 
