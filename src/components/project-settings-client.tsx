@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Check, Edit3, Loader2, Plus, X, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Edit3, Loader2, Plus, X, Trash2 } from 'lucide-react';
 
 interface Label   { id: number; project_id: number; name: string; color: string }
+interface Column  { id: string; name: string; group: string; color: string; sequence: number; isDefault?: boolean }
 interface Member  { id: number; project_id: number; user_id: number; name: string; email: string; role: string }
 interface Cycle   { id: number; project_id: number; name: string; start_date: string; end_date: string; archived: number }
 interface UserRow { id: number; name: string; email: string }
@@ -21,22 +22,40 @@ const AUTO_ARCHIVE_OPTIONS: { value: number; label: string }[] = [
 
 const LABEL_COLORS = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ec4899','#6b7280'];
 
+// What a column's group means to the rest of the app (dashboard counts,
+// completion stamping, auto-archive). Cancelled is default-only and hidden.
+const COLUMN_GROUPS: { value: string; label: string }[] = [
+  { value: 'backlog',   label: 'Backlog' },
+  { value: 'unstarted', label: 'Not started' },
+  { value: 'started',   label: 'In progress' },
+  { value: 'completed', label: 'Done' },
+];
+const GROUP_LABEL: Record<string, string> = {
+  ...Object.fromEntries(COLUMN_GROUPS.map(g => [g.value, g.label])),
+  cancelled: 'Cancelled',
+};
+
 export function ProjectSettingsClient({
   projectId,
   initialProject,
+  canManage,
   canReteam,
+  initialStates,
   initialLabels,
   initialMembers,
   initialCycles,
 }: {
   projectId: string;
   initialProject: ProjectDetails;
+  canManage: boolean;
   canReteam: boolean;
+  initialStates: Column[];
   initialLabels: Label[];
   initialMembers: Member[];
   initialCycles: Cycle[];
 }) {
   const [project, setProject] = useState<ProjectDetails>(initialProject);
+  const [columns, setColumns] = useState<Column[]>(initialStates);
   const [labels, setLabels]   = useState<Label[]>(initialLabels);
   const [members, setMembers] = useState<Member[]>(initialMembers);
   const [cycles, setCycles]   = useState<Cycle[]>(initialCycles);
@@ -44,8 +63,13 @@ export function ProjectSettingsClient({
   const [allUsers, setAllUsers] = useState<UserRow[]>([]);
 
   useEffect(() => {
+    if (!canManage) return;
     fetch('/api/tickets/users').then(r => r.json()).then(d => setAllUsers(d as UserRow[])).catch(() => {});
-  }, []);
+  }, [canManage]);
+
+  if (!canManage) {
+    return <BoardColumnsSection projectId={projectId} columns={columns} setColumns={setColumns} />;
+  }
 
   return (
     <div className="space-y-6">
@@ -60,6 +84,7 @@ export function ProjectSettingsClient({
         value={project.autoArchiveDoneDays}
         onChange={(days) => setProject({ ...project, autoArchiveDoneDays: days })}
       />
+      <BoardColumnsSection projectId={projectId} columns={columns} setColumns={setColumns} />
       <LabelsSection projectId={projectId} labels={labels} setLabels={setLabels} />
       <MembersSection projectId={projectId} members={members} setMembers={setMembers} allUsers={allUsers} />
       <CyclesSection projectId={projectId} cycles={cycles} setCycles={setCycles} />
@@ -313,6 +338,233 @@ function AutoArchiveSection({
           </p>
         )}
         {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
+      </div>
+    </Card>
+  );
+}
+
+// ── Board columns ───────────────────────────────────────────────────────
+
+function BoardColumnsSection({
+  projectId, columns, setColumns,
+}: {
+  projectId: string; columns: Column[]; setColumns: (c: Column[]) => void;
+}) {
+  const [name, setName]   = useState('');
+  const [group, setGroup] = useState('started');
+  const [color, setColor] = useState(LABEL_COLORS[5]);
+  const [busy, setBusy]   = useState(false);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName]   = useState('');
+  const [error, setError] = useState('');
+
+  const base = `/api/tickets/projects/${projectId}/states`;
+
+  const readError = async (res: Response, fallback: string) =>
+    ((await res.json().catch(() => ({}))) as { error?: string }).error ?? fallback;
+
+  const add = async () => {
+    if (!name.trim()) return;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch(base, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), group, color }),
+      });
+      if (!res.ok) { setError(await readError(res, 'Could not add column.')); return; }
+      // The server shifts later columns right; refetch for the true order.
+      const list = await fetch(base);
+      if (list.ok) setColumns((await list.json()) as Column[]);
+      setName('');
+    } catch {
+      setError('Network error — column not added.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Optimistic swap with a neighbour; revert on failure.
+  const move = async (index: number, dir: -1 | 1) => {
+    const j = index + dir;
+    if (j < 0 || j >= columns.length) return;
+    const snapshot = columns;
+    const next = [...columns];
+    [next[index], next[j]] = [next[j], next[index]];
+    setColumns(next);
+    setSavingId(columns[index].id);
+    setError('');
+    try {
+      const res = await fetch(base, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order: next.map(c => c.id) }),
+      });
+      if (!res.ok) { setColumns(snapshot); setError(await readError(res, 'Could not reorder.')); }
+    } catch {
+      setColumns(snapshot);
+      setError('Network error — order not saved.');
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const patch = async (id: string, body: { name?: string; color?: string }) => {
+    const snapshot = columns;
+    setColumns(columns.map(c => (c.id === id ? { ...c, ...body } : c)));
+    setSavingId(id);
+    setError('');
+    try {
+      const res = await fetch(`${base}/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) { setColumns(snapshot); setError(await readError(res, 'Could not save column.')); }
+    } catch {
+      setColumns(snapshot);
+      setError('Network error — column not saved.');
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const saveName = async (id: string) => {
+    const trimmed = editName.trim();
+    setEditingId(null);
+    if (!trimmed || trimmed === columns.find(c => c.id === id)?.name) return;
+    await patch(id, { name: trimmed });
+  };
+
+  const remove = async (col: Column) => {
+    if (!confirm(`Delete the "${col.name}" column? Its tasks will move to the default ${GROUP_LABEL[col.group] ?? ''} column.`)) return;
+    setSavingId(col.id);
+    setError('');
+    try {
+      const res = await fetch(`${base}/${col.id}`, { method: 'DELETE' });
+      if (!res.ok) { setError(await readError(res, 'Could not delete column.')); return; }
+      setColumns(columns.filter(c => c.id !== col.id));
+    } catch {
+      setError('Network error — column not deleted.');
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  return (
+    <Card title="Board columns">
+      <p className="mb-3 text-xs text-(--rs-neutral-grey-500)">
+        The six default columns can be renamed and reordered but not deleted. A column&apos;s
+        type decides how its tasks count — tasks in a <strong>Done</strong> column are marked
+        complete. Cancelled is hidden on the board.
+      </p>
+      {error && <p className="mb-2 text-xs text-red-600" role="alert">{error}</p>}
+      <ol className="space-y-1.5 mb-3">
+        {columns.map((c, i) => (
+          <li key={c.id} className="flex items-center gap-2 px-3 py-2 bg-white border border-(--rs-neutral-grey-100) rounded-lg">
+            <div className="flex flex-col">
+              <button
+                type="button" onClick={() => move(i, -1)} disabled={i === 0 || savingId !== null}
+                aria-label={`Move ${c.name} left`}
+                className="rounded p-0.5 text-(--rs-neutral-grey-400) hover:text-(--rs-neutral-grey-800) disabled:opacity-30"
+              >
+                <ArrowUp className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button" onClick={() => move(i, 1)} disabled={i === columns.length - 1 || savingId !== null}
+                aria-label={`Move ${c.name} right`}
+                className="rounded p-0.5 text-(--rs-neutral-grey-400) hover:text-(--rs-neutral-grey-800) disabled:opacity-30"
+              >
+                <ArrowDown className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: c.color }} aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              {editingId === c.id ? (
+                <input
+                  autoFocus value={editName} maxLength={40}
+                  onChange={e => setEditName(e.target.value)}
+                  onBlur={() => saveName(c.id)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') saveName(c.id);
+                    if (e.key === 'Escape') setEditingId(null);
+                  }}
+                  aria-label="Column name"
+                  className="w-full text-sm px-2 py-1 border border-(--rs-primary-400) rounded-md bg-white focus:outline-none"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { setEditingId(c.id); setEditName(c.name); }}
+                  className="text-left text-sm font-medium text-(--rs-neutral-grey-900) truncate hover:text-(--rs-primary-700)"
+                  title="Rename"
+                >
+                  {c.name}
+                </button>
+              )}
+              <div className="text-xs text-(--rs-neutral-grey-500)">
+                {GROUP_LABEL[c.group] ?? c.group}
+                {c.isDefault && ' · Default'}
+                {c.group === 'cancelled' && ' · Hidden on board'}
+              </div>
+            </div>
+            <div className="hidden sm:flex gap-1">
+              {LABEL_COLORS.map(col => (
+                <button
+                  key={col} type="button"
+                  onClick={() => col !== c.color && patch(c.id, { color: col })}
+                  className={`w-4 h-4 rounded-full border-2 ${c.color === col ? 'border-(--rs-neutral-grey-900)' : 'border-transparent'}`}
+                  style={{ background: col }}
+                  aria-label={`Set ${c.name} color to ${col}`}
+                />
+              ))}
+            </div>
+            {savingId === c.id ? (
+              <Loader2 className="w-4 h-4 shrink-0 animate-spin text-(--rs-neutral-grey-400)" aria-label="Saving" />
+            ) : !c.isDefault ? (
+              <button
+                type="button" onClick={() => remove(c)}
+                aria-label={`Delete ${c.name} column`}
+                className="shrink-0 rounded-md p-1 text-(--rs-neutral-grey-400) transition-colors hover:bg-red-50 hover:text-red-500"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            ) : (
+              <span className="w-6 shrink-0" aria-hidden="true" />
+            )}
+          </li>
+        ))}
+      </ol>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={name} onChange={e => setName(e.target.value)} placeholder="New column name…" maxLength={40}
+          onKeyDown={e => { if (e.key === 'Enter') add(); }}
+          className="text-sm flex-1 min-w-40 px-3 py-1.5 border border-(--rs-neutral-grey-200) rounded-md bg-white focus:outline-none focus:border-(--rs-primary-400)"
+        />
+        <select
+          value={group} onChange={e => setGroup(e.target.value)} aria-label="Column type"
+          className="text-sm px-2.5 py-1.5 border border-(--rs-neutral-grey-200) rounded-md bg-white"
+        >
+          {COLUMN_GROUPS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+        </select>
+        <div className="flex gap-1">
+          {LABEL_COLORS.map(c => (
+            <button
+              key={c} type="button"
+              onClick={() => setColor(c)}
+              className={`w-5 h-5 rounded-full border-2 ${color === c ? 'border-(--rs-neutral-grey-900)' : 'border-transparent'}`}
+              style={{ background: c }}
+              aria-label={c}
+            />
+          ))}
+        </div>
+        <button
+          onClick={add} disabled={busy || !name.trim()}
+          className="flex items-center gap-1 text-sm font-medium text-white px-3 py-1.5 rounded-md disabled:opacity-50"
+          style={{ background: 'var(--rs-primary-500)' }}
+        >
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+          Add column
+        </button>
       </div>
     </Card>
   );

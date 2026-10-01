@@ -7,6 +7,7 @@ import { mapOrgDeptToAppTeam } from '@/lib/orgchart';
 import { unstable_cache } from 'next/cache';
 import { projectStatesTag, projectLabelsTag, projectCyclesTag, USERS_LIST_TAG } from '@/lib/cache-tags';
 import type { SessionUser } from '@/lib/session';
+import { HttpError, badRequest, notFound } from '@/lib/api/errors';
 
 export interface PlaneProject {
   id: string;
@@ -24,6 +25,7 @@ export interface PlaneState {
   group: string;
   color: string;
   sequence: number;
+  isDefault?: boolean;   // seeded board column — can be renamed/reordered, not deleted
 }
 
 export interface PlaneMember {
@@ -124,6 +126,7 @@ function mapState(r: Row): PlaneState {
     group: String(r.group),
     color: String(r.color ?? '#6b7280'),
     sequence: Number(r.sequence ?? 0),
+    isDefault: Boolean(r.is_default),
   };
 }
 
@@ -179,7 +182,7 @@ export async function getProjectStates(projectId: string): Promise<PlaneState[]>
       const sb = createAdminClient();
       const { data, error } = await sb
         .from('project_states')
-        .select('id, name, group, color, sequence')
+        .select('id, name, group, color, sequence, is_default')
         .eq('project_id', Number(projectId))
         .order('sequence');
       if (error) throw new PlaneApiError(500, `states/${projectId}`);
@@ -1480,10 +1483,123 @@ export function isCompletedGroup(group: string): boolean {
   return group === 'completed';
 }
 
+// ── Board columns (project_states) ─────────────────────────────────────────
+
+/** Groups a custom column may belong to. Cancelled is hidden on the board, so it's default-only. */
+export const CUSTOM_STATE_GROUPS = ['backlog', 'unstarted', 'started', 'completed'] as const;
+export type CustomStateGroup = (typeof CUSTOM_STATE_GROUPS)[number];
+
+async function requireProjectState(projectId: string, stateId: string): Promise<Row> {
+  const sb = createAdminClient();
+  const { data, error } = await sb.from('project_states')
+    .select('id, project_id, group, is_default')
+    .eq('id', Number(stateId)).eq('project_id', Number(projectId)).maybeSingle();
+  if (error) throw new PlaneApiError(500, `states/${stateId}`);
+  if (!data) throw notFound('Column not found');
+  return data as Row;
+}
+
+/**
+ * Add a custom column. It's placed just before the project's first completed /
+ * cancelled column so new work stages land ahead of Done by default.
+ */
+export async function createProjectState(
+  projectId: string,
+  input: { name: string; group: CustomStateGroup; color: string },
+): Promise<PlaneState> {
+  const sb = createAdminClient();
+  const pid = Number(projectId);
+  const { data: existing, error: readErr } = await sb.from('project_states')
+    .select('id, group, sequence').eq('project_id', pid).order('sequence');
+  if (readErr) throw new PlaneApiError(500, `states/${projectId}`);
+  const rows = (existing ?? []) as Row[];
+
+  const terminal = new Set(['completed', 'cancelled']);
+  const insertAt = input.group === 'completed'
+    ? rows.findIndex(r => String(r.group) === 'cancelled')
+    : rows.findIndex(r => terminal.has(String(r.group)));
+  const at = insertAt === -1 ? rows.length : insertAt;
+
+  // Shift everything at/after the insertion point right by one.
+  for (let i = rows.length - 1; i >= at; i--) {
+    const { error } = await sb.from('project_states')
+      .update({ sequence: i + 1 }).eq('id', Number(rows[i].id));
+    if (error) throw new PlaneApiError(502, `states/${rows[i].id} reorder`);
+  }
+
+  const { data, error } = await sb.from('project_states').insert({
+    project_id: pid, name: input.name, group: input.group, color: input.color,
+    sequence: at, is_default: false,
+  }).select('id, name, group, color, sequence, is_default').single();
+  if (error || !data) throw new PlaneApiError(502, 'states create');
+  return mapState(data as Row);
+}
+
+/** Rename / recolor a column (defaults included). Group is fixed after creation. */
+export async function updateProjectState(
+  projectId: string,
+  stateId: string,
+  patch: { name?: string; color?: string },
+): Promise<void> {
+  await requireProjectState(projectId, stateId);
+  const update: Row = {};
+  if (patch.name !== undefined)  update.name = patch.name;
+  if (patch.color !== undefined) update.color = patch.color;
+  if (Object.keys(update).length === 0) return;
+  const sb = createAdminClient();
+  const { error } = await sb.from('project_states').update(update).eq('id', Number(stateId));
+  if (error) throw new PlaneApiError(502, `states/${stateId}`);
+}
+
+/** Persist a new left-to-right order. `orderedIds` must be exactly the project's columns. */
+export async function reorderProjectStates(projectId: string, orderedIds: string[]): Promise<void> {
+  const sb = createAdminClient();
+  const { data, error } = await sb.from('project_states')
+    .select('id').eq('project_id', Number(projectId));
+  if (error) throw new PlaneApiError(500, `states/${projectId}`);
+  const current = new Set(((data ?? []) as Row[]).map(r => String(r.id)));
+  const given = new Set(orderedIds);
+  if (given.size !== orderedIds.length || given.size !== current.size || [...given].some(id => !current.has(id))) {
+    throw badRequest('Column order must list every column in this project exactly once');
+  }
+  for (const [i, id] of orderedIds.entries()) {
+    const { error: upErr } = await sb.from('project_states')
+      .update({ sequence: i }).eq('id', Number(id));
+    if (upErr) throw new PlaneApiError(502, `states/${id} reorder`);
+  }
+}
+
+/**
+ * Delete a custom column. Its tasks (archived ones included) move to the
+ * project's default column in the same group — falling back to the first
+ * default column — so nothing drops off the board. Returns that column's id.
+ */
+export async function deleteProjectState(projectId: string, stateId: string): Promise<string> {
+  const state = await requireProjectState(projectId, stateId);
+  if (state.is_default) throw badRequest('Default columns can’t be deleted');
+
+  const sb = createAdminClient();
+  const { data: defaults, error: dErr } = await sb.from('project_states')
+    .select('id, group').eq('project_id', Number(projectId)).eq('is_default', true).order('sequence');
+  if (dErr) throw new PlaneApiError(500, `states/${projectId}`);
+  const rows = (defaults ?? []) as Row[];
+  const target = rows.find(r => String(r.group) === String(state.group)) ?? rows[0];
+  if (!target) throw new HttpError(409, 'No default column to move this column’s tasks into');
+
+  const { error: moveErr } = await sb.from('work_items')
+    .update({ state_id: Number(target.id), updated_at: new Date().toISOString() })
+    .eq('state_id', Number(stateId));
+  if (moveErr) throw new PlaneApiError(502, `states/${stateId} move items`);
+
+  const { error } = await sb.from('project_states').delete().eq('id', Number(stateId));
+  if (error) throw new PlaneApiError(502, `states/${stateId}`);
+  return String(target.id);
+}
+
 // ── Project CRUD (self-service create / edit / archive) ───────────────────
 
 /** Default workflow states bootstrapped on every new project. */
-const DEFAULT_STATES: Array<Omit<{ name: string; group: string; color: string; sequence: number }, never>> = [
+const DEFAULT_STATES: Array<{ name: string; group: string; color: string; sequence: number }> = [
   { name: 'Backlog',     group: 'backlog',   color: '#94a3b8', sequence: 0 },
   { name: 'To Do',       group: 'unstarted', color: '#3b82f6', sequence: 1 },
   { name: 'In Progress', group: 'started',   color: '#eab308', sequence: 2 },
@@ -1535,7 +1651,7 @@ export async function createProject(input: {
 
   // 3. Bootstrap default states so the board is usable immediately.
   const { error: stErr } = await sb.from('project_states').insert(
-    DEFAULT_STATES.map(s => ({ project_id: pid, ...s })),
+    DEFAULT_STATES.map(s => ({ project_id: pid, ...s, is_default: true })),
   );
   if (stErr) throw new PlaneApiError(502, `projects create — default states (${stErr.message})`);
 
