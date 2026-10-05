@@ -9,7 +9,7 @@ export type LeadToolKey = 'ceo' | 'pm' | 'sales' | 'marketing' | 'recruiting' | 
 // are intentionally NOT here — they stay strictly admin-role only.
 export type GateableToolKey =
   | 'attendance' | 'ceo' | 'marketing' | 'onboarding'
-  | 'pm' | 'recruiting' | 'sales';
+  | 'pm' | 'recruiting' | 'research' | 'sales';
 
 export const GATEABLE_TOOLS: ReadonlyArray<{
   key: GateableToolKey;
@@ -25,6 +25,7 @@ export const GATEABLE_TOOLS: ReadonlyArray<{
   { key: 'onboarding', label: 'Onboarding',       prefixes: ['/onboarders'] },
   { key: 'pm',         label: 'PM',               prefixes: ['/pm'] },
   { key: 'recruiting', label: 'Recruiting (ATS)', prefixes: ['/recruiting'] },
+  { key: 'research',   label: 'Research',         prefixes: ['/research'] },
   { key: 'sales',      label: 'Sales',            prefixes: ['/sales'] },
 ];
 
@@ -54,6 +55,8 @@ const DEPARTMENT_TOOLS: Record<string, GateableToolKey[]> = {
   'human resource':  ['recruiting', 'onboarding'],
   'human resources': ['recruiting', 'onboarding'],
   'marketing':       ['marketing'],
+  'market intelligence':         ['research'],
+  'market research & analytics': ['research'],
   'sales':           ['sales'],
   'technical':       [],
 };

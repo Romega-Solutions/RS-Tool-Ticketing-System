@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import Image from "next/image";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap, BookMarked, Timer, BellRing, LayoutGrid, Megaphone } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Briefcase, FileText, Calendar, LogOut, User, Menu, PanelLeftClose, PanelLeftOpen, Shield, ClipboardList, Building2, Loader2, Users2, Sun, Wand2, UserPlus2, CircleDollarSign, BookOpen, GraduationCap, BookMarked, Timer, BellRing, LayoutGrid, Megaphone, Newspaper } from "lucide-react";
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { PersonAvatar } from "@/components/person-avatar";
@@ -30,6 +30,7 @@ const navItems = [
   { href: "/onboarders",            label: "Onboarding",     icon: GraduationCap,   category: "leadTools" },
   { href: "/pm/status-drafter",     label: "PM",             icon: ClipboardList,   category: "leadTools" },
   { href: "/recruiting/candidates", label: "Recruiting",     icon: UserPlus2,       category: "leadTools" },
+  { href: "/research",              label: "Research",       icon: Newspaper,       category: "leadTools" },
   { href: "/sales/leads",           label: "Sales",          icon: Users2,          category: "leadTools" },
   { href: "/attendance/requests",   label: "Time Approvals", icon: ClipboardList,   category: "leadTools" },
   // ── Admin — admin only
@@ -133,6 +134,7 @@ function NavLinks({ collapsed = false, role, toolAccess }: { collapsed?: boolean
     if (i.href.startsWith('/onboarders')) return hasToolAccess('onboarding', role, toolAccess);
     if (i.href.startsWith('/pm/')) return hasToolAccess('pm', role, toolAccess);
     if (i.href.startsWith('/recruiting/')) return hasToolAccess('recruiting', role, toolAccess);
+    if (i.href.startsWith('/research')) return hasToolAccess('research', role, toolAccess);
     if (i.href.startsWith('/sales/')) return hasToolAccess('sales', role, toolAccess);
     return false;
   });

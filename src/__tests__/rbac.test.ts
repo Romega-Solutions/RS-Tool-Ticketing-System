@@ -123,6 +123,8 @@ describe('canAccessPath', () => {
     expect(canAccessPath('/attendance', 'lead', ['attendance'])).toBe(true);
     expect(canAccessPath('/attendance', 'admin', [])).toBe(true);            // admin bypass
     expect(canAccessPath('/sales/leads', 'ic', ['sales'])).toBe(true);
+    expect(canAccessPath('/research/new', 'ic', ['research'])).toBe(true);
+    expect(canAccessPath('/research', 'ic', ['marketing'])).toBe(false);
     expect(canAccessPath('/sales/leads', 'ic', [])).toBe(false);
   });
 
@@ -162,6 +164,8 @@ describe('defaultToolAccess', () => {
   it('gives a department IC just their department tool', () => {
     expect(defaultToolAccess('ic', 'Sales')).toEqual(['sales']);
     expect(defaultToolAccess('ic', 'Marketing')).toEqual(['marketing']);
+    expect(defaultToolAccess('ic', 'Market Intelligence')).toEqual(['research']);
+    expect(defaultToolAccess('ic', 'Market Research & Analytics')).toEqual(['research']);
   });
 
   it('gives departments without a default tool (Technical/Executive/Finance) nothing', () => {
@@ -183,7 +187,7 @@ describe('defaultToolAccess', () => {
 
   it('gives admins every gateable tool', () => {
     expect(defaultToolAccess('admin', null)).toEqual(
-      expect.arrayContaining(['attendance', 'ceo', 'marketing', 'onboarding', 'pm', 'recruiting', 'sales']),
+      expect.arrayContaining(['attendance', 'ceo', 'marketing', 'onboarding', 'pm', 'recruiting', 'research', 'sales']),
     );
   });
 });

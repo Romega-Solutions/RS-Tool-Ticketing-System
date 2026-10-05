@@ -4,6 +4,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isAllowedTaskImageUpload, taskImageExtension } from '@/lib/task-image-uploads';
+import { RESEARCH_COVERS_BUCKET, MAX_COVER_BYTES, coverImageExtension } from '@/lib/research-posts';
 
 const BUCKET           = process.env.SUPABASE_RESUMES_BUCKET   ?? 'candidate-resumes';
 const CANDIDATE_PREEMPLOYMENT_BUCKET = process.env.SUPABASE_CANDIDATE_PREEMPLOYMENT_BUCKET ?? 'candidate-pre-employment-docs';
@@ -317,4 +318,35 @@ export async function uploadTaskImageToStorage(args: {
     mimeType: args.file.type,
     sizeBytes: args.file.size,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Market Research cover images. Unlike the buckets above this one is PUBLIC
+// (the website + og:image crawlers need a stable URL), so we return only the
+// path; researchCoverUrl() turns it into the public URL. Names are random so a
+// draft's cover isn't guessable before it's published.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function uploadResearchCover(file: File): Promise<{ path: string }> {
+  const ext = coverImageExtension(file);
+  if (!ext) throw new Error('Only JPG, PNG, and WebP images are accepted.');
+  if (file.size > MAX_COVER_BYTES) throw new Error('Cover image must be 5 MB or smaller.');
+
+  const path = `covers/${crypto.randomUUID()}.${ext}`;
+  const admin = createAdminClient();
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const { error } = await admin.storage.from(RESEARCH_COVERS_BUCKET).upload(path, bytes, {
+    contentType: file.type,
+    upsert: false,
+  });
+  if (error) throw new Error(`Cover upload failed: ${error.message}`);
+  return { path };
+}
+
+// Best-effort cleanup when a cover is replaced or its post deleted — a leftover
+// object is harmless, so failures are logged rather than thrown.
+export async function removeResearchCover(path: string): Promise<void> {
+  const admin = createAdminClient();
+  const { error } = await admin.storage.from(RESEARCH_COVERS_BUCKET).remove([path]);
+  if (error) console.error('[research] cover cleanup failed:', path, error.message);
 }
