@@ -1,6 +1,6 @@
 import { getProjects, getProjectStates, getWorkItems, getCycles, buildStateLookup, enrichWorkItems } from '@/lib/tickets';
 import { getSession } from '@/lib/session';
-import { getProjectCaps } from '@/lib/permissions';
+import { getProjectCaps, canEditProjectColumns } from '@/lib/permissions';
 import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import { AlertCircle, MessageSquare, Settings } from 'lucide-react';
@@ -20,6 +20,7 @@ export default async function ProjectBoardPage({
   // Per-project access: members/leads (+ admins) only; non-members are bounced.
   const caps = await getProjectCaps(session, Number(id));
   if (!caps.canView) redirect('/projects');
+  const showSettings = caps.canManage || await canEditProjectColumns(session, Number(id));
 
   let projectName = '';
   let states: Awaited<ReturnType<typeof getProjectStates>> = [];
@@ -67,7 +68,7 @@ export default async function ProjectBoardPage({
           >
             <MessageSquare className="w-3.5 h-3.5" /> Discussion
           </Link>
-          {caps.canManage && (
+          {showSettings && (
             <Link
               href={`/projects/${id}/settings`}
               className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm text-(--rs-neutral-grey-600) transition-colors hover:border-(--rs-primary-300) hover:text-(--rs-primary-700)"

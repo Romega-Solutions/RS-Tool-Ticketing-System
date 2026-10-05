@@ -460,6 +460,7 @@ export const projectStates = pgTable('project_states', {
   group:     text('group').notNull(), // backlog|unstarted|started|completed|cancelled
   color:     text('color').notNull().default('#6b7280'),
   sequence:  integer('sequence').notNull().default(0),
+  isDefault: boolean('is_default').notNull().default(false), // seeded column — can't be deleted
 });
 
 export const cycles = pgTable('cycles', {
