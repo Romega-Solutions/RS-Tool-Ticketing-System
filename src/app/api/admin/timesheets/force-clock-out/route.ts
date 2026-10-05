@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { clockOut } from '@/lib/presence';
 import { computeOvertime } from '@/lib/utils';
 import { weeklySecondsForUser, baseWeeklySecondsForUser } from '@/lib/overtime-server';
 import { route, requireAdmin } from '@/lib/api';
@@ -72,9 +71,6 @@ export const POST = route(async (req: Request) => {
   if (error) {
     return NextResponse.json({ error: `Force clock-out failed: ${error.message}` }, { status: 500 });
   }
-
-  // Drop from in-memory presence + broadcast to live subscribers.
-  clockOut(userId);
 
   return NextResponse.json({
     success: true,

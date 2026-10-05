@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { route, requireSession, parseBody } from '@/lib/api';
 import { getPresencePingSnapshotForUser, sendPresencePing } from '@/lib/presence';
-import { hydrateOpenPresenceFromDB } from '@/lib/presence-hydration';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { isUserClockedIn } from '@/lib/presence-online';
 import {
   getStoredPresencePingSnapshotForUser,
   persistPresencePingRecord,
@@ -29,7 +30,11 @@ export const GET = route(async () => {
 export const POST = route(async (req: Request) => {
   const session = await requireSession();
   const body = await parseBody(req, pingSchema);
-  await hydrateOpenPresenceFromDB();
+
+  if (body.toUserId !== session.id && !(await isUserClockedIn(createAdminClient(), body.toUserId))) {
+    const mapped = errorByReason.not_online;
+    return NextResponse.json({ error: mapped.message }, { status: mapped.status });
+  }
 
   const result = sendPresencePing({
     from: {

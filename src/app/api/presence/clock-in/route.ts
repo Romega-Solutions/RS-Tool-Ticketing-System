@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { clockIn } from '@/lib/presence';
-import { getPhotoResolver } from '@/lib/orgchart';
 import { decideClockInAllowed } from '@/lib/overtime-policy';
 import { weeklySecondsForUser, weeklyAllowanceForUser, enforceUserOpenSession } from '@/lib/overtime-server';
 import { route, requireSession, parseBody, badRequest } from '@/lib/api';
@@ -66,7 +64,6 @@ export const POST = route(async (req: Request) => {
   }
 
   const notes = body.notes?.trim() || null;
-  const photoUrl = (await getPhotoResolver())({ name: session.name, email: session.email });
 
   const admin = createAdminClient();
   const nowDate = new Date();
@@ -100,7 +97,6 @@ export const POST = route(async (req: Request) => {
     : (existingWithNotes?.[0] ?? null);
 
   if (existing) {
-    clockIn({ userId: session.id, name: session.name, role: session.role, team: session.team, clockedInAt: existing.clocked_in_at, weekSecondsBefore, photoUrl });
     return NextResponse.json({
       timesheetId: existing.id,
       clockedInAt: existing.clocked_in_at,
@@ -154,7 +150,6 @@ export const POST = route(async (req: Request) => {
     return NextResponse.json({ error: 'Failed to start clock-in session' }, { status: 500 });
   }
 
-  clockIn({ userId: session.id, name: session.name, role: session.role, team: session.team, clockedInAt: now, weekSecondsBefore, photoUrl });
   await autoMarkPresent(session.id);
 
   return NextResponse.json({ timesheetId: inserted.id, clockedInAt: now, weekSecondsBefore, notes, noteSaved });

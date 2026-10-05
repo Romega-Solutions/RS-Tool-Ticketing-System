@@ -71,62 +71,19 @@ export type PresencePingSnapshot = {
 };
 
 // ── In-memory store ────────────────────────────────────────────────────────────
-// Resets on server restart — acceptable for a small internal tool.
-// Polled by clients (not pushed over a held-open connection) — see /api/presence/live.
+// Who is online is NOT stored here — it is read from open `timesheets` rows
+// (see presence-online.ts), since this module's state is per serverless instance.
 
-const online:    Map<number, PresenceUser>                          = new Map();
 const presencePings: Map<string, PresencePingRecord>                 = new Map();
 let pingSequence = 0;
 
 export const PRESENCE_PING_RESPONSE_WINDOW_MS = 60 * 60 * 1000;
 
-// ── Visibility check ───────────────────────────────────────────────────────────
-// Returns true if a viewer is allowed to see targetUser's presence.
-
-function canSee(
-  viewerRole: AppRole,
-  viewerTeam: string | null,
-  viewerUserId: number,
-  target: PresenceUser,
-): boolean {
-  if (viewerRole === 'admin')   return true;
-  if (target.userId === viewerUserId) return true;
-  if (viewerRole === 'lead' && target.role === 'ic' && target.team === viewerTeam) return true;
-  return false;
-}
-
 type PingResult =
   | { ok: true; event: PresencePingEvent; record: PresencePingRecord }
-  | { ok: false; reason: 'self' | 'not_online' };
+  | { ok: false; reason: 'self' };
 
 // ── Public API ─────────────────────────────────────────────────────────────────
-
-export function clockIn(user: PresenceUser): void {
-  online.set(user.userId, user);
-}
-
-export function clockOut(userId: number): void {
-  online.delete(userId);
-}
-
-/** Filtered snapshot of who is currently online, visible to this viewer. */
-export function getOnline(
-  viewerRole: AppRole,
-  viewerTeam: string | null,
-  viewerUserId: number,
-): PresenceUser[] {
-  return [...online.values()].filter(u => canSee(viewerRole, viewerTeam, viewerUserId, u));
-}
-
-/** Open user's own timesheet entry in the store (for widget restore on refresh). */
-export function getMyEntry(userId: number): PresenceUser | undefined {
-  return online.get(userId);
-}
-
-/** All online users — no visibility filter. Used by the live page. */
-export function getAllOnline(): PresenceUser[] {
-  return [...online.values()];
-}
 
 function pingDeadline(createdAt: string): string {
   return new Date(Date.parse(createdAt) + PRESENCE_PING_RESPONSE_WINDOW_MS).toISOString();
@@ -182,8 +139,8 @@ export function sendPresencePing({
   message?: string | null;
   createdAt?: string;
 }): PingResult {
+  // Whether the target is clocked in is checked by the caller against the DB.
   if (from.userId === toUserId) return { ok: false, reason: 'self' };
-  if (!online.has(toUserId)) return { ok: false, reason: 'not_online' };
 
   const id = nextPingId(createdAt, from.userId, toUserId);
   const deadlineAt = pingDeadline(createdAt);
@@ -318,17 +275,7 @@ export function getPresencePingSnapshotForUser(userId: number, now = new Date())
   return createPresencePingSnapshotFromRecords([...presencePings.values()], userId, now);
 }
 
-/** Seed users from DB without broadcasting. Used for post-restart hydration. */
-export function seedUsers(users: PresenceUser[]): void {
-  for (const u of users) {
-    if (!online.has(u.userId)) {
-      online.set(u.userId, u);
-    }
-  }
-}
-
 export function __resetPresenceForTests(): void {
-  online.clear();
   presencePings.clear();
   pingSequence = 0;
 }

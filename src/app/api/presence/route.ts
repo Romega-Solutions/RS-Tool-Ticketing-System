@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getOnline, getMyEntry, clockIn, clockOut } from '@/lib/presence';
-import { getPhotoResolver } from '@/lib/orgchart';
 import { weeklySecondsForUser, weeklyAllowanceForUser, enforceUserOpenSession, maybeSweepOpenSessions } from '@/lib/overtime-server';
-import type { AppRole } from '@/lib/rbac';
 import { route, requireSession } from '@/lib/api';
 
 export const runtime = 'nodejs';
@@ -26,9 +23,8 @@ export const GET = route(async () => {
     weeklyAllowanceForUser(admin, session.id, now),
   ]);
 
-  // The DB is the source of truth for this user's own session. The in-memory
-  // presence map is per-instance, so it can still hold an entry after the user
-  // clocked out (or the cron closed the session) on another instance.
+  // This user's own session, read from the DB (not a per-instance memory map).
+
   let openSession: { timesheetId: number; clockedInAt: string; notes: string | null } | null = null;
   const { data: openRows, error } = await admin
     .from('timesheets')
@@ -49,14 +45,7 @@ export const GET = route(async () => {
 
   if (open) {
     openSession = { timesheetId: open.id, clockedInAt: open.clocked_in_at, notes: 'notes' in open ? ((open.notes as string | null) ?? null) : null };
-    if (!getMyEntry(session.id)) {
-      const photoUrl = (await getPhotoResolver())({ name: session.name, email: session.email });
-      clockIn({ userId: session.id, name: session.name, role: session.role as AppRole, team: session.team, clockedInAt: open.clocked_in_at, weekSecondsBefore, photoUrl });
-    }
-  } else {
-    clockOut(session.id);
   }
 
-  const online = getOnline(session.role, session.team, session.id);
-  return NextResponse.json({ online, openSession, weekSecondsBefore, weekAllowanceSeconds });
+  return NextResponse.json({ openSession, weekSecondsBefore, weekAllowanceSeconds });
 });

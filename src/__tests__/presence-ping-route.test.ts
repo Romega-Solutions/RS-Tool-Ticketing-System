@@ -27,30 +27,17 @@ function mockSession(session: SessionUser | null) {
   }));
 }
 
-function mockPresenceHydration() {
+function mockClockedIn(clockedInUserIds: number[]) {
   const from = vi.fn((table: string) => {
     if (table === 'timesheets') {
       return {
         select: vi.fn(() => ({
-          is: vi.fn(() => Promise.resolve({
-            data: [{ user_id: 2, clocked_in_at: '2026-06-10T01:00:00.000Z' }],
-          })),
-        })),
-      };
-    }
-
-    if (table === 'users') {
-      return {
-        select: vi.fn(() => ({
-          in: vi.fn(() => ({
-            eq: vi.fn(() => Promise.resolve({
-              data: [{
-                id: 2,
-                name: 'Receiver',
-                email: 'receiver@romega-solutions.com',
-                role: 'ic',
-                team: 'Engineering',
-              }],
+          eq: vi.fn((_col: string, userId: number) => ({
+            is: vi.fn(() => ({
+              limit: vi.fn(() => Promise.resolve({
+                data: clockedInUserIds.includes(userId) ? [{ id: 10 }] : [],
+                error: null,
+              })),
             })),
           })),
         })),
@@ -63,12 +50,6 @@ function mockPresenceHydration() {
   vi.doMock('@/lib/supabase/admin', () => ({
     createAdminClient: vi.fn(() => ({ from })),
   }));
-  vi.doMock('@/lib/orgchart', () => ({
-    getPhotoResolver: vi.fn().mockResolvedValue(() => null),
-  }));
-  vi.doMock('@/lib/overtime-server', () => ({
-    weeklySecondsForUsers: vi.fn().mockResolvedValue(new Map([[2, 0]])),
-  }));
 }
 
 describe('POST /api/presence/ping', () => {
@@ -77,9 +58,9 @@ describe('POST /api/presence/ping', () => {
     vi.restoreAllMocks();
   });
 
-  it('hydrates open clock-in sessions from the DB before allowing a ping to a not-yet-seen user', async () => {
+  it('allows a ping when the target has an open timesheet row', async () => {
     mockSession(sender);
-    mockPresenceHydration();
+    mockClockedIn([2]);
 
     const presence = await import('@/lib/presence');
     presence.__resetPresenceForTests();
@@ -108,5 +89,16 @@ describe('POST /api/presence/ping', () => {
         },
       },
     });
+  });
+
+  it('rejects a ping when the target has no open timesheet row', async () => {
+    mockSession(sender);
+    mockClockedIn([]);
+
+    const { POST } = await import('@/app/api/presence/ping/route');
+    const res = await POST(jsonReq({ toUserId: 2 }));
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'User is not clocked in right now' });
   });
 });

@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { clockOut } from '@/lib/presence';
 import { computeOvertime } from '@/lib/utils';
 import { weeklySecondsForUser, baseWeeklySecondsForUser } from '@/lib/overtime-server';
 import { route, requireSession } from '@/lib/api';
@@ -26,9 +25,7 @@ export const POST = route(async () => {
   }
 
   if (!openRows || openRows.length === 0) {
-    // Already closed (another tab, the cron, or an admin). Clear any stale
-    // in-memory presence so the UI settles on "clocked out".
-    clockOut(session.id);
+    // Already closed (another tab, the cron, or an admin) — treat as success.
     return NextResponse.json({ alreadyClockedOut: true, durationSeconds: 0, isOvertime: false, overtimeSeconds: 0 });
   }
 
@@ -69,8 +66,6 @@ export const POST = route(async () => {
       .in('id', duplicates.map(d => d.id));
     if (dupError) console.error('[clock-out] duplicate close error:', dupError.message);
   }
-
-  clockOut(session.id);
 
   return NextResponse.json({ durationSeconds, clockedOutAt: now, isOvertime, overtimeSeconds });
 });

@@ -2,24 +2,12 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   __resetPresenceForTests,
   acknowledgePresencePing,
-  clockIn,
   getPresencePingSnapshotForUser,
   PRESENCE_PING_RESPONSE_WINDOW_MS,
   sendPresencePingReply,
   sendPresencePing,
-  type PresenceUser,
 } from '@/lib/presence';
 import { normalizePingMessage } from '@/lib/presence-ping';
-
-function makeUser(overrides: Partial<PresenceUser> & { userId: number }): PresenceUser {
-  return {
-    name: 'Test User',
-    role: 'ic',
-    team: 'Engineering',
-    clockedInAt: '2026-06-10T01:00:00.000Z',
-    ...overrides,
-  };
-}
 
 describe('normalizePingMessage', () => {
   it('uses the default quick ping when the message is blank', () => {
@@ -36,10 +24,7 @@ describe('sendPresencePing', () => {
     __resetPresenceForTests();
   });
 
-  it('delivers a ping to a user who is clocked in, regardless of live connection state', () => {
-    const target = makeUser({ userId: 2, name: 'Receiver' });
-    clockIn(target);
-
+  it('builds a user_ping event for the target', () => {
     const result = sendPresencePing({
       from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
       toUserId: 2,
@@ -55,8 +40,6 @@ describe('sendPresencePing', () => {
   });
 
   it('tracks a delivered ping as a one-hour response task for sender and receiver', () => {
-    clockIn(makeUser({ userId: 2, name: 'Receiver' }));
-
     const result = sendPresencePing({
       from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
       toUserId: 2,
@@ -84,8 +67,6 @@ describe('sendPresencePing', () => {
   });
 
   it('acknowledges a ping before the one-hour response window expires', () => {
-    clockIn(makeUser({ userId: 2, name: 'Receiver' }));
-
     const sent = sendPresencePing({
       from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
       toUserId: 2,
@@ -111,8 +92,6 @@ describe('sendPresencePing', () => {
   });
 
   it('builds a reply event once the receiver acknowledges a ping', () => {
-    clockIn(makeUser({ userId: 2, name: 'Receiver' }));
-
     const sent = sendPresencePing({
       from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
       toUserId: 2,
@@ -143,8 +122,6 @@ describe('sendPresencePing', () => {
   });
 
   it('marks an unanswered ping missed after the one-hour response window expires', () => {
-    clockIn(makeUser({ userId: 2, name: 'Receiver' }));
-
     const sent = sendPresencePing({
       from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
       toUserId: 2,
@@ -163,20 +140,6 @@ describe('sendPresencePing', () => {
     expect(receiverSnapshot.byUserId[2]).toMatchObject({
       requiresMyReplyCount: 0,
       missedMeCount: 1,
-    });
-  });
-
-  it('rejects a ping when the target is not clocked in', () => {
-    const result = sendPresencePing({
-      from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
-      toUserId: 2,
-      message: 'Can you check this?',
-      createdAt: '2026-06-10T02:00:00.000Z',
-    });
-
-    expect(result).toEqual({
-      ok: false,
-      reason: 'not_online',
     });
   });
 });
