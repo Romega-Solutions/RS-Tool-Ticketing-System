@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { route, requireSession, parseBody } from '@/lib/api';
-import { getPresencePingSnapshotForUser, sendPresencePing } from '@/lib/presence';
+import { sendPresencePing } from '@/lib/presence';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isUserClockedIn } from '@/lib/presence-online';
 import {
@@ -23,8 +23,9 @@ const errorByReason: Record<'self' | 'not_online', { status: number; message: st
 
 export const GET = route(async () => {
   const session = await requireSession();
-  const stored = await getStoredPresencePingSnapshotForUser(session.id);
-  return NextResponse.json(stored ?? getPresencePingSnapshotForUser(session.id));
+  const snapshot = await getStoredPresencePingSnapshotForUser(session.id);
+  if (!snapshot) return NextResponse.json({ error: 'Failed to load pings' }, { status: 500 });
+  return NextResponse.json(snapshot);
 });
 
 export const POST = route(async (req: Request) => {
@@ -53,9 +54,10 @@ export const POST = route(async (req: Request) => {
     return NextResponse.json({ error: mapped.message }, { status: mapped.status });
   }
 
-  await persistPresencePingRecord(result.record);
-  const snapshot = await getStoredPresencePingSnapshotForUser(session.id)
-    ?? getPresencePingSnapshotForUser(session.id);
+  if (!(await persistPresencePingRecord(result.record))) {
+    return NextResponse.json({ error: 'Failed to send ping' }, { status: 500 });
+  }
+  const snapshot = await getStoredPresencePingSnapshotForUser(session.id);
 
   return NextResponse.json({
     ok: true,

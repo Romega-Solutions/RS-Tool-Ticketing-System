@@ -1,13 +1,25 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  __resetPresenceForTests,
-  acknowledgePresencePing,
-  getPresencePingSnapshotForUser,
+  createPresencePingSnapshotFromRecords,
   PRESENCE_PING_RESPONSE_WINDOW_MS,
   sendPresencePingReply,
   sendPresencePing,
+  type PresencePingRecord,
 } from '@/lib/presence';
 import { normalizePingMessage } from '@/lib/presence-ping';
+
+const sender = { userId: 1, name: 'Sender', role: 'lead' as const, team: 'Engineering', photoUrl: null };
+
+function sendTo2(message = 'Please confirm you are online.'): PresencePingRecord {
+  const result = sendPresencePing({
+    from: sender,
+    toUserId: 2,
+    message,
+    createdAt: '2026-06-10T02:00:00.000Z',
+  });
+  if (!result.ok) throw new Error(`ping rejected: ${result.reason}`);
+  return result.record;
+}
 
 describe('normalizePingMessage', () => {
   it('uses the default quick ping when the message is blank', () => {
@@ -20,13 +32,9 @@ describe('normalizePingMessage', () => {
 });
 
 describe('sendPresencePing', () => {
-  beforeEach(() => {
-    __resetPresenceForTests();
-  });
-
   it('builds a user_ping event for the target', () => {
     const result = sendPresencePing({
-      from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
+      from: sender,
       toUserId: 2,
       message: 'Can you check this?',
       createdAt: '2026-06-10T02:00:00.000Z',
@@ -39,107 +47,84 @@ describe('sendPresencePing', () => {
     expect(result.event.from.name).toBe('Sender');
   });
 
-  it('tracks a delivered ping as a one-hour response task for sender and receiver', () => {
-    const result = sendPresencePing({
-      from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
-      toUserId: 2,
-      message: 'Please confirm you are online.',
-      createdAt: '2026-06-10T02:00:00.000Z',
-    });
+  it('rejects pinging yourself', () => {
+    const result = sendPresencePing({ from: sender, toUserId: 1 });
+    expect(result).toEqual({ ok: false, reason: 'self' });
+  });
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.record.deadlineAt).toBe(
-      new Date(Date.parse(result.record.createdAt) + PRESENCE_PING_RESPONSE_WINDOW_MS).toISOString(),
+  it('gives each ping a unique id even when sent in the same millisecond', () => {
+    expect(sendTo2().id).not.toBe(sendTo2().id);
+  });
+
+  it('starts a pending ping with a one-hour response deadline', () => {
+    const record = sendTo2();
+    expect(record.status).toBe('pending');
+    expect(record.deadlineAt).toBe(
+      new Date(Date.parse(record.createdAt) + PRESENCE_PING_RESPONSE_WINDOW_MS).toISOString(),
     );
+  });
+});
 
-    const senderSnapshot = getPresencePingSnapshotForUser(1, new Date('2026-06-10T02:10:00.000Z'));
-    expect(senderSnapshot.byUserId[2]).toMatchObject({
+describe('createPresencePingSnapshotFromRecords', () => {
+  it('tracks a pending ping as a response task for sender and receiver', () => {
+    const record = sendTo2();
+    const at = new Date('2026-06-10T02:10:00.000Z');
+
+    expect(createPresencePingSnapshotFromRecords([{ ...record }], 1, at).byUserId[2]).toMatchObject({
       awaitingReplyCount: 1,
       missedReplyCount: 0,
     });
-
-    const receiverSnapshot = getPresencePingSnapshotForUser(2, new Date('2026-06-10T02:10:00.000Z'));
-    expect(receiverSnapshot.byUserId[2]).toMatchObject({
+    expect(createPresencePingSnapshotFromRecords([{ ...record }], 2, at).byUserId[2]).toMatchObject({
       requiresMyReplyCount: 1,
       missedMeCount: 0,
     });
   });
 
-  it('acknowledges a ping before the one-hour response window expires', () => {
-    const sent = sendPresencePing({
-      from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
-      toUserId: 2,
-      message: 'Please confirm you are online.',
-      createdAt: '2026-06-10T02:00:00.000Z',
-    });
-    expect(sent.ok).toBe(true);
-    if (!sent.ok) return;
+  it('counts an acknowledged ping as replied', () => {
+    const record: PresencePingRecord = {
+      ...sendTo2(),
+      status: 'acknowledged',
+      acknowledgedAt: '2026-06-10T02:30:00.000Z',
+    };
 
-    const ack = acknowledgePresencePing({
-      eventId: sent.event.id,
-      userId: 2,
-      now: new Date('2026-06-10T02:30:00.000Z'),
-    });
-
-    expect(ack).toMatchObject({ ok: true });
-    const senderSnapshot = getPresencePingSnapshotForUser(1, new Date('2026-06-10T02:31:00.000Z'));
-    expect(senderSnapshot.byUserId[2]).toMatchObject({
+    expect(
+      createPresencePingSnapshotFromRecords([record], 1, new Date('2026-06-10T02:31:00.000Z')).byUserId[2],
+    ).toMatchObject({
       awaitingReplyCount: 0,
       acknowledgedReplyCount: 1,
       missedReplyCount: 0,
     });
   });
 
-  it('builds a reply event once the receiver acknowledges a ping', () => {
-    const sent = sendPresencePing({
-      from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
-      toUserId: 2,
-      message: 'Please confirm you are online.',
-      createdAt: '2026-06-10T02:00:00.000Z',
-    });
-    expect(sent.ok).toBe(true);
-    if (!sent.ok) return;
+  it('marks an unanswered ping missed after the one-hour response window expires', () => {
+    const record = sendTo2();
+    const at = new Date('2026-06-10T03:01:00.000Z');
 
-    const ack = acknowledgePresencePing({
-      eventId: sent.event.id,
-      userId: 2,
+    expect(createPresencePingSnapshotFromRecords([{ ...record }], 1, at).byUserId[2]).toMatchObject({
+      awaitingReplyCount: 0,
+      missedReplyCount: 1,
+    });
+    expect(createPresencePingSnapshotFromRecords([{ ...record }], 2, at).byUserId[2]).toMatchObject({
+      requiresMyReplyCount: 0,
+      missedMeCount: 1,
+    });
+  });
+});
+
+describe('sendPresencePingReply', () => {
+  it('builds a reply event for an acknowledged ping', () => {
+    const record: PresencePingRecord = {
+      ...sendTo2(),
+      status: 'acknowledged',
       replyMessage: "I'm here",
-      now: new Date('2026-06-10T02:30:00.000Z'),
-    });
-    expect(ack.ok).toBe(true);
-    if (!ack.ok) return;
+      acknowledgedAt: '2026-06-10T02:30:00.000Z',
+    };
 
-    const reply = sendPresencePingReply({
-      record: ack.record,
-      responderName: 'Receiver',
-    });
+    const reply = sendPresencePingReply({ record, responderName: 'Receiver' });
 
     expect(reply.type).toBe('user_ping_reply');
     expect(reply.toUserId).toBe(1);
     expect(reply.replyMessage).toBe("I'm here");
     expect(reply.responderName).toBe('Receiver');
-  });
-
-  it('marks an unanswered ping missed after the one-hour response window expires', () => {
-    const sent = sendPresencePing({
-      from: { userId: 1, name: 'Sender', role: 'lead', team: 'Engineering', photoUrl: null },
-      toUserId: 2,
-      message: 'Please confirm you are online.',
-      createdAt: '2026-06-10T02:00:00.000Z',
-    });
-    expect(sent.ok).toBe(true);
-
-    const senderSnapshot = getPresencePingSnapshotForUser(1, new Date('2026-06-10T03:01:00.000Z'));
-    expect(senderSnapshot.byUserId[2]).toMatchObject({
-      awaitingReplyCount: 0,
-      missedReplyCount: 1,
-    });
-
-    const receiverSnapshot = getPresencePingSnapshotForUser(2, new Date('2026-06-10T03:01:00.000Z'));
-    expect(receiverSnapshot.byUserId[2]).toMatchObject({
-      requiresMyReplyCount: 0,
-      missedMeCount: 1,
-    });
   });
 });

@@ -52,6 +52,19 @@ function mockClockedIn(clockedInUserIds: number[]) {
   }));
 }
 
+function mockPingStore({ persisted = true } = {}) {
+  const persistPresencePingRecord = vi.fn().mockResolvedValue(persisted);
+  vi.doMock('@/lib/presence-ping-store', () => ({
+    persistPresencePingRecord,
+    getStoredPresencePingSnapshotForUser: vi.fn().mockResolvedValue({
+      byUserId: { 2: { awaitingReplyCount: 1, missedReplyCount: 0 } },
+      sent: [],
+      received: [],
+    }),
+  }));
+  return { persistPresencePingRecord };
+}
+
 describe('POST /api/presence/ping', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -61,9 +74,7 @@ describe('POST /api/presence/ping', () => {
   it('allows a ping when the target has an open timesheet row', async () => {
     mockSession(sender);
     mockClockedIn([2]);
-
-    const presence = await import('@/lib/presence');
-    presence.__resetPresenceForTests();
+    const { persistPresencePingRecord } = mockPingStore();
 
     const { POST } = await import('@/app/api/presence/ping/route');
     const res = await POST(jsonReq({ toUserId: 2, message: 'Are you online?' }));
@@ -89,16 +100,31 @@ describe('POST /api/presence/ping', () => {
         },
       },
     });
+    expect(persistPresencePingRecord).toHaveBeenCalledWith(expect.objectContaining({ targetUserId: 2, status: 'pending' }));
+  });
+
+  it('fails instead of reporting success when the ping cannot be saved', async () => {
+    mockSession(sender);
+    mockClockedIn([2]);
+    mockPingStore({ persisted: false });
+
+    const { POST } = await import('@/app/api/presence/ping/route');
+    const res = await POST(jsonReq({ toUserId: 2 }));
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: 'Failed to send ping' });
   });
 
   it('rejects a ping when the target has no open timesheet row', async () => {
     mockSession(sender);
     mockClockedIn([]);
+    const { persistPresencePingRecord } = mockPingStore();
 
     const { POST } = await import('@/app/api/presence/ping/route');
     const res = await POST(jsonReq({ toUserId: 2 }));
 
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: 'User is not clocked in right now' });
+    expect(persistPresencePingRecord).not.toHaveBeenCalled();
   });
 });

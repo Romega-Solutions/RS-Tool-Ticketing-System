@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { AppRole } from './rbac';
 import { normalizePingMessage, normalizePingReply } from './presence-ping';
 
@@ -70,12 +71,9 @@ export type PresencePingSnapshot = {
   received: PresencePingRecord[];
 };
 
-// ── In-memory store ────────────────────────────────────────────────────────────
-// Who is online is NOT stored here — it is read from open `timesheets` rows
-// (see presence-online.ts), since this module's state is per serverless instance.
-
-const presencePings: Map<string, PresencePingRecord>                 = new Map();
-let pingSequence = 0;
+// Nothing is kept in memory here: serverless instances don't share state. Who
+// is online comes from open `timesheets` rows (presence-online.ts) and pings
+// live in the `presence_pings` table (presence-ping-store.ts).
 
 export const PRESENCE_PING_RESPONSE_WINDOW_MS = 60 * 60 * 1000;
 
@@ -90,18 +88,7 @@ function pingDeadline(createdAt: string): string {
 }
 
 function nextPingId(createdAt: string, fromUserId: number, toUserId: number): string {
-  pingSequence += 1;
-  return `${createdAt}-${fromUserId}-${toUserId}-${pingSequence}`;
-}
-
-function markExpiredPresencePings(now = new Date()): void {
-  const nowMs = now.getTime();
-  for (const record of presencePings.values()) {
-    if (record.status !== 'pending') continue;
-    if (Date.parse(record.deadlineAt) > nowMs) continue;
-    record.status = 'missed';
-    record.missedAt = now.toISOString();
-  }
+  return `${createdAt}-${fromUserId}-${toUserId}-${randomUUID().slice(0, 8)}`;
 }
 
 function emptyPingSummary(userId: number): PresencePingUserSummary {
@@ -162,34 +149,8 @@ export function sendPresencePing({
     acknowledgedAt: null,
     missedAt: null,
   };
-  presencePings.set(id, record);
 
   return { ok: true, event, record };
-}
-
-export function acknowledgePresencePing({
-  eventId,
-  userId,
-  replyMessage,
-  now = new Date(),
-}: {
-  eventId: string;
-  userId: number;
-  replyMessage?: string | null;
-  now?: Date;
-}): { ok: true; record: PresencePingRecord } | { ok: false; reason: 'not_found' | 'forbidden' | 'expired'; record?: PresencePingRecord } {
-  const record = presencePings.get(eventId);
-  if (!record) return { ok: false, reason: 'not_found' };
-  if (record.targetUserId !== userId) return { ok: false, reason: 'forbidden' };
-
-  markExpiredPresencePings(now);
-  if (record.status === 'missed') return { ok: false, reason: 'expired', record };
-  if (record.status === 'acknowledged') return { ok: true, record };
-
-  record.status = 'acknowledged';
-  record.replyMessage = normalizePingReply(replyMessage);
-  record.acknowledgedAt = now.toISOString();
-  return { ok: true, record };
 }
 
 export function sendPresencePingReply({
@@ -268,14 +229,4 @@ export function createPresencePingSnapshotFromRecords(
     sent: sent.sort(newestFirst),
     received: received.sort(newestFirst),
   };
-}
-
-export function getPresencePingSnapshotForUser(userId: number, now = new Date()): PresencePingSnapshot {
-  markExpiredPresencePings(now);
-  return createPresencePingSnapshotFromRecords([...presencePings.values()], userId, now);
-}
-
-export function __resetPresenceForTests(): void {
-  presencePings.clear();
-  pingSequence = 0;
 }
