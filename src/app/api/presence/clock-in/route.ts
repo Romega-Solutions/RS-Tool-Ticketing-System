@@ -76,13 +76,14 @@ export const POST = route(async (req: Request) => {
   // duration) is naturally excluded.
   const weekSecondsBefore = await weeklySecondsForUser(admin, session.id, nowDate);
   // .limit(1), not .maybeSingle(): with duplicate open rows maybeSingle errors,
-  // which used to read as "no session" and insert yet another open row.
+  // which used to read as "no session" and insert yet another open row. The
+  // earliest row is the real session, matching clock-out and the online list.
   const { data: existingWithNotes, error: existingError } = await admin
     .from('timesheets')
     .select('id, clocked_in_at, notes')
     .eq('user_id', session.id)
     .is('clocked_out_at', null)
-    .order('clocked_in_at', { ascending: false })
+    .order('clocked_in_at', { ascending: true })
     .limit(1);
 
   const existing = existingError
@@ -91,7 +92,7 @@ export const POST = route(async (req: Request) => {
         .select('id, clocked_in_at')
         .eq('user_id', session.id)
         .is('clocked_out_at', null)
-        .order('clocked_in_at', { ascending: false })
+        .order('clocked_in_at', { ascending: true })
         .limit(1)
         .then(result => result.data?.[0] ?? null)
     : (existingWithNotes?.[0] ?? null);

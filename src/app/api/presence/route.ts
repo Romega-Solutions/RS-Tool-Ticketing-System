@@ -24,6 +24,7 @@ export const GET = route(async () => {
   ]);
 
   // This user's own session, read from the DB (not a per-instance memory map).
+  // With duplicate open rows the earliest is the real one, as in clock-out.
 
   let openSession: { timesheetId: number; clockedInAt: string; notes: string | null } | null = null;
   const { data: openRows, error } = await admin
@@ -31,7 +32,7 @@ export const GET = route(async () => {
     .select('id, clocked_in_at, notes')
     .eq('user_id', session.id)
     .is('clocked_out_at', null)
-    .order('clocked_in_at', { ascending: false })
+    .order('clocked_in_at', { ascending: true })
     .limit(1);
   const open = error
     ? (await admin
@@ -39,7 +40,7 @@ export const GET = route(async () => {
         .select('id, clocked_in_at')
         .eq('user_id', session.id)
         .is('clocked_out_at', null)
-        .order('clocked_in_at', { ascending: false })
+        .order('clocked_in_at', { ascending: true })
         .limit(1)).data?.[0]
     : openRows?.[0];
 
