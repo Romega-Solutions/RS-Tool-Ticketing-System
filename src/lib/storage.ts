@@ -11,6 +11,7 @@ const ONBOARDER_BUCKET = process.env.SUPABASE_ONBOARDER_BUCKET ?? 'onboarder-doc
 const LEARNING_BUCKET  = process.env.SUPABASE_LEARNING_BUCKET  ?? 'learning-content';
 const TASK_IMAGE_BUCKET = process.env.SUPABASE_TASK_IMAGES_BUCKET ?? 'task-images';
 const TIMESHEET_DOCS_BUCKET = process.env.SUPABASE_TIMESHEET_DOCS_BUCKET ?? 'timesheet-edit-docs';
+const USER_PHOTOS_BUCKET = process.env.SUPABASE_USER_PHOTOS_BUCKET ?? 'user-photos';
 
 // 1y — long enough that the signed URL doesn't expire mid-pipeline. Recruiters
 // who want to share externally should re-sign just before sharing.
@@ -317,4 +318,19 @@ export async function uploadTaskImageToStorage(args: {
     mimeType: args.file.type,
     sizeBytes: args.file.size,
   };
+}
+
+// ── User photos — PUBLIC bucket, so a plain URL works everywhere ───────────
+export function userPhotoUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  return `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/${USER_PHOTOS_BUCKET}/${path}`;
+}
+
+export async function uploadUserPhoto(userId: number, file: File): Promise<string> {
+  const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+  // Fresh key per upload so browsers/CDN never serve a stale cached photo.
+  const path = `${userId}/${Date.now()}.${ext}`;
+  const { error } = await createAdminClient().storage.from(USER_PHOTOS_BUCKET).upload(path, file, { contentType: file.type });
+  if (error) throw new Error(`User photo upload failed: ${error.message}`);
+  return path;
 }

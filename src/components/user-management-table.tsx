@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Pencil, X, Loader2, UserPlus, Eye, EyeOff, Users, UserMinus, RotateCcw, FileText, ArrowUp, ArrowDown, ChevronsUpDown, SlidersHorizontal, Mail, MailCheck, Filter } from 'lucide-react';
+import { ChevronDown, Upload, Pencil, X, Loader2, UserPlus, Eye, EyeOff, Users, UserMinus, RotateCcw, FileText, ArrowUp, ArrowDown, ChevronsUpDown, SlidersHorizontal, Mail, MailCheck, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -31,6 +31,10 @@ export type UserRow = {
   schedulePhtStart: string | null;
   schedulePhtEnd: string | null;
   setupEmailSentAt: string | null;
+  // null = reports to the founder (Robbie Galoso) by default.
+  reportsToUserId: number | null;
+  alsoReportsToUserIds: number[];
+  photoUrl: string | null;
 };
 
 // Selectable roles (stored value is the lowercase string; the dropdown shows the
@@ -63,6 +67,7 @@ type EditState = {
   role: string; isActive: boolean; team: string; memberCode: string; hourlyRateUsd: string;
   dateOfBirth: string; startDate: string; endDate: string; driveUrl: string;
   approvedHoursPerWeek: string; schedulePhtStart: string; schedulePhtEnd: string;
+  reportsToUserId: string; alsoReportsToUserIds: number[];
 };
 
 type NewUserForm = {
@@ -115,7 +120,7 @@ type ColKey = 'role' | 'team' | 'approvedHoursPerWeek' | 'schedulePht' | 'schedu
   | 'isActive' | 'dateOfBirth' | 'startDate' | 'endDate' | 'driveUrl' | 'memberCode' | 'hourlyRateUsd';
 const COLUMNS: { key: ColKey; label: string }[] = [
   { key: 'role',                 label: 'Role' },
-  { key: 'team',                 label: 'Team' },
+  { key: 'team',                 label: 'Department' },
   { key: 'approvedHoursPerWeek', label: 'Approved Hours' },
   { key: 'schedulePht',          label: 'Schedule PHT' },
   { key: 'schedulePst',          label: 'Schedule PST' },
@@ -312,7 +317,9 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
   }, []);
 
   // Edit existing user — the editor lives inside the profile dialog (profileUser).
-  const [editForm, setEditForm]     = useState<EditState>({ name: '', username: '', email: '', jobTitle: '', role: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '', dateOfBirth: '', startDate: '', endDate: '', driveUrl: '', approvedHoursPerWeek: '15', schedulePhtStart: '', schedulePhtEnd: '' });
+  const [editForm, setEditForm]     = useState<EditState>({ name: '', username: '', email: '', jobTitle: '', role: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '', dateOfBirth: '', startDate: '', endDate: '', driveUrl: '', approvedHoursPerWeek: '15', schedulePhtStart: '', schedulePhtEnd: '', reportsToUserId: '', alsoReportsToUserIds: [] });
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [alsoMenuOpen, setAlsoMenuOpen] = useState(false);
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState('');
 
@@ -367,9 +374,11 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       approvedHoursPerWeek: String(user.approvedHoursPerWeek ?? 15),
       schedulePhtStart: user.schedulePhtStart ?? '',
       schedulePhtEnd: user.schedulePhtEnd ?? '',
+      reportsToUserId: user.reportsToUserId != null ? String(user.reportsToUserId) : '',
+      alsoReportsToUserIds: user.alsoReportsToUserIds,
     });
   };
-  const closeProfile = () => { setProfileUser(null); setError(''); };
+  const closeProfile = () => { setProfileUser(null); setError(''); setAlsoMenuOpen(false); };
 
   // Save the editable profile dialog → PATCH /api/admin/users (which already
   // accepts every one of these fields). Validates client-side first.
@@ -406,12 +415,43 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       });
       const data = (await res.json()) as { user?: UserRow; error?: string };
       if (!res.ok) { setError(data.error ?? 'Failed to save'); return; }
-      if (data.user) setUserList(prev => prev.map(u => u.id === userId ? data.user! : u));
+      const res2 = await fetch(`/api/admin/users/${userId}/reporting`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reportsToUserId: editForm.reportsToUserId ? Number(editForm.reportsToUserId) : null,
+          alsoReportsToUserIds: editForm.alsoReportsToUserIds,
+        }),
+      });
+      const reporting = (await res2.json()) as { reportsToUserId?: number | null; alsoReportsToUserIds?: number[]; error?: string };
+      setUserList(prev => prev.map(u => u.id === userId ? { ...u, ...data.user, ...(res2.ok ? reporting : {}) } : u));
+      if (!res2.ok) { setError(reporting.error ?? 'Saved, but reporting lines failed to save'); return; }
       setProfileUser(null);
     } catch {
       setError('Request failed');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Photo uploads immediately (separate from Save) — it's a file, not a form field.
+  const uploadPhoto = async (file: File) => {
+    if (!profileUser) return;
+    const userId = profileUser.id;
+    setUploadingPhoto(true);
+    setError('');
+    try {
+      const fd = new FormData();
+      fd.append('photo', file);
+      const res = await fetch(`/api/admin/users/${userId}/reporting`, { method: 'POST', body: fd });
+      const data = (await res.json()) as { photoUrl?: string; error?: string };
+      if (!res.ok || !data.photoUrl) { setError(data.error ?? 'Photo upload failed'); return; }
+      setUserList(prev => prev.map(u => u.id === userId ? { ...u, photoUrl: data.photoUrl! } : u));
+      setProfileUser(p => p && { ...p, photoUrl: data.photoUrl! });
+    } catch {
+      setError('Photo upload failed');
+    } finally {
+      setUploadingPhoto(false);
     }
   };
 
@@ -430,7 +470,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       });
       const data = (await res.json()) as { user?: UserRow; error?: string };
       if (!res.ok) { setError(data.error ?? 'Failed to save'); return; }
-      if (data.user) setUserList(prev => prev.map(u => u.id === userId ? data.user! : u));
+      if (data.user) setUserList(prev => prev.map(u => u.id === userId ? { ...u, ...data.user } : u));
       setProfileUser(null);
     } catch {
       setError('Request failed');
@@ -451,7 +491,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       });
       const data = (await res.json()) as { user?: UserRow; error?: string };
       if (!res.ok) { setError(data.error ?? 'Failed to update'); return; }
-      if (data.user) setUserList(prev => prev.map(u => u.id === user.id ? data.user! : u));
+      if (data.user) setUserList(prev => prev.map(u => u.id === user.id ? { ...u, ...data.user } : u));
       setPendingRemove(null);
     } catch {
       setError('Request failed');
@@ -480,7 +520,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       });
       const data = (await res.json()) as { user?: UserRow; error?: string };
       if (!res.ok) { setCreateError(data.error ?? 'Failed to create user'); return; }
-      const created = data.user;
+      const created = data.user && { ...data.user, reportsToUserId: null, alsoReportsToUserIds: [], photoUrl: null };
       if (created) setUserList(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       closeCreate();
       // "Send setup email now" — best-effort; the account was already created.
@@ -582,7 +622,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                   ))}
                 </div>
 
-                <p className="px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider text-(--rs-neutral-grey-400) border-t border-(--rs-neutral-grey-100)">Team</p>
+                <p className="px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider text-(--rs-neutral-grey-400) border-t border-(--rs-neutral-grey-100)">Department</p>
                 <div className="max-h-40 overflow-y-auto">
                   {availableTeams.map(team => (
                     <label key={team} className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-(--rs-neutral-grey-50) cursor-pointer text-sm text-(--rs-neutral-grey-700)">
@@ -592,7 +632,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                         onChange={() => toggleFilterTeam(team)}
                         className="w-4 h-4 rounded accent-(--rs-primary-500)"
                       />
-                      {team === NO_TEAM ? 'No team' : team}
+                      {team === NO_TEAM ? 'No department' : team}
                     </label>
                   ))}
                 </div>
@@ -640,7 +680,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
               <tr className="border-b border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50)">
                 <SortableTh label="Name" k="name" sort={sort} onSort={toggleSort} width="w-48" />
                 {show('role') && <SortableTh label="Role" k="role" sort={sort} onSort={toggleSort} width="w-28" />}
-                {show('team') && <SortableTh label="Team" k="team" sort={sort} onSort={toggleSort} width="w-40" />}
+                {show('team') && <SortableTh label="Department" k="team" sort={sort} onSort={toggleSort} width="w-40" />}
                 {show('approvedHoursPerWeek') && <SortableTh label="Approved Hours" k="approvedHoursPerWeek" sort={sort} onSort={toggleSort} width="w-32" align="center" />}
                 {show('schedulePht') && <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-36">Schedule PHT</th>}
                 {show('schedulePst') && <th className="text-left px-4 py-3 font-semibold text-(--rs-neutral-grey-600) w-40">Schedule PST</th>}
@@ -690,7 +730,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                         {user.team ? (
                           <span className="text-xs text-(--rs-neutral-grey-700)">{user.team}</span>
                         ) : (
-                          <span className="text-xs text-(--rs-neutral-grey-300) italic">No team</span>
+                          <span className="text-xs text-(--rs-neutral-grey-300) italic">No department</span>
                         )}
                       </td>
                     )}
@@ -997,6 +1037,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
             // Self-edits are role-only — the API rejects every other field on
             // your own account (see admin/users/route.ts).
             const isSelf = currentUserId === profileUser.id;
+            const leadOptions = userList.filter(u => u.isActive && u.id !== profileUser.id);
             const pst = pstLabel(
               isSelf ? profileUser.schedulePhtStart : (editForm.schedulePhtStart || null),
               isSelf ? profileUser.schedulePhtEnd : (editForm.schedulePhtEnd || null),
@@ -1025,7 +1066,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                           {ROLE_OPTIONS.map(r => <option key={r} value={r}>{roleDisplayLabel(r)}</option>)}
                         </select>
                       </div>
-                      <ProfileField label="Team" value={profileUser.team ?? '—'} />
+                      <ProfileField label="Department" value={profileUser.team ?? '—'} />
                       <ProfileField label="Member Code" value={profileUser.memberCode ?? '—'} />
                       <ProfileField label="Approved Hours" value={`${profileUser.approvedHoursPerWeek} hrs`} />
                       <ProfileField label="Status" value={profileUser.isActive ? 'Active' : 'Inactive'} />
@@ -1076,13 +1117,45 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                           {ROLE_OPTIONS.map(r => <option key={r} value={r}>{roleDisplayLabel(r)}</option>)}
                         </select>
                       </Field>
-                      <Field label="Team">
-                        <select value={editForm.team} onChange={e => setEditForm(f => ({ ...f, team: e.target.value }))} aria-label="Team" className={inputCls}>
-                          <option value="">— No team —</option>
+                      <Field label="Department">
+                        <select value={editForm.team} onChange={e => setEditForm(f => ({ ...f, team: e.target.value }))} aria-label="Department" className={inputCls}>
+                          <option value="">— No department —</option>
                           {Array.from(new Set([editForm.team, ...DEPARTMENTS].filter(Boolean))).map(d => (
                             <option key={d} value={d}>{d}</option>
                           ))}
                         </select>
+                      </Field>
+                      <Field label="Reports To">
+                        <select value={editForm.reportsToUserId} onChange={e => setEditForm(f => ({ ...f, reportsToUserId: e.target.value }))} aria-label="Reports to" className={inputCls}>
+                          <option value="">Robbie Galoso (default)</option>
+                          {leadOptions.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+                      </Field>
+                      <Field label="Also Reports To">
+                        <div className="relative">
+                          <button type="button" onClick={() => setAlsoMenuOpen(o => !o)} aria-label="Also reports to"
+                            className={`${inputCls} flex items-center justify-between gap-2 text-left`}>
+                            <span className="truncate">
+                              {leadOptions.filter(u => editForm.alsoReportsToUserIds.includes(u.id)).map(u => u.name).join(', ') || 'None'}
+                            </span>
+                            <ChevronDown className="w-4 h-4 shrink-0 text-(--rs-neutral-grey-500)" />
+                          </button>
+                          {alsoMenuOpen && (
+                            <>
+                              <div className="fixed inset-0 z-10" onClick={() => setAlsoMenuOpen(false)} />
+                              <div className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-xl border border-(--rs-neutral-grey-200) bg-white shadow-lg p-1">
+                          {leadOptions.map(u => (
+                            <label key={u.id} className="flex items-center gap-2.5 px-2 py-1 rounded hover:bg-(--rs-neutral-grey-50) cursor-pointer text-sm text-(--rs-neutral-grey-700)">
+                              <input type="checkbox" checked={editForm.alsoReportsToUserIds.includes(u.id)}
+                                onChange={e => setEditForm(f => ({ ...f, alsoReportsToUserIds: e.target.checked ? [...f.alsoReportsToUserIds, u.id] : f.alsoReportsToUserIds.filter(id => id !== u.id) }))}
+                                className="w-4 h-4 rounded accent-(--rs-primary-500)" />
+                              {u.name}
+                            </label>
+                          ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
                       </Field>
                       <Field label="Member Code">
                         <input value={editForm.memberCode} onChange={e => setEditForm(f => ({ ...f, memberCode: e.target.value }))}
@@ -1139,6 +1212,22 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                           <input type="url" aria-label="Google Drive link" value={editForm.driveUrl}
                             onChange={e => setEditForm(f => ({ ...f, driveUrl: e.target.value }))}
                             placeholder="https://drive.google.com/…" className={inputCls} />
+                        </Field>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <Field label="Photo">
+                          <div className="flex items-center gap-4">
+                            {profileUser.photoUrl
+                              // eslint-disable-next-line @next/next/no-img-element
+                              ? <img src={profileUser.photoUrl} alt="" className="w-24 h-24 rounded-full object-cover" />
+                              : <div className="w-24 h-24 rounded-full bg-(--rs-neutral-grey-100)" />}
+                            <label className={`inline-flex items-center gap-2 rounded-lg border border-(--rs-primary-300) bg-(--rs-primary-50) px-3 py-2 text-sm font-medium text-(--rs-primary-700) hover:bg-(--rs-primary-100) ${uploadingPhoto ? 'opacity-60 pointer-events-none' : 'cursor-pointer'}`}>
+                              {uploadingPhoto ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                              {uploadingPhoto ? 'Uploading…' : profileUser.photoUrl ? 'Change photo' : 'Upload photo'}
+                              <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" disabled={uploadingPhoto}
+                                onChange={e => { const file = e.target.files?.[0]; if (file) { void uploadPhoto(file); } e.target.value = ''; }} />
+                            </label>
+                          </div>
                         </Field>
                       </div>
                     </div>
