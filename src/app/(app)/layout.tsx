@@ -3,7 +3,7 @@ import { AppSidebar, MobileNav } from "@/components/app-sidebar";
 import { getSessionResult } from "@/lib/session";
 import { hasSupabaseConfig } from "@/lib/supabase/config";
 import { canAccessPath, defaultLandingPath, canAccessAdmin } from "@/lib/rbac";
-import { getPhotoResolver } from "@/lib/orgchart";
+import { getUserPhotoResolver } from "@/lib/storage";
 import { hasIncompleteHardCourse, isPathExemptFromHardEnforcement } from "@/lib/lms-enforcement";
 import { ClockWidget } from "@/components/clock-widget";
 import { LiveClock } from "@/components/live-clock";
@@ -48,8 +48,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     // same slow auth endpoint just to render this redirect.
     switch (result.reason) {
       case 'no_row':
-        // Supabase auth OK but no public.users row — recovery via onboarding.
-        redirect('/onboarding');
+        // Supabase auth OK but no public.users row — accounts are admin-created.
+        redirect('/login?error=not_allowed');
       case 'inactive':
         redirect('/login?stale=1&reason=inactive');
       case 'timeout':
@@ -84,7 +84,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const firstName = session.name.trim().split(" ")[0] ?? "User";
   const quoteSeed = new Date().getDate() + (session.id ?? 0);
   const quote = await getDailyQuote(quoteSeed);
-  const myPhotoUrl = (await getPhotoResolver())({ name: session.name, email: session.email });
+  const myPhotoUrl = (await getUserPhotoResolver())({ name: session.name, email: session.email });
 
   return (
     <div className="flex h-screen bg-(--rs-primary-50) overflow-hidden text-(--rs-neutral-grey-900)">

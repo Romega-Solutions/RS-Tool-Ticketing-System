@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { ChevronDown, Upload, Pencil, X, Loader2, UserPlus, Eye, EyeOff, Users, UserMinus, RotateCcw, FileText, ArrowUp, ArrowDown, ChevronsUpDown, SlidersHorizontal, Mail, MailCheck, Filter } from 'lucide-react';
+import { ChevronDown, Pencil, X, Loader2, UserPlus, Eye, EyeOff, Users, UserMinus, RotateCcw, FileText, ArrowUp, ArrowDown, ChevronsUpDown, SlidersHorizontal, Mail, MailCheck, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase/client';
 import { roleDisplayLabel } from '@/lib/rbac';
 import { formatPhtRange, pacificRange } from '@/lib/schedule';
 import { usePersistedJson } from '@/lib/use-persisted-json';
+import { DEPARTMENTS } from '@/lib/departments';
 
 export type UserRow = {
   id: number;
@@ -40,16 +41,6 @@ export type UserRow = {
 // Selectable roles (stored value is the lowercase string; the dropdown shows the
 // proper display label via roleDisplayLabel). 'founder' = Admin access.
 const ROLE_OPTIONS = ['intern', 'ic', 'lead', 'admin', 'founder'];
-
-// Canonical departments, shown alphabetically in the selection dropdowns.
-const DEPARTMENTS = [
-  'Executive',
-  'Finance',
-  'Human Resource',
-  'Marketing',
-  'Sales',
-  'Technical',
-];
 
 const ROLE_BADGE: Record<string, string> = {
   admin:   'bg-purple-100 text-purple-700 border-purple-200',
@@ -1045,11 +1036,26 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
             return (
               <>
                 <DialogHeader>
-                  <DialogTitle>{profileUser.name}</DialogTitle>
-                  <p className="text-sm text-(--rs-neutral-grey-500)">{profileUser.username} · {profileUser.email}</p>
-                  {profileUser.jobTitle && (
-                    <p className="text-xs text-(--rs-neutral-grey-400)">{profileUser.jobTitle}</p>
-                  )}
+                  <div className="flex items-center gap-4">
+                    <label title="Change photo" className={`group relative w-16 h-16 shrink-0 rounded-full overflow-hidden bg-(--rs-neutral-grey-100) ${uploadingPhoto ? 'pointer-events-none' : 'cursor-pointer'}`}>
+                      {profileUser.photoUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={profileUser.photoUrl} alt="" className="w-full h-full object-cover" />
+                      )}
+                      <span className={`absolute inset-0 flex items-center justify-center bg-black/50 text-[10px] font-medium text-white text-center leading-tight transition-opacity ${uploadingPhoto ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                        {uploadingPhoto ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Change photo'}
+                      </span>
+                      <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" disabled={uploadingPhoto}
+                        onChange={e => { const file = e.target.files?.[0]; if (file) { void uploadPhoto(file); } e.target.value = ''; }} />
+                    </label>
+                    <div className="min-w-0">
+                      <DialogTitle>{profileUser.name}</DialogTitle>
+                      <p className="text-sm text-(--rs-neutral-grey-500)">{profileUser.username} · {profileUser.email}</p>
+                      {profileUser.jobTitle && (
+                        <p className="text-xs text-(--rs-neutral-grey-400)">{profileUser.jobTitle}</p>
+                      )}
+                    </div>
+                  </div>
                 </DialogHeader>
 
                 {error && (
@@ -1212,22 +1218,6 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                           <input type="url" aria-label="Google Drive link" value={editForm.driveUrl}
                             onChange={e => setEditForm(f => ({ ...f, driveUrl: e.target.value }))}
                             placeholder="https://drive.google.com/…" className={inputCls} />
-                        </Field>
-                      </div>
-                      <div className="sm:col-span-2">
-                        <Field label="Photo">
-                          <div className="flex items-center gap-4">
-                            {profileUser.photoUrl
-                              // eslint-disable-next-line @next/next/no-img-element
-                              ? <img src={profileUser.photoUrl} alt="" className="w-24 h-24 rounded-full object-cover" />
-                              : <div className="w-24 h-24 rounded-full bg-(--rs-neutral-grey-100)" />}
-                            <label className={`inline-flex items-center gap-2 rounded-lg border border-(--rs-primary-300) bg-(--rs-primary-50) px-3 py-2 text-sm font-medium text-(--rs-primary-700) hover:bg-(--rs-primary-100) ${uploadingPhoto ? 'opacity-60 pointer-events-none' : 'cursor-pointer'}`}>
-                              {uploadingPhoto ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                              {uploadingPhoto ? 'Uploading…' : profileUser.photoUrl ? 'Change photo' : 'Upload photo'}
-                              <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" disabled={uploadingPhoto}
-                                onChange={e => { const file = e.target.files?.[0]; if (file) { void uploadPhoto(file); } e.target.value = ''; }} />
-                            </label>
-                          </div>
                         </Field>
                       </div>
                     </div>

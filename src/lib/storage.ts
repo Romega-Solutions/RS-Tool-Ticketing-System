@@ -334,3 +334,22 @@ export async function uploadUserPhoto(userId: number, file: File): Promise<strin
   if (error) throw new Error(`User photo upload failed: ${error.message}`);
   return path;
 }
+
+export type PhotoResolver = (who: { name?: string | null; email?: string | null }) => string | null;
+
+/** Portal-owned photos keyed by email. Call once per request, then map a
+ *  whole roster through the returned closure. No photo = initials avatar. */
+export async function getUserPhotoResolver(): Promise<PhotoResolver> {
+  const admin = createAdminClient();
+  const { data: rows } = await admin.from('user_reporting').select('user_id, photo_path').not('photo_path', 'is', null);
+  const byEmail = new Map<string, string>();
+  if (rows?.length) {
+    const { data: users } = await admin.from('users').select('id, email').in('id', rows.map(r => r.user_id));
+    for (const row of rows) {
+      const email = users?.find(u => u.id === row.user_id)?.email;
+      const url = userPhotoUrl(row.photo_path);
+      if (email && url) byEmail.set(String(email).toLowerCase(), url);
+    }
+  }
+  return (who) => byEmail.get(who.email?.toLowerCase().trim() ?? '') ?? null;
+}

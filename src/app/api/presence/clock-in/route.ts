@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { clockIn } from '@/lib/presence';
-import { getPhotoResolver } from '@/lib/orgchart';
+import { getUserPhotoResolver } from '@/lib/storage';
 import { decideClockInAllowed } from '@/lib/overtime-policy';
 import { weeklySecondsForUser, weeklyAllowanceForUser, enforceUserOpenSession } from '@/lib/overtime-server';
 import { route, requireSession, parseBody, badRequest } from '@/lib/api';
@@ -66,7 +66,7 @@ export const POST = route(async (req: Request) => {
   }
 
   const notes = body.notes?.trim() || null;
-  const photoUrl = (await getPhotoResolver())({ name: session.name, email: session.email });
+  const photoUrl = (await getUserPhotoResolver())({ name: session.name, email: session.email });
 
   const admin = createAdminClient();
   const nowDate = new Date();

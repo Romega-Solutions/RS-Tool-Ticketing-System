@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getOnline, getMyEntry, clockIn } from '@/lib/presence';
-import { getPhotoResolver } from '@/lib/orgchart';
+import { getUserPhotoResolver } from '@/lib/storage';
 import { weeklySecondsForUser, weeklyAllowanceForUser, enforceUserOpenSession, maybeSweepOpenSessions } from '@/lib/overtime-server';
 import type { AppRole } from '@/lib/rbac';
 import { route, requireSession } from '@/lib/api';
@@ -33,7 +33,7 @@ export const GET = route(async () => {
   if (myEntry) {
     openSession = { timesheetId: -1, clockedInAt: myEntry.clockedInAt, notes: null };
   } else {
-    const photoUrl = (await getPhotoResolver())({ name: session.name, email: session.email });
+    const photoUrl = (await getUserPhotoResolver())({ name: session.name, email: session.email });
     const { data: openWithNotes, error } = await admin
       .from('timesheets')
       .select('id, clocked_in_at, notes')

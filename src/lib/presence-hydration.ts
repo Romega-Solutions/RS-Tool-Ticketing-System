@@ -1,6 +1,6 @@
 import { seedUsers, type PresenceUser } from '@/lib/presence';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getPhotoResolver } from '@/lib/orgchart';
+import { getUserPhotoResolver } from '@/lib/storage';
 import { weeklySecondsForUsers } from '@/lib/overtime-server';
 import { normalizeRole } from '@/lib/rbac';
 
@@ -25,7 +25,7 @@ export async function hydrateOpenPresenceFromDB(): Promise<void> {
       ((users ?? []) as { id: number; name: string; email: string | null; role: string; team: string | null }[]).map(u => [u.id, u])
     );
 
-    const resolvePhoto = await getPhotoResolver();
+    const resolvePhoto = await getUserPhotoResolver();
     const weekByUser = await weeklySecondsForUsers(admin, userIds, new Date());
     const toSeed: PresenceUser[] = [];
 

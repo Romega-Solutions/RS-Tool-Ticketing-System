@@ -63,8 +63,8 @@ function mockPresenceHydration() {
   vi.doMock('@/lib/supabase/admin', () => ({
     createAdminClient: vi.fn(() => ({ from })),
   }));
-  vi.doMock('@/lib/orgchart', () => ({
-    getPhotoResolver: vi.fn().mockResolvedValue(() => null),
+  vi.doMock('@/lib/storage', () => ({
+    getUserPhotoResolver: vi.fn().mockResolvedValue(() => null),
   }));
   vi.doMock('@/lib/overtime-server', () => ({
     weeklySecondsForUsers: vi.fn().mockResolvedValue(new Map([[2, 0]])),

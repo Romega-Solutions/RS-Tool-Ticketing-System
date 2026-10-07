@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getPhotoResolver } from '@/lib/orgchart';
+import { getUserPhotoResolver } from '@/lib/storage';
 import { route, requireAdmin, requireTool, parseBody, badRequest } from '@/lib/api';
 import { WEEKLY_CAP_SECONDS } from '@/lib/utils';
 import { isValidDateRange } from '@/lib/export-utils';
@@ -162,7 +162,7 @@ export const GET = route(async (req: Request) => {
 
     const [{ data: teamUsersData }, resolvePhoto] = await Promise.all([
       usersQuery,
-      getPhotoResolver(),
+      getUserPhotoResolver(),
     ]);
     const teamUsers = teamUsersData ?? [];
     const userIds = teamUsers.map((u: { id: number }) => u.id);
@@ -241,7 +241,7 @@ export const GET = route(async (req: Request) => {
   const [{ data: rawRecordsData }, { data: teamUsersData2 }, resolvePhoto] = await Promise.all([
     admin.from('attendance').select('*').eq('week_start', weekStart),
     usersQuery,
-    getPhotoResolver(),
+    getUserPhotoResolver(),
   ]);
   const rawRecords = rawRecordsData ?? [];
   const teamUsers = teamUsersData2 ?? [];

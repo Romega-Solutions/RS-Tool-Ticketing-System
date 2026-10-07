@@ -9,7 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
 import { hasToolAccess } from '@/lib/rbac';
-import { getPhotoResolver } from '@/lib/orgchart';
+import { getUserPhotoResolver } from '@/lib/storage';
 import { refreshOnboarderSignedUrl } from '@/lib/storage';
 import {
   OnboarderStatusSelect,
@@ -201,7 +201,7 @@ export default async function OnboarderDetailPage({
   // Onboarders are pre-employment, so most won't be on the org chart yet — this
   // resolves to a photo only once they've been added there; otherwise the
   // gradient initials below stand in.
-  const photoUrl = (await getPhotoResolver())({ name: o.full_name, email: o.personal_email });
+  const photoUrl = (await getUserPhotoResolver())({ name: o.full_name, email: o.romega_email ?? o.personal_email });
 
   // Children fetched in parallel
   const [docsRes, histRes, creatorRes, leadRes, supervisorRes, sessionRes, paymentRes] = await Promise.all([
