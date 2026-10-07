@@ -43,10 +43,10 @@ ALTER TABLE user_secondary_leads ENABLE ROW LEVEL SECURITY;
 -- Seed the department list used by User Management (DEPARTMENTS in
 -- src/components/user-management-table.tsx).
 INSERT INTO departments (name, display_order) VALUES
-  ('Executive', 1),
-  ('Finance', 2),
-  ('Human Resource', 3),
+  ('Technical', 1),
+  ('HR', 2),
+  ('Sales', 3),
   ('Marketing', 4),
-  ('Sales', 5),
-  ('Technical', 6)
+  ('Market Intelligence', 5),
+  ('Management', 6)
 ON CONFLICT (name) DO NOTHING;

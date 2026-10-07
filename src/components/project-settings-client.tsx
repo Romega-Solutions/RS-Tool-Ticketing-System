@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowDown, ArrowUp, Check, Edit3, Loader2, Plus, X, Trash2 } from 'lucide-react';
+import { DEPARTMENTS } from '@/lib/departments';
 
 interface Label   { id: number; project_id: number; name: string; color: string }
 interface Column  { id: string; name: string; group: string; color: string; sequence: number; isDefault?: boolean }
@@ -201,7 +202,7 @@ function ProjectDetailsSection({
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-(--rs-neutral-grey-400)">Team</p>
             <p className="mt-1 text-sm text-(--rs-neutral-grey-600)">
-              {project.team || <span className="italic text-(--rs-neutral-grey-400)">No team assigned.</span>}
+              {project.team || <span className="italic text-(--rs-neutral-grey-400)">No department assigned.</span>}
             </p>
           </div>
           {message && (
@@ -232,13 +233,15 @@ function ProjectDetailsSection({
           </label>
           {canReteam && (
             <label className="block">
-              <span className="text-xs font-medium text-(--rs-neutral-grey-600)">Team</span>
-              <input
+              <span className="text-xs font-medium text-(--rs-neutral-grey-600)">Department</span>
+              <select
                 value={team}
                 onChange={e => setTeam(e.target.value)}
-                placeholder="Team name"
                 className="mt-1 min-h-10 w-full rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm focus:border-(--rs-primary-400) focus:outline-none"
-              />
+              >
+                <option value="">— No department —</option>
+                {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
             </label>
           )}
           {error && <p className="text-xs text-red-500">{error}</p>}
