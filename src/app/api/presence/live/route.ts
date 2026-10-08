@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getAllOnline } from '@/lib/presence';
-import { hydrateOpenPresenceFromDB } from '@/lib/presence-hydration';
+import { createAdminClient } from '@/lib/supabase/admin';
+import { loadOnlineUsers } from '@/lib/presence-online';
 import { route, requireSession } from '@/lib/api';
 
 export const runtime = 'nodejs';
@@ -11,6 +11,6 @@ export const runtime = 'nodejs';
 // connected user, which dominated the project's Fluid Compute bill.
 export const GET = route(async () => {
   await requireSession();
-  await hydrateOpenPresenceFromDB();
-  return NextResponse.json({ online: getAllOnline() });
+  const online = await loadOnlineUsers(createAdminClient(), new Date());
+  return NextResponse.json({ online });
 });
