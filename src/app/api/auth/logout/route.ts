@@ -12,13 +12,23 @@ export async function POST() {
 
     if (session) {
       const admin = createAdminClient();
-      const { data: open } = await admin
+      // .limit(1), not .maybeSingle(): with duplicate open rows maybeSingle
+      // errors, which used to read as "not clocked in" and let the user log out.
+      // The earliest row is the real session, matching clock-in and clock-out.
+      const { data: openRows, error: openError } = await admin
         .from('timesheets')
         .select('id, clocked_in_at')
         .eq('user_id', session.id)
         .is('clocked_out_at', null)
-        .maybeSingle();
+        .order('clocked_in_at', { ascending: true })
+        .limit(1);
 
+      if (openError) {
+        console.error('[logout] session lookup error:', openError.message);
+        return NextResponse.json({ error: 'Failed to look up your session' }, { status: 500 });
+      }
+
+      const open = openRows?.[0];
       if (open) {
         return NextResponse.json(
           { clockedIn: true, clockedInAt: open.clocked_in_at },
