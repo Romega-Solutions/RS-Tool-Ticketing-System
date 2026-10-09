@@ -4,11 +4,9 @@ import { route, requireAdmin, parseBody, badRequest } from '@/lib/api';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { enforceRateLimit, keyByUser } from '@/lib/rate-limit';
 import { uploadUserPhoto, userPhotoUrl } from '@/lib/storage';
+import { photoError, isImageBytes } from '@/lib/user-photo';
 
 export const runtime = 'nodejs';
-
-const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const PHOTO_MAX_BYTES = 5_000_000;
 
 const bodySchema = z.object({
   reportsToUserId:      z.number().int().positive().nullable(),
@@ -56,8 +54,11 @@ export const POST = route(async (req: Request, { params }: { params: Promise<{ i
 
   const file = (await req.formData()).get('photo');
   if (!(file instanceof File)) throw badRequest('photo is required');
-  if (!PHOTO_TYPES.has(file.type)) throw badRequest('Photo must be JPG, PNG or WebP');
-  if (file.size > PHOTO_MAX_BYTES) throw badRequest('Photo must be 5 MB or smaller');
+  const invalid = photoError(file);
+  if (invalid) throw badRequest(invalid);
+  if (!isImageBytes(new Uint8Array(await file.slice(0, 12).arrayBuffer()))) {
+    throw badRequest('That file is not a valid JPG, PNG or WebP image');
+  }
 
   const path = await uploadUserPhoto(userId, file);
   const { error } = await createAdminClient().from('user_reporting').upsert(

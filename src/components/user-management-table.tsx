@@ -11,6 +11,7 @@ import { roleDisplayLabel, normalizeRole } from '@/lib/rbac';
 import { formatPhtRange, pacificRange } from '@/lib/schedule';
 import { usePersistedJson } from '@/lib/use-persisted-json';
 import { DEPARTMENTS } from '@/lib/departments';
+import { photoError } from '@/lib/user-photo';
 import { changeView } from '@/app/actions/view-actions';
 
 export type UserRow = {
@@ -80,6 +81,8 @@ type NewUserForm = {
   schedulePhtStart: string;
   schedulePhtEnd: string;
   sendSetupEmail: boolean;
+  reportsToUserId: string;
+  alsoReportsToUserIds: number[];
 };
 
 const EMPTY_FORM: NewUserForm = {
@@ -87,6 +90,8 @@ const EMPTY_FORM: NewUserForm = {
   dateOfBirth: '', startDate: '', endDate: '', driveUrl: '',
   approvedHoursPerWeek: '15', schedulePhtStart: '', schedulePhtEnd: '',
   sendSetupEmail: false,
+  reportsToUserId: '',
+  alsoReportsToUserIds: [],
 };
 
 // ── Column sorting ───────────────────────────────────────────────────────────
@@ -310,8 +315,10 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
 
   // Edit existing user — the editor lives inside the profile dialog (profileUser).
   const [editForm, setEditForm]     = useState<EditState>({ name: '', username: '', email: '', jobTitle: '', role: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '', dateOfBirth: '', startDate: '', endDate: '', driveUrl: '', approvedHoursPerWeek: '15', schedulePhtStart: '', schedulePhtEnd: '', reportsToUserId: '', alsoReportsToUserIds: [] });
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [alsoMenuOpen, setAlsoMenuOpen] = useState(false);
+  // Photo picked in Add / Edit — only uploaded when the dialog is saved.
+  const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
+  const pendingPhotoPreview = useMemo(() => (pendingPhoto ? URL.createObjectURL(pendingPhoto) : null), [pendingPhoto]);
+  useEffect(() => () => { if (pendingPhotoPreview) URL.revokeObjectURL(pendingPhotoPreview); }, [pendingPhotoPreview]);
   const [saving, setSaving]         = useState(false);
   const [error, setError]           = useState('');
 
@@ -348,6 +355,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
   // Open the profile dialog as an editor — seeds editForm from the row.
   const openProfile = (user: UserRow) => {
     setProfileUser(user);
+    setPendingPhoto(null);
     setError('');
     setEditForm({
       name: user.name,
@@ -370,7 +378,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       alsoReportsToUserIds: user.alsoReportsToUserIds,
     });
   };
-  const closeProfile = () => { setProfileUser(null); setError(''); setAlsoMenuOpen(false); };
+  const closeProfile = () => { setProfileUser(null); setError(''); };
 
   // Save the editable profile dialog → PATCH /api/admin/users (which already
   // accepts every one of these fields). Validates client-side first.
@@ -418,6 +426,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       const reporting = (await res2.json()) as { reportsToUserId?: number | null; alsoReportsToUserIds?: number[]; error?: string };
       setUserList(prev => prev.map(u => u.id === userId ? { ...u, ...data.user, ...(res2.ok ? reporting : {}) } : u));
       if (!res2.ok) { setError(reporting.error ?? 'Saved, but reporting lines failed to save'); return; }
+      if (pendingPhoto && !(await uploadPhoto(userId, pendingPhoto))) return;
       setProfileUser(null);
     } catch {
       setError('Request failed');
@@ -426,24 +435,19 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
     }
   };
 
-  // Photo uploads immediately (separate from Save) — it's a file, not a form field.
-  const uploadPhoto = async (file: File) => {
-    if (!profileUser) return;
-    const userId = profileUser.id;
-    setUploadingPhoto(true);
-    setError('');
+  // Uploads the pending photo for a saved user. Returns false (with an error shown) on failure.
+  const uploadPhoto = async (userId: number, file: File): Promise<boolean> => {
     try {
       const fd = new FormData();
       fd.append('photo', file);
       const res = await fetch(`/api/admin/users/${userId}/reporting`, { method: 'POST', body: fd });
       const data = (await res.json()) as { photoUrl?: string; error?: string };
-      if (!res.ok || !data.photoUrl) { setError(data.error ?? 'Photo upload failed'); return; }
+      if (!res.ok || !data.photoUrl) { setError(data.error ?? 'Photo upload failed'); return false; }
       setUserList(prev => prev.map(u => u.id === userId ? { ...u, photoUrl: data.photoUrl! } : u));
-      setProfileUser(p => p && { ...p, photoUrl: data.photoUrl! });
+      return true;
     } catch {
       setError('Photo upload failed');
-    } finally {
-      setUploadingPhoto(false);
+      return false;
     }
   };
 
@@ -463,6 +467,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       const data = (await res.json()) as { user?: UserRow; error?: string };
       if (!res.ok) { setError(data.error ?? 'Failed to save'); return; }
       if (data.user) setUserList(prev => prev.map(u => u.id === userId ? { ...u, ...data.user } : u));
+      if (pendingPhoto && !(await uploadPhoto(userId, pendingPhoto))) return;
       setProfileUser(null);
     } catch {
       setError('Request failed');
@@ -494,6 +499,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
 
   const openCreate = () => {
     setNewForm(EMPTY_FORM);
+    setPendingPhoto(null);
     setCreateError('');
     setShowCreate(true);
   };
@@ -504,7 +510,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
     setCreating(true);
     setCreateError('');
     try {
-      const { sendSetupEmail, ...payload } = newForm;
+      const { sendSetupEmail, reportsToUserId, alsoReportsToUserIds, ...payload } = newForm;
       const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -515,6 +521,15 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       const created = data.user && { ...data.user, reportsToUserId: null, alsoReportsToUserIds: [], photoUrl: null };
       if (created) setUserList(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       closeCreate();
+      if (created && pendingPhoto) void uploadPhoto(created.id, pendingPhoto);
+      if (created && (reportsToUserId || alsoReportsToUserIds.length)) {
+        const reporting = { reportsToUserId: reportsToUserId ? Number(reportsToUserId) : null, alsoReportsToUserIds };
+        const r = await fetch(`/api/admin/users/${created.id}/reporting`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reporting),
+        });
+        if (r.ok) setUserList(prev => prev.map(u => u.id === created.id ? { ...u, ...reporting } : u));
+        else setError(`${created.name} was created, but their reporting lines could not be saved.`);
+      }
       // "Send setup email now" — best-effort; the account was already created.
       if (sendSetupEmail && created) {
         try {
@@ -899,8 +914,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       {/* ── Create User Modal ───────────────────────────────────────────── */}
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="w-full max-w-md rounded-2xl bg-white shadow-xl border border-(--rs-neutral-grey-200) max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-(--rs-neutral-grey-100) px-6 py-4 sticky top-0 bg-white">
+          <div className="w-full max-w-2xl rounded-2xl bg-white shadow-xl border border-(--rs-neutral-grey-200) max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-(--rs-neutral-grey-100) px-6 py-4 sticky top-0 z-10 bg-white">
               <h2 className="font-serif text-lg font-bold text-(--rs-neutral-grey-900)">Add New User</h2>
               <button onClick={closeCreate} className="text-(--rs-neutral-grey-400) hover:text-(--rs-neutral-grey-700) rounded p-1">
                 <X className="w-5 h-5" />
@@ -911,6 +926,29 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
               {createError && (
                 <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2.5 rounded-lg text-sm">{createError}</div>
               )}
+
+              <div className="flex items-center gap-4">
+                <label title="Add photo" className="group relative w-16 h-16 shrink-0 rounded-full overflow-hidden bg-(--rs-neutral-grey-100) cursor-pointer">
+                  {pendingPhotoPreview && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={pendingPhotoPreview} alt="" className="w-full h-full object-cover" />
+                  )}
+                  <span className={`absolute inset-0 flex items-center justify-center bg-black/50 text-[10px] font-medium text-white text-center leading-tight transition-opacity ${pendingPhotoPreview ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}>
+                    {pendingPhotoPreview ? 'Change photo' : 'Add photo'}
+                  </span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only"
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      if (!file) return;
+                      const invalid = photoError(file);
+                      setCreateError(invalid ?? '');
+                      if (!invalid) setPendingPhoto(file);
+                    }} />
+                </label>
+                <p className="text-xs text-(--rs-neutral-grey-500)">Photo (optional) — JPG, PNG or WebP, up to 4 MB.</p>
+              </div>
+
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Field label="Full Name" required>
@@ -954,6 +992,11 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                     {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                 </Field>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <LeadFields options={userList.filter(u => u.isActive)} reportsTo={newForm.reportsToUserId} also={newForm.alsoReportsToUserIds}
+                  onChange={(reportsToUserId, alsoReportsToUserIds) => setNewForm(f => ({ ...f, reportsToUserId, alsoReportsToUserIds }))} />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1050,16 +1093,23 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
               <>
                 <DialogHeader>
                   <div className="flex items-center gap-4">
-                    <label title="Change photo" className={`group relative w-16 h-16 shrink-0 rounded-full overflow-hidden bg-(--rs-neutral-grey-100) ${uploadingPhoto ? 'pointer-events-none' : 'cursor-pointer'}`}>
-                      {profileUser.photoUrl && (
+                    <label title="Change photo" className="group relative w-16 h-16 shrink-0 rounded-full overflow-hidden bg-(--rs-neutral-grey-100) cursor-pointer">
+                      {(pendingPhotoPreview ?? profileUser.photoUrl) && (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={profileUser.photoUrl} alt="" className="w-full h-full object-cover" />
+                        <img src={(pendingPhotoPreview ?? profileUser.photoUrl)!} alt="" className="w-full h-full object-cover" />
                       )}
-                      <span className={`absolute inset-0 flex items-center justify-center bg-black/50 text-[10px] font-medium text-white text-center leading-tight transition-opacity ${uploadingPhoto ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                        {uploadingPhoto ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Change photo'}
+                      <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-[10px] font-medium text-white text-center leading-tight transition-opacity opacity-0 group-hover:opacity-100">
+                        Change photo
                       </span>
-                      <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" disabled={uploadingPhoto}
-                        onChange={e => { const file = e.target.files?.[0]; if (file) { void uploadPhoto(file); } e.target.value = ''; }} />
+                      <input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only"
+                        onChange={e => {
+                          const file = e.target.files?.[0];
+                          e.target.value = '';
+                          if (!file) return;
+                          const invalid = photoError(file);
+                          setError(invalid ?? '');
+                          if (!invalid) setPendingPhoto(file);
+                        }} />
                     </label>
                     <div className="min-w-0">
                       <DialogTitle>{profileUser.name}</DialogTitle>
@@ -1099,7 +1149,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                     <p className="text-xs text-(--rs-neutral-grey-500)">Only your role is editable here — use the profile page for everything else.</p>
                     <DialogFooter>
                       <Button variant="ghost" onClick={closeProfile} disabled={saving}>Cancel</Button>
-                      <Button onClick={saveOwnRole} disabled={saving || editForm.role === profileUser.role} className="gap-2">
+                      <Button onClick={saveOwnRole} disabled={saving || (editForm.role === profileUser.role && !pendingPhoto)} className="gap-2">
                         {saving && <Loader2 className="w-4 h-4 animate-spin" />}
                         {saving ? 'Saving…' : 'Save'}
                       </Button>
@@ -1144,38 +1194,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                           ))}
                         </select>
                       </Field>
-                      <Field label="Reports To">
-                        <select value={editForm.reportsToUserId} onChange={e => setEditForm(f => ({ ...f, reportsToUserId: e.target.value }))} aria-label="Reports to" className={inputCls}>
-                          <option value="">Robbie Galoso (default)</option>
-                          {leadOptions.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                        </select>
-                      </Field>
-                      <Field label="Also Reports To">
-                        <div className="relative">
-                          <button type="button" onClick={() => setAlsoMenuOpen(o => !o)} aria-label="Also reports to"
-                            className={`${inputCls} flex items-center justify-between gap-2 text-left`}>
-                            <span className="truncate">
-                              {leadOptions.filter(u => editForm.alsoReportsToUserIds.includes(u.id)).map(u => u.name).join(', ') || 'None'}
-                            </span>
-                            <ChevronDown className="w-4 h-4 shrink-0 text-(--rs-neutral-grey-500)" />
-                          </button>
-                          {alsoMenuOpen && (
-                            <>
-                              <div className="fixed inset-0 z-10" onClick={() => setAlsoMenuOpen(false)} />
-                              <div className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-xl border border-(--rs-neutral-grey-200) bg-white shadow-lg p-1">
-                          {leadOptions.map(u => (
-                            <label key={u.id} className="flex items-center gap-2.5 px-2 py-1 rounded hover:bg-(--rs-neutral-grey-50) cursor-pointer text-sm text-(--rs-neutral-grey-700)">
-                              <input type="checkbox" checked={editForm.alsoReportsToUserIds.includes(u.id)}
-                                onChange={e => setEditForm(f => ({ ...f, alsoReportsToUserIds: e.target.checked ? [...f.alsoReportsToUserIds, u.id] : f.alsoReportsToUserIds.filter(id => id !== u.id) }))}
-                                className="w-4 h-4 rounded accent-(--rs-primary-500)" />
-                              {u.name}
-                            </label>
-                          ))}
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </Field>
+                      <LeadFields options={leadOptions} reportsTo={editForm.reportsToUserId} also={editForm.alsoReportsToUserIds}
+                        onChange={(reportsToUserId, alsoReportsToUserIds) => setEditForm(f => ({ ...f, reportsToUserId, alsoReportsToUserIds }))} />
                       <Field label="Member Code">
                         <input value={editForm.memberCode} onChange={e => setEditForm(f => ({ ...f, memberCode: e.target.value }))}
                           placeholder="e.g. ACNG-1" className={`${inputCls} font-mono`} />
@@ -1284,6 +1304,52 @@ function Field({ label, required, children }: { label: string; required?: boolea
       </label>
       {children}
     </div>
+  );
+}
+
+// Reports To (single, empty = founder by default) + Also Reports To (multi).
+function LeadFields({ options, reportsTo, also, onChange }: {
+  options: UserRow[];
+  reportsTo: string;
+  also: number[];
+  onChange: (reportsTo: string, also: number[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Field label="Reports To">
+        <select value={reportsTo} onChange={e => onChange(e.target.value, also)} aria-label="Reports to" className={inputCls}>
+          <option value="">Robbie Galoso (default)</option>
+          {options.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
+      </Field>
+      <Field label="Also Reports To">
+        <div className="relative">
+          <button type="button" onClick={() => setOpen(o => !o)} aria-label="Also reports to"
+            className={`${inputCls} flex items-center justify-between gap-2 text-left`}>
+            <span className="truncate">
+              {options.filter(u => also.includes(u.id)).map(u => u.name).join(', ') || 'None'}
+            </span>
+            <ChevronDown className="w-4 h-4 shrink-0 text-(--rs-neutral-grey-500)" />
+          </button>
+          {open && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+              <div className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-xl border border-(--rs-neutral-grey-200) bg-white shadow-lg p-1">
+                {options.map(u => (
+                  <label key={u.id} className="flex items-center gap-2.5 px-2 py-1 rounded hover:bg-(--rs-neutral-grey-50) cursor-pointer text-sm text-(--rs-neutral-grey-700)">
+                    <input type="checkbox" checked={also.includes(u.id)}
+                      onChange={e => onChange(reportsTo, e.target.checked ? [...also, u.id] : also.filter(id => id !== u.id))}
+                      className="w-4 h-4 rounded accent-(--rs-primary-500)" />
+                    {u.name}
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </Field>
+    </>
   );
 }
 
