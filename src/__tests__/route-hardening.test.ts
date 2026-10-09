@@ -141,21 +141,6 @@ describe('route hardening coverage', () => {
     expect(await res.json()).toEqual({ error: 'Unauthorized' });
   });
 
-  it('orgchart lookup converts unexpected lookup failures into a 500 envelope', async () => {
-    mockSession(user());
-    vi.doMock('@/lib/orgchart', () => ({
-      lookupPerson: vi.fn().mockRejectedValue(new Error('orgchart down')),
-    }));
-
-    const { GET } = await import('@/app/api/orgchart/lookup/route');
-    const res = await GET({
-      nextUrl: new URL('http://localhost/api/orgchart/lookup?email=ken%40romega-solutions.com'),
-    } as never);
-
-    expect(res.status).toBe(500);
-    expect(await res.json()).toEqual({ error: 'Internal server error' });
-  });
-
   it('weekly report stays available to IC users for their own invalid-week validation path', async () => {
     mockSession(user({ role: 'ic' }));
 

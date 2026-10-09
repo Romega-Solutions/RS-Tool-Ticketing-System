@@ -1,6 +1,6 @@
 import type { PresenceUser } from '@/lib/presence';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getPhotoResolver } from '@/lib/orgchart';
+import { getUserPhotoResolver } from '@/lib/storage';
 import { weeklySecondsForUsers } from '@/lib/overtime-server';
 import { normalizeRole } from '@/lib/rbac';
 
@@ -33,7 +33,7 @@ export async function loadOnlineUsers(admin: Admin, now: Date): Promise<Presence
       .select('id, name, email, role, team')
       .in('id', userIds)
       .eq('is_active', 1),
-    getPhotoResolver(),
+    getUserPhotoResolver(),
     weeklySecondsForUsers(admin, userIds, now),
   ]);
   if (usersError) throw new Error(`Failed to load online users: ${usersError.message}`);
