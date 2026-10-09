@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState, useRef, useEffect, useMemo } from 'react';
+import { useCallback, useDeferredValue, useState, useRef, useEffect, useMemo } from 'react';
 import {
   closestCenter,
   DndContext,
@@ -22,6 +22,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertTriangle, Archive, GripVertical, Hash, Loader2, Plus, Search, X } from 'lucide-react';
 import { ProjectArchiveDrawer } from '@/components/project-archive-drawer';
 import { PersonAvatar } from '@/components/person-avatar';
+import { descriptionSearchText, matchesTaskSearch, parseTaskSearch } from '@/lib/task-search';
 import { TaskDetailSheet, type SheetWorkItem } from '@/components/task-detail-sheet';
 import { CreateTaskDialog, type CreateTaskDefaults } from '@/components/create-task-dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -49,6 +50,7 @@ export type KanbanItem = {
   id: string;
   sequence_id: number;
   name: string;
+  description_stripped?: string;
   priority: string;
   assignees: string[];
   target_date?: string | null;
@@ -66,6 +68,18 @@ type KanbanMember = { id: number; user_id: number; name: string; email: string; 
 // Keep a column from becoming an endless scroll: render this many cards, then
 // offer a "Show all" toggle. Mainly helps the Done column over a project's life.
 const DONE_VISIBLE_CAP = 50;
+
+// Lowercased title + description text per item. Keyed by object identity so
+// each item's HTML is stripped once, not on every keystroke or re-render.
+const searchTextCache = new WeakMap<KanbanItem, string>();
+function itemSearchText(item: KanbanItem): string {
+  let text = searchTextCache.get(item);
+  if (text === undefined) {
+    text = `${item.name.toLowerCase()} ${descriptionSearchText(item.description_stripped)}`;
+    searchTextCache.set(item, text);
+  }
+  return text;
+}
 
 // Group flat work items into a state-id → items map (board seed + reload share this).
 function groupItems(items: KanbanItem[], states: KanbanState[]): Map<string, KanbanItem[]> {
@@ -577,15 +591,15 @@ export function KanbanBoard({
     return new Set<string>(me ? [me.email, String(me.user_id)] : [String(currentUserId)]);
   }, [members, currentUserId]);
 
-  // Search matches the title or the ticket number ("12", "#12", "PROJ-12").
+  // Search matches the title, the description, or the ticket number ("12", "#12", "PROJ-12").
+  // Deferred so typing stays responsive while a large board re-filters.
   const searchTerm = filters.search.trim().toLowerCase();
-  const searchNumber = searchTerm.match(/^(?:#|[a-z0-9]+-)?(\d+)$/)?.[1];
+  const deferredSearch = useDeferredValue(searchTerm);
+  const searchQuery = useMemo(() => parseTaskSearch(deferredSearch), [deferredSearch]);
 
   const filterMatch = (item: KanbanItem): boolean => {
-    if (searchTerm) {
-      const nameHit = item.name.toLowerCase().includes(searchTerm);
-      const numberHit = searchNumber !== undefined && String(item.sequence_id) === searchNumber;
-      if (!nameHit && !numberHit) return false;
+    if (searchQuery && !matchesTaskSearch(searchQuery, { text: itemSearchText(item), sequence_id: item.sequence_id })) {
+      return false;
     }
     if (filters.assignee && !item.assignees.includes(filters.assignee)) return false;
     if (filters.label && !item.label_ids?.includes(Number(filters.label))) return false;
@@ -781,7 +795,7 @@ export function KanbanBoard({
           <input
             type="search"
             aria-label="Search tasks"
-            placeholder="Search tasks…"
+            placeholder="Search titles & descriptions…"
             value={filters.search}
             onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
             onKeyDown={e => { if (e.key === 'Escape') setFilters(f => ({ ...f, search: '' })); }}
@@ -987,6 +1001,7 @@ export function KanbanBoard({
         id: updated.id,
         sequence_id: updated.sequence_id,
         name: updated.name,
+        description_stripped: updated.description ?? undefined,
         priority: updated.priority,
         assignees: updated.assignee_users.map(u => u.email || String(u.id)),
         target_date: updated.target_date,
