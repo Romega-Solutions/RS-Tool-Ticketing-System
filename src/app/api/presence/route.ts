@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getOnline, getMyEntry, clockIn } from '@/lib/presence';
-import { getUserPhotoResolver } from '@/lib/storage';
 import { weeklySecondsForUser, weeklyAllowanceForUser, enforceUserOpenSession, maybeSweepOpenSessions } from '@/lib/overtime-server';
-import type { AppRole } from '@/lib/rbac';
 import { route, requireSession } from '@/lib/api';
 
 export const runtime = 'nodejs';
@@ -21,42 +18,35 @@ export const GET = route(async () => {
   // anyone is using the app — not only at the daily cron.
   await maybeSweepOpenSessions(admin, now);
 
-  const online = getOnline(session.role, session.team, session.id);
   const [weekSecondsBefore, weekAllowanceSeconds] = await Promise.all([
     weeklySecondsForUser(admin, session.id, now),
     weeklyAllowanceForUser(admin, session.id, now),
   ]);
 
-  const myEntry = getMyEntry(session.id);
+  // This user's own session, read from the DB (not a per-instance memory map).
+  // With duplicate open rows the earliest is the real one, as in clock-out.
+
   let openSession: { timesheetId: number; clockedInAt: string; notes: string | null } | null = null;
-
-  if (myEntry) {
-    openSession = { timesheetId: -1, clockedInAt: myEntry.clockedInAt, notes: null };
-  } else {
-    const photoUrl = (await getUserPhotoResolver())({ name: session.name, email: session.email });
-    const { data: openWithNotes, error } = await admin
-      .from('timesheets')
-      .select('id, clocked_in_at, notes')
-      .eq('user_id', session.id)
-      .is('clocked_out_at', null)
-      .maybeSingle();
-
-    if (error) {
-      const { data: openFallback } = await admin
+  const { data: openRows, error } = await admin
+    .from('timesheets')
+    .select('id, clocked_in_at, notes')
+    .eq('user_id', session.id)
+    .is('clocked_out_at', null)
+    .order('clocked_in_at', { ascending: true })
+    .limit(1);
+  const open = error
+    ? (await admin
         .from('timesheets')
         .select('id, clocked_in_at')
         .eq('user_id', session.id)
         .is('clocked_out_at', null)
-        .maybeSingle();
-      if (openFallback) {
-        openSession = { timesheetId: openFallback.id, clockedInAt: openFallback.clocked_in_at, notes: null };
-        clockIn({ userId: session.id, name: session.name, role: session.role as AppRole, team: session.team, clockedInAt: openFallback.clocked_in_at, weekSecondsBefore, photoUrl });
-      }
-    } else if (openWithNotes) {
-      openSession = { timesheetId: openWithNotes.id, clockedInAt: openWithNotes.clocked_in_at, notes: openWithNotes.notes ?? null };
-      clockIn({ userId: session.id, name: session.name, role: session.role as AppRole, team: session.team, clockedInAt: openWithNotes.clocked_in_at, weekSecondsBefore, photoUrl });
-    }
+        .order('clocked_in_at', { ascending: true })
+        .limit(1)).data?.[0]
+    : openRows?.[0];
+
+  if (open) {
+    openSession = { timesheetId: open.id, clockedInAt: open.clocked_in_at, notes: 'notes' in open ? ((open.notes as string | null) ?? null) : null };
   }
 
-  return NextResponse.json({ online, openSession, weekSecondsBefore, weekAllowanceSeconds });
+  return NextResponse.json({ openSession, weekSecondsBefore, weekAllowanceSeconds });
 });

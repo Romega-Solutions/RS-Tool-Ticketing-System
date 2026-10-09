@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { clockIn } from '@/lib/presence';
-import { getUserPhotoResolver } from '@/lib/storage';
 import { decideClockInAllowed } from '@/lib/overtime-policy';
 import { weeklySecondsForUser, weeklyAllowanceForUser, enforceUserOpenSession } from '@/lib/overtime-server';
 import { route, requireSession, parseBody, badRequest } from '@/lib/api';
@@ -66,7 +64,6 @@ export const POST = route(async (req: Request) => {
   }
 
   const notes = body.notes?.trim() || null;
-  const photoUrl = (await getUserPhotoResolver())({ name: session.name, email: session.email });
 
   const admin = createAdminClient();
   const nowDate = new Date();
@@ -78,12 +75,16 @@ export const POST = route(async (req: Request) => {
   // used by the weekly OT badge / browser guardrail. The open row (null
   // duration) is naturally excluded.
   const weekSecondsBefore = await weeklySecondsForUser(admin, session.id, nowDate);
+  // .limit(1), not .maybeSingle(): with duplicate open rows maybeSingle errors,
+  // which used to read as "no session" and insert yet another open row. The
+  // earliest row is the real session, matching clock-out and the online list.
   const { data: existingWithNotes, error: existingError } = await admin
     .from('timesheets')
     .select('id, clocked_in_at, notes')
     .eq('user_id', session.id)
     .is('clocked_out_at', null)
-    .maybeSingle();
+    .order('clocked_in_at', { ascending: true })
+    .limit(1);
 
   const existing = existingError
     ? await admin
@@ -91,12 +92,12 @@ export const POST = route(async (req: Request) => {
         .select('id, clocked_in_at')
         .eq('user_id', session.id)
         .is('clocked_out_at', null)
-        .maybeSingle()
-        .then(result => result.data)
-    : existingWithNotes;
+        .order('clocked_in_at', { ascending: true })
+        .limit(1)
+        .then(result => result.data?.[0] ?? null)
+    : (existingWithNotes?.[0] ?? null);
 
   if (existing) {
-    clockIn({ userId: session.id, name: session.name, role: session.role, team: session.team, clockedInAt: existing.clocked_in_at, weekSecondsBefore, photoUrl });
     return NextResponse.json({
       timesheetId: existing.id,
       clockedInAt: existing.clocked_in_at,
@@ -150,7 +151,6 @@ export const POST = route(async (req: Request) => {
     return NextResponse.json({ error: 'Failed to start clock-in session' }, { status: 500 });
   }
 
-  clockIn({ userId: session.id, name: session.name, role: session.role, team: session.team, clockedInAt: now, weekSecondsBefore, photoUrl });
   await autoMarkPresent(session.id);
 
   return NextResponse.json({ timesheetId: inserted.id, clockedInAt: now, weekSecondsBefore, notes, noteSaved });

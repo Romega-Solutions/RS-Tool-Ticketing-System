@@ -1,15 +1,10 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { route, requireSession, parseBody } from '@/lib/api';
-import {
-  acknowledgePresencePing,
-  getPresencePingSnapshotForUser,
-  sendPresencePingReply,
-} from '@/lib/presence';
+import { sendPresencePingReply } from '@/lib/presence';
 import {
   acknowledgeStoredPresencePing,
   getStoredPresencePingSnapshotForUser,
-  persistPresencePingRecord,
 } from '@/lib/presence-ping-store';
 
 export const runtime = 'nodejs';
@@ -29,24 +24,19 @@ export const POST = route(async (req: Request) => {
   const session = await requireSession();
   const body = await parseBody(req, ackSchema);
 
-  let result = acknowledgePresencePing({
+  const result = await acknowledgeStoredPresencePing({
     eventId: body.eventId,
     userId: session.id,
     replyMessage: body.replyMessage,
   });
 
-  if (!result.ok && result.reason === 'not_found') {
-    result = await acknowledgeStoredPresencePing({
-      eventId: body.eventId,
-      userId: session.id,
-      replyMessage: body.replyMessage,
-    }) ?? result;
+  if (!result) {
+    return NextResponse.json({ error: 'Failed to reply to ping' }, { status: 500 });
   }
 
   if (!result.ok) {
     const mapped = errorByReason[result.reason];
-    const snapshot = await getStoredPresencePingSnapshotForUser(session.id)
-      ?? getPresencePingSnapshotForUser(session.id);
+    const snapshot = await getStoredPresencePingSnapshotForUser(session.id);
     return NextResponse.json({
       error: mapped.message,
       record: result.record,
@@ -54,13 +44,11 @@ export const POST = route(async (req: Request) => {
     }, { status: mapped.status });
   }
 
-  await persistPresencePingRecord(result.record);
   sendPresencePingReply({
     record: result.record,
     responderName: session.name,
   });
-  const snapshot = await getStoredPresencePingSnapshotForUser(session.id)
-    ?? getPresencePingSnapshotForUser(session.id);
+  const snapshot = await getStoredPresencePingSnapshotForUser(session.id);
 
   return NextResponse.json({
     ok: true,

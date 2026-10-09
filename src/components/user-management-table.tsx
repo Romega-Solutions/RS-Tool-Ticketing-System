@@ -7,10 +7,11 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { SendSetupEmailDialog, type SetupEmailTarget } from '@/components/send-setup-email-dialog';
 import { createClient } from '@/lib/supabase/client';
-import { roleDisplayLabel } from '@/lib/rbac';
+import { roleDisplayLabel, normalizeRole } from '@/lib/rbac';
 import { formatPhtRange, pacificRange } from '@/lib/schedule';
 import { usePersistedJson } from '@/lib/use-persisted-json';
 import { DEPARTMENTS } from '@/lib/departments';
+import { changeView } from '@/app/actions/view-actions';
 
 export type UserRow = {
   id: number;
@@ -537,6 +538,10 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
     }
   };
 
+  const handleImpersonate = async(user:UserRow) =>{
+    await changeView(user.id) 
+  }
+
   // Name + Actions are always shown; colSpan for the empty row counts them too.
   const totalColSpan = visibleCols.size + 2;
 
@@ -837,6 +842,14 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
 
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {currentUserId !== user.id && user.isActive && normalizeRole(user.role) !== 'admin' && (
+                        <Button size="sm" variant="ghost"
+                          className="h-7 px-2.5 text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-900)"
+                          onClick={() => handleImpersonate(user)}>
+                          <Eye className="w-3.5 h-3.5 mr-1" />
+                          View
+                        </Button>
+                        )}
                         <Button size="sm" variant="ghost"
                           className="h-7 px-2.5 text-(--rs-neutral-grey-500) hover:text-(--rs-neutral-grey-900)"
                           onClick={() => openProfile(user)}>
