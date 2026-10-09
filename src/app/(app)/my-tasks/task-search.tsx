@@ -37,7 +37,7 @@ export function TaskSearch() {
       <input
         type="search"
         aria-label="Search my tasks"
-        placeholder="Search by title, project, or ticket #…"
+        placeholder="Search title, description, project, or ticket #…"
         value={value}
         onChange={e => setValue(e.target.value)}
         onKeyDown={e => { if (e.key === 'Escape') setValue(''); }}
