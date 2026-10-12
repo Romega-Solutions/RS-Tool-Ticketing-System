@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean, index, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean, index, primaryKey, check } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id:            serial('id').primaryKey(),
@@ -782,3 +782,42 @@ export const emailTemplates = pgTable('email_templates', {
   updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedBy: integer('updated_by'),
 });
+
+// ── People: departments + reporting lines ─────────────────────────────────
+// The portal is the source of truth for who reports to whom. `users` is left
+// untouched: a person's department stays in `users.team` (labelled
+// "Department" in the UI) and everything else hangs off `users.id` here.
+// Created by drizzle/0013_departments_reporting_lines.sql.
+
+// Department list + display info. `name` matches the values in `users.team`.
+export const departments = pgTable('departments', {
+  id:           serial('id').primaryKey(),
+  name:         text('name').notNull().unique(),
+  color:        text('color'),
+  displayOrder: integer('display_order').notNull().default(0),
+}).enableRLS();
+
+// One row per user. No row / null reports_to_user_id = reports to the founder
+// (Robbie Galoso) by default. photo_path is an object key in the public
+// `user-photos` storage bucket.
+export const userReporting = pgTable('user_reporting', {
+  userId:          integer('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  reportsToUserId: integer('reports_to_user_id').references(() => users.id, { onDelete: 'set null' }),
+  photoPath:       text('photo_path'),
+  displayOrder:    integer('display_order').notNull().default(0),
+  isHidden:        boolean('is_hidden').notNull().default(false),
+  updatedAt:       text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  index('user_reporting_reports_to_idx').on(t.reportsToUserId),
+  check('user_reporting_not_self', sql`${t.reportsToUserId} IS NULL OR ${t.reportsToUserId} <> ${t.userId}`),
+]).enableRLS();
+
+// Secondary ("also reports to") leads — any number per user.
+export const userSecondaryLeads = pgTable('user_secondary_leads', {
+  userId:              integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  alsoReportsToUserId: integer('also_reports_to_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (t) => [
+  primaryKey({ columns: [t.userId, t.alsoReportsToUserId] }),
+  index('user_secondary_leads_also_reports_to_idx').on(t.alsoReportsToUserId),
+  check('user_secondary_leads_not_self', sql`${t.userId} <> ${t.alsoReportsToUserId}`),
+]).enableRLS();

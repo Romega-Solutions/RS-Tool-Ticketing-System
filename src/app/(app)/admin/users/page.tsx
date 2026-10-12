@@ -3,6 +3,7 @@ import { getSession } from '@/lib/session';
 import { canAccessAdmin } from '@/lib/rbac';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { UsersAdminTabs } from '@/components/users-admin-tabs';
+import { userPhotoUrl } from '@/lib/storage';
 
 export default async function AdminUsersPage() {
   const session = await getSession();
@@ -14,6 +15,11 @@ export default async function AdminUsersPage() {
     .select('id, username, name, email, role, team, job_title, member_code, hourly_rate_usd, is_active, tool_access, date_of_birth, start_date, end_date, drive_url, approved_hours_per_week, schedule_pht_start, schedule_pht_end, setup_email_sent_at')
     .order('name');
   const rawUsers = data ?? [];
+  const [{ data: reporting }, { data: secondary }] = await Promise.all([
+    admin.from('user_reporting').select('user_id, reports_to_user_id, photo_path'),
+    admin.from('user_secondary_leads').select('user_id, also_reports_to_user_id'),
+  ]);
+  const reportingByUser = new Map((reporting ?? []).map(r => [r.user_id as number, r]));
 
   const allUsers = rawUsers.map((u: Record<string, unknown>) => ({
     id:            u.id as number,
@@ -35,6 +41,9 @@ export default async function AdminUsersPage() {
     schedulePhtStart: (u.schedule_pht_start as string | null) ?? null,
     schedulePhtEnd:   (u.schedule_pht_end as string | null) ?? null,
     setupEmailSentAt: (u.setup_email_sent_at as string | null) ?? null,
+    reportsToUserId: (reportingByUser.get(u.id as number)?.reports_to_user_id as number | null) ?? null,
+    alsoReportsToUserIds: (secondary ?? []).filter(s => s.user_id === u.id).map(s => s.also_reports_to_user_id as number),
+    photoUrl: userPhotoUrl(reportingByUser.get(u.id as number)?.photo_path as string | null),
   }));
 
   return (

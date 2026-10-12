@@ -3,7 +3,6 @@
 // with `Plane*` exist for back-compat with callers that haven't been
 // renamed yet; they no longer have anything to do with Plane.so.
 import { createAdminClient } from '@/lib/supabase/admin';
-import { mapOrgDeptToAppTeam } from '@/lib/orgchart';
 import { unstable_cache } from 'next/cache';
 import { projectStatesTag, projectLabelsTag, projectCyclesTag, USERS_LIST_TAG } from '@/lib/cache-tags';
 import type { SessionUser } from '@/lib/session';
@@ -1636,9 +1635,8 @@ export async function createProject(input: {
     if (suffix > 99) throw new PlaneApiError(502, 'projects create — identifier collision');
   }
 
-  // 2. Insert the project row. Normalize team through the org-chart canonical
-  //    list so we don't accumulate ghost team names from typos / casing drift.
-  const normalizedTeam = input.team ? mapOrgDeptToAppTeam(input.team) : null;
+  // 2. Insert the project row.
+  const normalizedTeam = input.team?.trim() || null;
   const { data: inserted, error } = await sb.from('projects').insert({
     identifier:  ident,
     name:        input.name.trim(),
@@ -1672,7 +1670,7 @@ export async function updateProject(
   const update: Row = { updated_at: new Date().toISOString() };
   if (normalized.name !== undefined)        update.name = normalized.name;
   if (normalized.description !== undefined) update.description = normalized.description;
-  if (normalized.team !== undefined)        update.team = normalized.team ? mapOrgDeptToAppTeam(normalized.team) : null;
+  if (normalized.team !== undefined)        update.team = normalized.team?.trim() || null;
   if (normalized.archived !== undefined)    update.archived = normalized.archived;
   if (normalized.autoArchiveDoneDays !== undefined) update.auto_archive_done_days = normalized.autoArchiveDoneDays;
   if (Object.keys(update).length === 1) return; // only updated_at — skip

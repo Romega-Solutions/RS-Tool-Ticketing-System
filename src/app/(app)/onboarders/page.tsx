@@ -18,7 +18,7 @@ import { LeadToolHeader, StatCard } from "@/components/lead-tool-header";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSession } from "@/lib/session";
 import { hasToolAccess } from "@/lib/rbac";
-import { APP_DEPARTMENTS } from "@/lib/orgchart";
+import { DEPARTMENTS } from "@/lib/departments";
 import {
   ALLOWED_STATUSES,
   ALLOWED_TYPES,
@@ -223,7 +223,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
                 <Settings2 className="w-4 h-4" /> Setup & workflows
               </Link>
               <CreateOnboarderForm
-                departments={[...APP_DEPARTMENTS]}
+                departments={[...DEPARTMENTS]}
                 leads={onboardingLeads}
                 globalLead={globalLeadSetting.lead}
               />

@@ -6,7 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession, type SessionUser } from '@/lib/session';
 import { hasToolAccess } from '@/lib/rbac';
 import { toProperName, formatPhoneNumber } from '@/lib/format';
-import { APP_DEPARTMENTS } from '@/lib/orgchart';
+import { DEPARTMENTS } from '@/lib/departments';
 import {
   uploadOnboarderDocument,
   type OnboarderDocumentKind,
@@ -199,8 +199,8 @@ export async function createOnboarder(formData: FormData): Promise<void> {
   if (directSupervisorIdRaw && (!Number.isInteger(directSupervisorId) || (directSupervisorId ?? 0) <= 0)) {
     throw new Error('Select a valid direct supervisor');
   }
-  if (!(APP_DEPARTMENTS as readonly string[]).includes(teamRaw)) {
-    throw new Error(`Department '${teamRaw}' is not on the org chart. Pick from the dropdown.`);
+  if (!(DEPARTMENTS as readonly string[]).includes(teamRaw)) {
+    throw new Error(`Department '${teamRaw}' is not a valid department. Pick from the dropdown.`);
   }
   if (startDateRaw && !/^\d{4}-\d{2}-\d{2}$/.test(startDateRaw)) {
     throw new Error('Start date must be a valid YYYY-MM-DD');

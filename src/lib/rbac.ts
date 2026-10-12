@@ -49,13 +49,14 @@ export function hasToolAccess(
 // Keyed by the canonical department names (lowercased); a couple of aliases are
 // included for robustness against older team strings.
 const DEPARTMENT_TOOLS: Record<string, GateableToolKey[]> = {
-  'executive':       [],
-  'finance':         [],
-  'human resource':  ['recruiting', 'onboarding'],
-  'human resources': ['recruiting', 'onboarding'],
-  'marketing':       ['marketing'],
-  'sales':           ['sales'],
-  'technical':       [],
+  'technical':           [],
+  'hr':                  ['recruiting', 'onboarding'],
+  'human resource':      ['recruiting', 'onboarding'],
+  'human resources':     ['recruiting', 'onboarding'],
+  'sales':               ['sales'],
+  'marketing':           ['marketing'],
+  'market intelligence': [],
+  'management':          [],
 };
 
 // Compute the day-one Team-Tool set for a new user from role + department:
@@ -110,7 +111,7 @@ export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string
   // to leads. Interns are still excluded.
   const normalizeTeamName = (value: string | null | undefined) => String(value ?? '').trim().toLowerCase();
   const LEAD_TOOL_TEAMS: Record<LeadToolKey, string[]> = {
-    ceo: ['executive', 'executive & admin', 'admin'],
+    ceo: ['management', 'executive', 'executive & admin', 'admin'],
     pm: ['operations', 'project management', 'design/pm'],
     sales: ['sales', 'sales & account management'],
     marketing: ['marketing', 'marketing & brand content', 'hr/marketing'],
@@ -121,7 +122,7 @@ export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string
     onboarding: [
       'recruiting', 'talent acquisition', 'people operations', 'operations',
       'hr', 'human resources', 'people', 'hr/marketing',
-      'executive', 'executive & admin', 'admin',
+      'management', 'executive', 'executive & admin', 'admin',
     ],
   };
   // ICs on a core recruiting/HR team get the Recruiting tool too (not other lead tools).
@@ -136,7 +137,7 @@ export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string
 
 // ── Romega Tools hub (external app launchers) ────────────────────────────────
 // "HR" for tool-gating purposes = the people/HR team plus the exec/admin group.
-const HR_TEAMS = ['hr/marketing', 'executive & admin', 'admin'];
+const HR_TEAMS = ['hr', 'management', 'hr/marketing', 'executive & admin', 'admin'];
 
 export function isHrTeam(team: string | null): boolean {
   return HR_TEAMS.includes(String(team ?? '').trim().toLowerCase());
