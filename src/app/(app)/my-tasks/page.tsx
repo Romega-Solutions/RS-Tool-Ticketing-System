@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { TaskCard } from '@/components/task-card';
 import { OnboardingBanner } from './onboarding-banner';
 import { TaskSearch } from './task-search';
+import { descriptionSearchText, matchesTaskSearch, parseTaskSearch } from '@/lib/task-search';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,9 +31,8 @@ export default async function MyTasksPage({
   const { tab = 'active', priority = '', dueSoon = '', q = '' } = await searchParams;
   const dueSoonOn = dueSoon === '1';
   const search = q.trim();
-  const searchTerm = search.toLowerCase();
-  // "12", "#12", or "PROJ-12" → match the ticket number.
-  const searchNumber = searchTerm.match(/^(?:#|([a-z0-9]+)-)?(\d+)$/);
+  // Matches title, description, project name, or ticket number ("12", "#12", "PROJ-12").
+  const searchQuery = parseTaskSearch(search);
   const sessionUser = await getSession();
 
   let activeTasks:    TaskWithProject[] = [];
@@ -70,14 +70,17 @@ export default async function MyTasksPage({
 
       const passesFilters = (i: TaskWithProject) => {
         if (priority && i.priority !== priority) return false;
-        if (searchTerm) {
-          const textHit =
-            i.name.toLowerCase().includes(searchTerm) ||
-            i._projectName.toLowerCase().includes(searchTerm);
-          const numberHit = !!searchNumber &&
-            String(i.sequence_id) === searchNumber[2] &&
-            (!searchNumber[1] || i._projectIdentifier.toLowerCase() === searchNumber[1]);
-          if (!textHit && !numberHit) return false;
+        if (searchQuery) {
+          const text = [
+            i.name.toLowerCase(),
+            i._projectName.toLowerCase(),
+            descriptionSearchText(i.description_stripped),
+          ].join(' ');
+          if (!matchesTaskSearch(searchQuery, {
+            text,
+            sequence_id: i.sequence_id,
+            identifier: i._projectIdentifier,
+          })) return false;
         }
         if (dueSoonOn) {
           if (!i.target_date) return false;
