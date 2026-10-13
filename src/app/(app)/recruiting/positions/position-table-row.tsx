@@ -17,6 +17,7 @@ export type Position = {
   is_open:         boolean;
   created_at:      string;
   created_by:      number | null;
+  slug?:           string | null;
   created_by_name?: string | null;
   applicant_count?: number;
 };
@@ -90,7 +91,9 @@ export function PositionTableRow({ position }: { position: Position }) {
       <td className="px-4 py-3.5">
         <div className="flex items-center gap-1.5 flex-wrap">
           <PositionStatusToggle id={position.id} isOpen={position.is_open} />
-          {position.is_open && <CopyApplicationLinkButton positionId={position.id} />}
+          {position.is_open && (
+            <CopyApplicationLinkButton positionId={position.id} slug={position.slug} />
+          )}
         </div>
       </td>
       <td className="px-4 py-3.5">

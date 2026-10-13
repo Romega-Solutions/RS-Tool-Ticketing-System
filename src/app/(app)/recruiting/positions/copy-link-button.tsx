@@ -2,13 +2,19 @@
 
 import { useState } from 'react';
 import { Link2, Check } from 'lucide-react';
+import { publicPositionApplyUrl } from '@/lib/recruiting/position-slug';
 
-export function CopyApplicationLinkButton({ positionId }: { positionId: number }) {
+export function CopyApplicationLinkButton({
+  positionId,
+  slug,
+}: {
+  positionId: number;
+  slug?: string | null;
+}) {
   const [copied, setCopied] = useState(false);
 
   function handleCopy() {
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    const url = `${origin}/apply/${positionId}`;
+    const url = publicPositionApplyUrl({ id: positionId, slug });
     navigator.clipboard?.writeText(url).then(
       () => {
         setCopied(true);
