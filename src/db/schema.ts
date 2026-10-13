@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean, index, primaryKey, check } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean, index, uniqueIndex, primaryKey, check, timestamp } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id:            serial('id').primaryKey(),
@@ -201,6 +201,32 @@ export const candidates = pgTable('candidates', {
   index('candidates_assigned_to_idx').on(t.assignedTo),
   index('candidates_created_by_idx').on(t.createdBy),
   index('candidates_status_idx').on(t.status),
+]);
+
+// Open roles. Created outside drizzle-kit (docs/migrations/add-ats-history-and-positions.sql
+// and extend-positions-fields.sql). `slug` is the stable public apply key
+// (drizzle/0014_positions_slug.sql). Title edits must not rewrite it.
+export const positions = pgTable('positions', {
+  id:             serial('id').primaryKey(),
+  jobTitle:       text('job_title').notNull(),
+  // Legacy free-text client. Unused by the app; left in place by the extend migration.
+  client:         text('client'),
+  location:       text('location'),
+  jobDescription: text('job_description'),
+  isOpen:         boolean('is_open').notNull().default(true),
+  createdBy:      integer('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:      timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
+  updatedAt:      timestamp('updated_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
+  placementType:  text('placement_type').notNull().default('internal'),
+  compensation:   text('compensation'),
+  employmentType: text('employment_type').notNull().default('full_time'),
+  openings:       integer('openings').notNull().default(1),
+  // Nullable until 0014_positions_slug.sql is applied. Unique when present.
+  slug:           text('slug'),
+}, (t) => [
+  index('positions_open_idx').on(t.isOpen),
+  index('positions_created_by_idx').on(t.createdBy),
+  uniqueIndex('positions_slug_unique_idx').on(t.slug),
 ]);
 
 // Generic request + raw-submission store for candidate-facing pre-employment
