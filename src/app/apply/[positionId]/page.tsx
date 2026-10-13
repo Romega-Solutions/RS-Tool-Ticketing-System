@@ -4,7 +4,11 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { Briefcase, MapPin, Clock, Banknote, AlertCircle } from 'lucide-react';
 import { ApplyForm } from './apply-form';
 import { RichText } from '@/components/rich-text';
-import { atsPositionTag } from '@/lib/cache-tags';
+import { ATS_POSITIONS_TAG, atsPositionTag } from '@/lib/cache-tags';
+import { isMissingSlugColumn, positionApplyLookup } from '@/lib/recruiting/position-slug';
+
+const POSITION_DETAIL_COLUMNS =
+  'id, job_title, location, compensation, employment_type, openings, job_description, is_open';
 
 type Position = {
   id:              number;
@@ -27,7 +31,7 @@ async function getCachedPosition(id: number) {
       const supabase = createAdminClient();
       const { data, error } = await supabase
         .from('positions')
-        .select('id, job_title, location, compensation, employment_type, openings, job_description, is_open')
+        .select(POSITION_DETAIL_COLUMNS)
         .eq('id', id)
         .maybeSingle();
       if (error && !error.message?.toLowerCase().includes('does not exist')) {
@@ -40,18 +44,44 @@ async function getCachedPosition(id: number) {
   )();
 }
 
+async function getCachedPositionBySlug(slug: string) {
+  return unstable_cache(
+    async () => {
+      const supabase = createAdminClient();
+      const { data, error } = await supabase
+        .from('positions')
+        .select(POSITION_DETAIL_COLUMNS)
+        .eq('slug', slug)
+        .maybeSingle();
+      if (error && !isMissingSlugColumn(error.message) && !error.message.toLowerCase().includes('does not exist')) {
+        throw new Error(error.message);
+      }
+      return { data: data as Position | null, errorMessage: error?.message ?? null };
+    },
+    ['ats-position-detail', 'slug', slug],
+    { revalidate: 300, tags: [ATS_POSITIONS_TAG] },
+  )();
+}
+
+function positionUnavailable(errorMessage: string | null): boolean {
+  if (!errorMessage) return false;
+  return isMissingSlugColumn(errorMessage) || errorMessage.toLowerCase().includes('does not exist');
+}
+
 export default async function ApplyPage({
   params,
 }: {
   params: Promise<{ positionId: string }>;
 }) {
   const { positionId } = await params;
-  const id = parseInt(positionId, 10);
-  if (!Number.isInteger(id) || id <= 0) notFound();
+  const lookup = positionApplyLookup(positionId);
+  if (!lookup) notFound();
 
-  const { data, errorMessage } = await getCachedPosition(id);
+  const { data, errorMessage } = 'id' in lookup
+    ? await getCachedPosition(lookup.id)
+    : await getCachedPositionBySlug(lookup.slug);
 
-  if (errorMessage?.toLowerCase().includes('does not exist')) {
+  if (positionUnavailable(errorMessage)) {
     return <NotConfigured />;
   }
   if (!data) notFound();

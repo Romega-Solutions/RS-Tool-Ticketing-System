@@ -12,6 +12,10 @@ import { type Position } from './position-table-row';
 import { PositionsTable } from './positions-table.client';
 import { ATS_POSITIONS_TAG } from '@/lib/cache-tags';
 import { countApplicantsByPosition, type PositionApplicantCandidate } from '@/lib/recruiting/position-applicants';
+import { isMissingSlugColumn } from '@/lib/recruiting/position-slug';
+
+const POSITION_LIST_COLUMNS =
+  'id, job_title, placement_type, location, compensation, employment_type, openings, job_description, is_open, created_at, created_by';
 
 function isTableMissing(msg: string | undefined) {
   if (!msg) return false;
@@ -58,17 +62,27 @@ async function getCandidatePositionRefs(
 const getCachedPositionRows = unstable_cache(
   async () => {
     const supabase = createAdminClient();
-    const { data, error } = await supabase
+    const withSlug = await supabase
       .from('positions')
-      .select('id, job_title, placement_type, location, compensation, employment_type, openings, job_description, is_open, created_at, created_by')
+      .select(`${POSITION_LIST_COLUMNS}, slug`)
       .order('created_at', { ascending: false })
       .limit(200);
+    // The list must keep working until drizzle/0014_positions_slug.sql is applied.
+    const fallback = withSlug.error && isMissingSlugColumn(withSlug.error.message)
+      ? await supabase
+        .from('positions')
+        .select(POSITION_LIST_COLUMNS)
+        .order('created_at', { ascending: false })
+        .limit(200)
+      : null;
+    const data = (fallback ? fallback.data : withSlug.data) as Position[] | null;
+    const error = fallback ? fallback.error : withSlug.error;
     if (error && !isTableMissing(error.message)) {
       throw new Error(error.message);
     }
     return { data: data as Position[] | null, errorMessage: error?.message ?? null };
   },
-  ['ats-position-rows'],
+  ['ats-position-rows', 'slug'],
   { revalidate: 300, tags: [ATS_POSITIONS_TAG] },
 );
 
