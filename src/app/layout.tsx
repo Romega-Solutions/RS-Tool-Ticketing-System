@@ -21,7 +21,7 @@ const merriweather = Merriweather({
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'),
-  title: "RS Ticketing System",
+  title: { default: "RS Portal", template: "%s | RS Portal" },
   description: "Task management and reporting for Romega Solutions",
   icons: {
     icon: [
@@ -32,7 +32,7 @@ export const metadata: Metadata = {
     apple: "/images/rs-icon.png",
   },
   openGraph: {
-    title: "RS Ticketing System",
+    title: "RS Portal",
     description: "Task management and reporting for Romega Solutions",
     siteName: "Romega Solutions",
     images: [{ url: "/images/rs-og-bg.png", width: 1200, height: 630 }],

@@ -357,7 +357,7 @@ export const POST = route(async (req: Request) => {
 
   // Build workbook
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'RS Ticketing System';
+  workbook.creator = 'RS Portal';
   workbook.created = new Date();
 
   const ws = workbook.addWorksheet('Weekly Report');

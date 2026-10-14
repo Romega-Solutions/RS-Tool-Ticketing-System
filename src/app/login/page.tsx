@@ -111,7 +111,7 @@ function LoginContent() {
               Your team.<br />Your tasks.<br />All in one place.
             </h1>
             <p className="mt-4 text-white/55 text-sm leading-relaxed max-w-xs">
-              RS Ticketing System keeps Romega Solutions teams aligned — track work, log time, and submit weekly reports without leaving the page.
+              RS Portal keeps Romega Solutions teams aligned — track work, log time, and submit weekly reports without leaving the page.
             </p>
           </div>
 
@@ -197,7 +197,7 @@ function LoginContent() {
           {/* Footer links */}
           <div className="mt-8 text-center space-y-1.5">
             <p className="text-xs text-(--color-foreground-subtle)">
-              © {new Date().getFullYear()} RS Ticketing System · Internal use only
+              © {new Date().getFullYear()} RS Portal · Internal use only
             </p>
             <p className="text-xs">
               <a href="/guide" className="text-(--rs-primary-600) hover:underline font-medium">
