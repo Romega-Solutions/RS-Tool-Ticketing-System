@@ -38,6 +38,7 @@ export type UserRow = {
   reportsToUserId: number | null;
   alsoReportsToUserIds: number[];
   photoUrl: string | null;
+  isHidden: boolean; // hidden from the org chart
 };
 
 // Selectable roles (stored value is the lowercase string; the dropdown shows the
@@ -60,7 +61,7 @@ type EditState = {
   role: string; isActive: boolean; team: string; memberCode: string; hourlyRateUsd: string;
   dateOfBirth: string; startDate: string; endDate: string; driveUrl: string;
   approvedHoursPerWeek: string; schedulePhtStart: string; schedulePhtEnd: string;
-  reportsToUserId: string; alsoReportsToUserIds: number[];
+  reportsToUserId: string; alsoReportsToUserIds: number[]; isHidden: boolean;
 };
 
 type NewUserForm = {
@@ -83,6 +84,7 @@ type NewUserForm = {
   sendSetupEmail: boolean;
   reportsToUserId: string;
   alsoReportsToUserIds: number[];
+  isHidden: boolean;
 };
 
 const EMPTY_FORM: NewUserForm = {
@@ -92,6 +94,7 @@ const EMPTY_FORM: NewUserForm = {
   sendSetupEmail: false,
   reportsToUserId: '',
   alsoReportsToUserIds: [],
+  isHidden: false,
 };
 
 // ── Column sorting ───────────────────────────────────────────────────────────
@@ -314,7 +317,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
   }, []);
 
   // Edit existing user — the editor lives inside the profile dialog (profileUser).
-  const [editForm, setEditForm]     = useState<EditState>({ name: '', username: '', email: '', jobTitle: '', role: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '', dateOfBirth: '', startDate: '', endDate: '', driveUrl: '', approvedHoursPerWeek: '15', schedulePhtStart: '', schedulePhtEnd: '', reportsToUserId: '', alsoReportsToUserIds: [] });
+  const [editForm, setEditForm]     = useState<EditState>({ name: '', username: '', email: '', jobTitle: '', role: '', isActive: true, team: '', memberCode: '', hourlyRateUsd: '', dateOfBirth: '', startDate: '', endDate: '', driveUrl: '', approvedHoursPerWeek: '15', schedulePhtStart: '', schedulePhtEnd: '', reportsToUserId: '', alsoReportsToUserIds: [], isHidden: false });
   // Photo picked in Add / Edit — only uploaded when the dialog is saved.
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
   const pendingPhotoPreview = useMemo(() => (pendingPhoto ? URL.createObjectURL(pendingPhoto) : null), [pendingPhoto]);
@@ -376,6 +379,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       schedulePhtEnd: user.schedulePhtEnd ?? '',
       reportsToUserId: user.reportsToUserId != null ? String(user.reportsToUserId) : '',
       alsoReportsToUserIds: user.alsoReportsToUserIds,
+      isHidden: user.isHidden,
     });
   };
   const closeProfile = () => { setProfileUser(null); setError(''); };
@@ -421,9 +425,10 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
         body: JSON.stringify({
           reportsToUserId: editForm.reportsToUserId ? Number(editForm.reportsToUserId) : null,
           alsoReportsToUserIds: editForm.alsoReportsToUserIds,
+          isHidden: editForm.isHidden,
         }),
       });
-      const reporting = (await res2.json()) as { reportsToUserId?: number | null; alsoReportsToUserIds?: number[]; error?: string };
+      const reporting = (await res2.json()) as { reportsToUserId?: number | null; alsoReportsToUserIds?: number[]; isHidden?: boolean; error?: string };
       setUserList(prev => prev.map(u => u.id === userId ? { ...u, ...data.user, ...(res2.ok ? reporting : {}) } : u));
       if (!res2.ok) { setError(reporting.error ?? 'Saved, but reporting lines failed to save'); return; }
       if (pendingPhoto && !(await uploadPhoto(userId, pendingPhoto))) return;
@@ -510,7 +515,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
     setCreating(true);
     setCreateError('');
     try {
-      const { sendSetupEmail, reportsToUserId, alsoReportsToUserIds, ...payload } = newForm;
+      const { sendSetupEmail, reportsToUserId, alsoReportsToUserIds, isHidden, ...payload } = newForm;
       const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -518,12 +523,12 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       });
       const data = (await res.json()) as { user?: UserRow; error?: string };
       if (!res.ok) { setCreateError(data.error ?? 'Failed to create user'); return; }
-      const created = data.user && { ...data.user, reportsToUserId: null, alsoReportsToUserIds: [], photoUrl: null };
+      const created = data.user && { ...data.user, reportsToUserId: null, alsoReportsToUserIds: [], photoUrl: null, isHidden: false };
       if (created) setUserList(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       closeCreate();
       if (created && pendingPhoto) void uploadPhoto(created.id, pendingPhoto);
-      if (created && (reportsToUserId || alsoReportsToUserIds.length)) {
-        const reporting = { reportsToUserId: reportsToUserId ? Number(reportsToUserId) : null, alsoReportsToUserIds };
+      if (created && (reportsToUserId || alsoReportsToUserIds.length || isHidden)) {
+        const reporting = { reportsToUserId: reportsToUserId ? Number(reportsToUserId) : null, alsoReportsToUserIds, isHidden };
         const r = await fetch(`/api/admin/users/${created.id}/reporting`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reporting),
         });
@@ -996,7 +1001,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <LeadFields options={userList.filter(u => u.isActive)} reportsTo={newForm.reportsToUserId} also={newForm.alsoReportsToUserIds}
-                  onChange={(reportsToUserId, alsoReportsToUserIds) => setNewForm(f => ({ ...f, reportsToUserId, alsoReportsToUserIds }))} />
+                  onChange={(reportsToUserId, alsoReportsToUserIds) => setNewForm(f => ({ ...f, reportsToUserId, alsoReportsToUserIds }))}
+                  hidden={newForm.isHidden} onHiddenChange={isHidden => setNewForm(f => ({ ...f, isHidden }))} />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1195,7 +1201,8 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                         </select>
                       </Field>
                       <LeadFields options={leadOptions} reportsTo={editForm.reportsToUserId} also={editForm.alsoReportsToUserIds}
-                        onChange={(reportsToUserId, alsoReportsToUserIds) => setEditForm(f => ({ ...f, reportsToUserId, alsoReportsToUserIds }))} />
+                        onChange={(reportsToUserId, alsoReportsToUserIds) => setEditForm(f => ({ ...f, reportsToUserId, alsoReportsToUserIds }))}
+                        hidden={editForm.isHidden} onHiddenChange={isHidden => setEditForm(f => ({ ...f, isHidden }))} />
                       <Field label="Member Code">
                         <input value={editForm.memberCode} onChange={e => setEditForm(f => ({ ...f, memberCode: e.target.value }))}
                           placeholder="e.g. ACNG-1" className={`${inputCls} font-mono`} />
@@ -1307,12 +1314,15 @@ function Field({ label, required, children }: { label: string; required?: boolea
   );
 }
 
-// Reports To (single, empty = founder by default) + Also Reports To (multi).
-function LeadFields({ options, reportsTo, also, onChange }: {
+// Reports To (single, empty = founder by default) + Also Reports To (multi)
+// + whether the org chart hides this person.
+function LeadFields({ options, reportsTo, also, onChange, hidden, onHiddenChange }: {
   options: UserRow[];
   reportsTo: string;
   also: number[];
   onChange: (reportsTo: string, also: number[]) => void;
+  hidden: boolean;
+  onHiddenChange: (hidden: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -1349,6 +1359,12 @@ function LeadFields({ options, reportsTo, also, onChange }: {
           )}
         </div>
       </Field>
+      <label className="sm:col-span-2 flex items-center gap-2.5 text-sm text-(--rs-neutral-grey-700) cursor-pointer">
+        <input type="checkbox" checked={hidden} onChange={e => onHiddenChange(e.target.checked)}
+          className="w-4 h-4 rounded accent-(--rs-primary-500)" />
+        Hide from org chart
+        <span className="text-xs text-(--rs-neutral-grey-400)">— still an active portal user</span>
+      </label>
     </>
   );
 }

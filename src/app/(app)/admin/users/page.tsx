@@ -16,7 +16,7 @@ export default async function AdminUsersPage() {
     .order('name');
   const rawUsers = data ?? [];
   const [{ data: reporting }, { data: secondary }] = await Promise.all([
-    admin.from('user_reporting').select('user_id, reports_to_user_id, photo_path'),
+    admin.from('user_reporting').select('user_id, reports_to_user_id, photo_path, is_hidden'),
     admin.from('user_secondary_leads').select('user_id, also_reports_to_user_id'),
   ]);
   const reportingByUser = new Map((reporting ?? []).map(r => [r.user_id as number, r]));
@@ -44,6 +44,7 @@ export default async function AdminUsersPage() {
     reportsToUserId: (reportingByUser.get(u.id as number)?.reports_to_user_id as number | null) ?? null,
     alsoReportsToUserIds: (secondary ?? []).filter(s => s.user_id === u.id).map(s => s.also_reports_to_user_id as number),
     photoUrl: userPhotoUrl(reportingByUser.get(u.id as number)?.photo_path as string | null),
+    isHidden: Boolean(reportingByUser.get(u.id as number)?.is_hidden),
   }));
 
   return (
