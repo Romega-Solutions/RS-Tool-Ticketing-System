@@ -372,7 +372,7 @@ export function MobileNav({ role, toolAccess }: { role: AppRole; toolAccess: str
       </SheetTrigger>
       <SheetContent side="left" className="w-56 p-0 bg-(--rs-neutral-grey-900) text-white border-r-0">
         <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
-        <SheetDescription className="sr-only">Access the internal ticketing system sections.</SheetDescription>
+        <SheetDescription className="sr-only">Access the RS Portal sections.</SheetDescription>
 
         <div className="flex flex-col h-full">
           {/* Mobile header — logo only, no extra text */}

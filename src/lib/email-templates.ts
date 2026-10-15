@@ -16,10 +16,10 @@ export const ACCOUNT_SETUP_KEY = 'account_setup';
 
 // Built-in fallback used when the DB row is missing (fresh DB / pre-migration).
 export const DEFAULT_ACCOUNT_SETUP = {
-  subject: 'Your RS Ticketing System account is ready, {{first_name}}',
+  subject: 'Your RS Portal account is ready, {{first_name}}',
   body: `Hi {{first_name}},
 
-An account has been created for you on the RS Ticketing System — Romega's internal workspace for tasks, attendance, and weekly reports.
+An account has been created for you on the RS Portal — Romega's internal workspace for tasks, attendance, and weekly reports.
 
 Getting in takes one click:
 

@@ -10,7 +10,7 @@ import {
 import { Mail, Network, Award, ExternalLink } from 'lucide-react';
 import { OrgChartCredentials } from './org-chart-credentials';
 
-export const metadata = { title: 'Tools · Romega Portal' };
+export const metadata = { title: 'Tools' };
 export const dynamic = 'force-dynamic';
 
 // Shared read-only Org Chart logins, keyed by the same access tier used for
