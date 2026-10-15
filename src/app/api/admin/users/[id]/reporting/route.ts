@@ -11,6 +11,7 @@ export const runtime = 'nodejs';
 const bodySchema = z.object({
   reportsToUserId:      z.number().int().positive().nullable(),
   alsoReportsToUserIds: z.array(z.number().int().positive()),
+  isHidden:             z.boolean().optional(),
 });
 
 async function userIdFrom(params: Promise<{ id: string }>): Promise<number> {
@@ -19,18 +20,19 @@ async function userIdFrom(params: Promise<{ id: string }>): Promise<number> {
   return userId;
 }
 
-// PUT — set who this user reports to. null = the default (the founder).
+// PUT — set who this user reports to (null = the founder) and whether the
+// org chart hides them.
 export const PUT = route(async (req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const session = await requireAdmin();
   await enforceRateLimit({ key: keyByUser('admin-users-write', session.id), limit: 30, windowSeconds: 60 });
   const userId = await userIdFrom(params);
-  const { reportsToUserId, alsoReportsToUserIds } = await parseBody(req, bodySchema);
+  const { reportsToUserId, alsoReportsToUserIds, isHidden } = await parseBody(req, bodySchema);
   const also = [...new Set(alsoReportsToUserIds)].filter(id => id !== reportsToUserId);
   if (reportsToUserId === userId || also.includes(userId)) throw badRequest('A user cannot report to themselves');
 
   const admin = createAdminClient();
   const { error } = await admin.from('user_reporting').upsert(
-    { user_id: userId, reports_to_user_id: reportsToUserId, updated_at: new Date().toISOString() },
+    { user_id: userId, reports_to_user_id: reportsToUserId, ...(isHidden !== undefined && { is_hidden: isHidden }), updated_at: new Date().toISOString() },
     { onConflict: 'user_id' },
   );
   if (error) throw new Error(error.message);
@@ -43,7 +45,7 @@ export const PUT = route(async (req: Request, { params }: { params: Promise<{ id
     if (insError) throw new Error(insError.message);
   }
 
-  return NextResponse.json({ reportsToUserId, alsoReportsToUserIds: also });
+  return NextResponse.json({ reportsToUserId, alsoReportsToUserIds: also, ...(isHidden !== undefined && { isHidden }) });
 });
 
 // POST — upload a new profile photo (multipart, field "photo").
