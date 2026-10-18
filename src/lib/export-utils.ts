@@ -222,8 +222,20 @@ export interface CustomRangeApiUser {
   hourlyRateUsd: number | null;
 }
 
+export interface CustomRangeApiSession {
+  userId: number;
+  date: string;
+  clockedInAt: string;
+  clockedOutAt: string | null;
+}
+
 export interface CustomRangeExport {
+  /** Inclusive ISO range this export was built for. */
+  start: string;
+  end: string;
   rows: ExportRow[];
+  /** Member name → date → "09:05 - 17:30" (first clock-in, last clock-out). Days without sessions are absent. */
+  dayLogs: Record<string, Record<string, string>>;
   timesheet: { rows: TimesheetMemberRow[]; meta: TimesheetMeta };
   wiseAmounts: Record<string, number | null>;
   rangeLabel: string;
@@ -234,6 +246,11 @@ export interface CustomRangeExport {
 function shortDateLabel(iso: string): string {
   const d = parseIsoDate(iso);
   return d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : iso;
+}
+
+/** "17:30" — 24-hour Manila time. */
+function fmtClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Manila' });
 }
 
 function longDateLabel(iso: string): string {
@@ -247,6 +264,7 @@ export function buildCustomRangeExport(
   end: string,
   users: CustomRangeApiUser[],
   timesheetsByDay: Record<string, number>,
+  sessions: CustomRangeApiSession[] = [],
 ): CustomRangeExport {
   const dates = datesBetween(start, end);
   const rangeLabel = `${longDateLabel(start)} - ${longDateLabel(end)}`;
@@ -263,8 +281,28 @@ export function buildCustomRangeExport(
     rows.push({ member: u.name, team: u.team ?? '', period_total_hours: fmtHm(periodSeconds) });
   }
 
+  // Sessions arrive ordered by clock-in, so the first one per day is the
+  // time in and the last one's clock-out is the time out (blank while open).
+  const firstLast = new Map<string, { in: string; out: string | null }>();
+  for (const s of sessions) {
+    const key = `${s.userId}:${s.date}`;
+    firstLast.set(key, { in: firstLast.get(key)?.in ?? s.clockedInAt, out: s.clockedOutAt });
+  }
+  const dayLogs: Record<string, Record<string, string>> = {};
+  for (const u of users) {
+    const days: Record<string, string> = {};
+    for (const d of dates) {
+      const day = firstLast.get(`${u.id}:${d}`);
+      if (day) days[d] = `${fmtClock(day.in)} - ${day.out ? fmtClock(day.out) : ''}`.trimEnd();
+    }
+    dayLogs[u.name] = days;
+  }
+
   return {
+    start,
+    end,
     rows,
+    dayLogs,
     timesheet: {
       rows: timesheetRows,
       meta: { rangeLabel, dayDateLabels: dates.map(shortDateLabel), dayOfWeekLabels: dates.map(weekdayShortLabel) },

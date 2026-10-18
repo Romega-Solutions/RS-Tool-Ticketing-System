@@ -168,4 +168,16 @@ describe('buildCustomRangeExport', () => {
     expect(result.jsonMeta).toEqual({ start: '2026-07-01', end: '2026-07-03' });
     expect(result.wisePaymentReference).toBe('Payroll Period 1 Jul 2026 - 3 Jul 2026');
   });
+
+  it('builds per-day "time in - time out" in 24h Manila time, blank out while open', () => {
+    const result = buildCustomRangeExport('2026-07-01', '2026-07-02', users, timesheetsByDay, [
+      { userId: 1, date: '2026-07-01', clockedInAt: '2026-07-01T01:05:00Z', clockedOutAt: '2026-07-01T02:05:00Z' },
+      { userId: 1, date: '2026-07-01', clockedInAt: '2026-07-01T05:00:00Z', clockedOutAt: '2026-07-01T09:30:00Z' },
+      { userId: 2, date: '2026-07-02', clockedInAt: '2026-07-02T00:00:00Z', clockedOutAt: null },
+    ]);
+    expect(result.dayLogs).toEqual({
+      Jane: { '2026-07-01': '09:05 - 17:30' },
+      Bob:  { '2026-07-02': '08:00 -' },
+    });
+  });
 });
