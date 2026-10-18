@@ -45,10 +45,12 @@ cp .env.example .env     # fill in Supabase + the keys you need
 npm run dev              # http://localhost:3000
 ```
 
-Then seed accounts and (optionally) sample LMS content:
+Sign in with Google using an email that has a row in `public.users`. To fill a
+non-production database with fake people and tasks (and the preview role test
+accounts), see [`scripts/preview-seed/README.md`](scripts/preview-seed/README.md).
+Optional sample LMS content:
 
 ```bash
-npx tsx scripts/seed-auth-users.ts   # Supabase Auth users for every public.users row (default pass Demo@1234)
 npx tsx scripts/seed-lms.ts          # sample courses/lessons/quiz
 ```
 

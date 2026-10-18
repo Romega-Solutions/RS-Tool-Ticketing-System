@@ -47,15 +47,17 @@ npx drizzle-kit migrate         # applies pending migrations (uses DATABASE_URL)
 ### Seeding
 
 ```bash
-# Create Supabase Auth users for every row in public.users (default pass Demo@1234)
-npx tsx scripts/seed-auth-users.ts
+# Fake structure-copy data + role test accounts for a NON-production database
+# (never production; see scripts/preview-seed/README.md)
+npx tsx scripts/preview-seed/index.ts --target <preview-project-ref>
 
 # Seed sample LMS courses/lessons/quiz (idempotent)
 npx tsx scripts/seed-lms.ts
 ```
 
 > `scripts/seed.ts` is the legacy SQLite-era seeder (inserts a bcrypt user row). Auth is
-> now Supabase, so `seed-auth-users.ts` is the one that matters.
+> now Supabase with Google sign-in; previews use the role switcher in
+> `src/lib/preview-role-switcher.ts`.
 
 ---
 
