@@ -1,7 +1,9 @@
 import { getProjects, getProjectStates, getWorkItems, getCycles, buildStateLookup, enrichWorkItems } from '@/lib/tickets';
 import { getSession } from '@/lib/session';
 import { getProjectCaps, canEditProjectColumns } from '@/lib/permissions';
-import { notFound, redirect } from 'next/navigation';
+import { notFound, permanentRedirect, redirect } from 'next/navigation';
+import { projectPath } from '@/lib/project-slug';
+import { resolveProjectParam } from '@/lib/project-slug-server';
 import Link from 'next/link';
 import { AlertCircle, MessageSquare, Settings } from 'lucide-react';
 import { KanbanBoard } from '@/components/kanban-board';
@@ -10,16 +12,30 @@ const EXCLUDED_GROUPS = new Set(['cancelled', 'canceled']);
 
 export default async function ProjectBoardPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { id } = await params;
+  const { id: rawId } = await params;
   const session = await getSession();
   if (!session) redirect('/login');   // Projects is a Workspace tool — open to all
+
+  // The URL key is a slug or a numeric id. An unknown key resolves to id 0 (no
+  // such project), so it behaves exactly like a missing numeric id: non-members
+  // are bounced to /projects and admins get a 404.
+  const resolved = await resolveProjectParam(rawId);
+  const id = String(resolved?.id ?? 0);
 
   // Per-project access: members/leads (+ admins) only; non-members are bounced.
   const caps = await getProjectCaps(session, Number(id));
   if (!caps.canView) redirect('/projects');
+
+  // Old numeric links → canonical slug URL (308), keeping ?task=&comment=.
+  if (resolved?.slug && rawId !== resolved.slug) {
+    permanentRedirect(projectPath(resolved, '', await searchParams));
+  }
+  const projectRef = { id, slug: resolved?.slug ?? null };
   const showSettings = caps.canManage || await canEditProjectColumns(session, Number(id));
 
   let projectName = '';
@@ -63,14 +79,14 @@ export default async function ProjectBoardPage({
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href={`/projects/${id}/discussion`}
+            href={projectPath(projectRef, 'discussion')}
             className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm text-(--rs-neutral-grey-600) transition-colors hover:border-(--rs-primary-300) hover:text-(--rs-primary-700)"
           >
             <MessageSquare className="w-3.5 h-3.5" /> Discussion
           </Link>
           {showSettings && (
             <Link
-              href={`/projects/${id}/settings`}
+              href={projectPath(projectRef, 'settings')}
               className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm text-(--rs-neutral-grey-600) transition-colors hover:border-(--rs-primary-300) hover:text-(--rs-primary-700)"
             >
               <Settings className="w-3.5 h-3.5" /> Settings

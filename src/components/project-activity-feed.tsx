@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Activity, FolderPlus, Archive } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import type { ProjectActivityEntry } from '@/lib/tickets';
+import { projectPath } from '@/lib/project-slug';
 
 function formatActivityTime(ts: string): string {
   if (!ts) return '';
@@ -39,7 +40,7 @@ export function ProjectActivityFeed({ entries }: { entries: ProjectActivityEntry
             return (
               <li key={`${entry.projectId}-${entry.action}`}>
                 <Link
-                  href={`/projects/${entry.projectId}`}
+                  href={projectPath({ id: entry.projectId, slug: entry.projectSlug })}
                   className="flex items-start gap-3 rounded-md py-3 transition-colors hover:bg-(--rs-neutral-grey-50) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300)"
                 >
                   <span

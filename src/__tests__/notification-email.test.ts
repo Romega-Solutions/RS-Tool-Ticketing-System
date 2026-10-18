@@ -68,6 +68,9 @@ describe('shouldEmailNotification — prefs gating', () => {
 describe('parseTaskIdFromLink', () => {
   it('extracts the numeric task id from a project deep link', () => {
     expect(parseTaskIdFromLink('/projects/3?task=42')).toBe(42);
+    expect(parseTaskIdFromLink('/projects/romega-portal-general?task=42')).toBe(42);
+    expect(parseTaskIdFromLink('/projects/romega-portal-general?task=42&comment=7')).toBe(42);
+    expect(parseTaskIdFromLink('/projects/2026-project?comment=7&task=9')).toBe(9);
     expect(parseTaskIdFromLink('/projects/3?task=42&comment=7')).toBe(42);
     expect(parseTaskIdFromLink('/projects/3?foo=1&task=99')).toBe(99);
   });
@@ -78,6 +81,7 @@ describe('parseTaskIdFromLink', () => {
     expect(parseTaskIdFromLink(null)).toBeNull();
     expect(parseTaskIdFromLink(undefined)).toBeNull();
     expect(parseTaskIdFromLink('/projects/3?task=abc')).toBeNull();
+    expect(parseTaskIdFromLink('/projects/romega-portal-general')).toBeNull();
   });
 });
 

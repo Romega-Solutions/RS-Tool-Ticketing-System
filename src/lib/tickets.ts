@@ -4,7 +4,11 @@
 // renamed yet; they no longer have anything to do with Plane.so.
 import { createAdminClient } from '@/lib/supabase/admin';
 import { unstable_cache } from 'next/cache';
-import { projectStatesTag, projectLabelsTag, projectCyclesTag, USERS_LIST_TAG } from '@/lib/cache-tags';
+import { projectStatesTag, projectLabelsTag, projectCyclesTag, USERS_LIST_TAG, PROJECT_SLUGS_TAG } from '@/lib/cache-tags';
+import { revalidateTag } from 'next/cache';
+import { getProjectSlugMap } from '@/lib/project-slug-server';
+import { allocateProjectSlug, slugifyProjectName } from '@/lib/project-slug';
+import { isMissingSlugColumn } from '@/lib/recruiting/position-slug';
 import type { SessionUser } from '@/lib/session';
 import { HttpError, badRequest, notFound } from '@/lib/api/errors';
 
@@ -16,6 +20,7 @@ export interface PlaneProject {
   network: number;
   team: string | null;
   autoArchiveDoneDays: number | null;   // null/0 = off
+  slug?: string | null;                 // readable URL key; null until the slug migration runs
 }
 
 export interface PlaneState {
@@ -164,7 +169,21 @@ export async function getProjects(
   if (visibleIds) q = q.in('id', visibleIds);
   const { data, error } = await q;
   if (error) throw new PlaneApiError(500, 'projects');
-  return (data ?? []).map(mapProject);
+  const slugs = await safeProjectSlugMap();
+  return (data ?? []).map(r => {
+    const p = mapProject(r);
+    return { ...p, slug: slugs[p.id] ?? null };
+  });
+}
+
+// Slugs are a progressive enhancement: never let a slug lookup failure break a
+// page that only needs project data. Empty map → numeric URLs.
+async function safeProjectSlugMap(): Promise<Record<string, string>> {
+  try {
+    return await getProjectSlugMap();
+  } catch {
+    return {};
+  }
 }
 
 // Lightweight name lookup used for notification copy ("…tagged you in {name}").
@@ -1635,15 +1654,37 @@ export async function createProject(input: {
     if (suffix > 99) throw new PlaneApiError(502, 'projects create — identifier collision');
   }
 
-  // 2. Insert the project row.
+  // 2. Insert the project row, with a readable URL slug when the column exists.
   const normalizedTeam = input.team?.trim() || null;
-  const { data: inserted, error } = await sb.from('projects').insert({
+  const baseRow = {
     identifier:  ident,
     name:        input.name.trim(),
     description: input.description ?? null,
     team:        normalizedTeam,
-  }).select('id, name, identifier, description, network, team, auto_archive_done_days').single();
-  if (error || !inserted) throw new PlaneApiError(502, 'projects create');
+  };
+  const takenSlugs = await getTakenProjectSlugs(sb);
+  let slug: string | null = takenSlugs
+    ? allocateProjectSlug(slugifyProjectName(baseRow.name), takenSlugs)
+    : null;
+  let inserted: Row | null = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const payload = slug ? { ...baseRow, slug } : baseRow;
+    const res = await sb.from('projects').insert(payload)
+      .select('id, name, identifier, description, network, team, auto_archive_done_days').single();
+    if (!res.error && res.data) { inserted = res.data as Row; break; }
+    // Lost a race for the same slug (unique index) → take the next free one.
+    const msg = res.error?.message ?? '';
+    if (slug && takenSlugs && res.error?.code === '23505' && msg.includes('slug')) {
+      takenSlugs.add(slug);
+      slug = allocateProjectSlug(slugifyProjectName(baseRow.name), takenSlugs);
+      continue;
+    }
+    throw new PlaneApiError(502, 'projects create');
+  }
+  if (!inserted) throw new PlaneApiError(502, 'projects create — slug collision');
+  if (slug) {
+    try { revalidateTag(PROJECT_SLUGS_TAG, { expire: 0 }); } catch { /* outside a request scope */ }
+  }
 
   const pid = Number(inserted.id);
 
@@ -1658,7 +1699,23 @@ export async function createProject(input: {
     .upsert({ project_id: pid, user_id: input.createdBy, role: 'lead' },
             { onConflict: 'project_id,user_id' });
 
-  return mapProject(inserted as Row);
+  return { ...mapProject(inserted), slug };
+}
+
+/** Existing slugs, or null when projects.slug has not been added yet (pre-migration). */
+async function getTakenProjectSlugs(
+  sb: ReturnType<typeof createAdminClient>,
+): Promise<Set<string> | null> {
+  const { data, error } = await sb.from('projects').select('slug');
+  if (error) {
+    if (isMissingSlugColumn(error.message)) return null;
+    throw new PlaneApiError(500, 'projects slugs');
+  }
+  return new Set(
+    ((data ?? []) as Array<{ slug: string | null }>)
+      .map(r => (typeof r.slug === 'string' ? r.slug : ''))
+      .filter(Boolean),
+  );
 }
 
 export async function updateProject(
@@ -1702,6 +1759,7 @@ export async function restoreProject(projectId: string): Promise<void> {
 
 export interface ProjectActivityEntry {
   projectId: string;
+  projectSlug?: string | null;
   projectName: string;
   identifier: string;
   action: 'created' | 'archived';
@@ -1727,10 +1785,12 @@ export async function getProjectActivity(
   const { data, error } = await q;
   if (error) throw new PlaneApiError(500, 'project-activity');
 
+  const slugs = await safeProjectSlugMap();
   const entries: ProjectActivityEntry[] = [];
   for (const r of (data ?? []) as Row[]) {
     const base = {
       projectId: String(r.id),
+      projectSlug: slugs[String(r.id)] ?? null,
       projectName: String(r.name),
       identifier: String(r.identifier ?? ''),
     };

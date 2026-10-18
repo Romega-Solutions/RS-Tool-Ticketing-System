@@ -8,12 +8,14 @@ import { MoreVertical, Archive, ArchiveRestore } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { cn } from '@/lib/utils';
+import { projectPath } from '@/lib/project-slug';
 
 export interface ProjectCardData {
   id: string;
   identifier: string;
   name: string;
   description: string;
+  slug?: string | null;
 }
 
 export interface ProjectCardProps {
@@ -118,7 +120,7 @@ export function ProjectCard({ project, stats, archived = false, canArchive = fal
       {/* Stretched-link overlay: keeps the whole card clickable without nesting a
           button inside an anchor (invalid HTML). The kebab sits above it. */}
       <Link
-        href={`/projects/${id}`}
+        href={projectPath({ id, slug: project.slug })}
         aria-label={`Open project ${name}`}
         className="absolute inset-0 z-[1] rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-400) focus-visible:ring-offset-2"
       />
