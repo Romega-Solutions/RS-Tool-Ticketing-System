@@ -47,6 +47,8 @@ interface Props {
   wiseAmounts?: Record<string, number | null>;
   /** Live USD→PHP snapshot applied to the timesheet template. */
   fx?: { rate: number; label: string };
+  /** Offer the Wise payout template. Admin-only: it is a pay file. */
+  allowPayout?: boolean;
 }
 
 const FORMAT_CARDS: { value: ExportFormat; label: string; icon: typeof FileText }[] = [
@@ -83,7 +85,7 @@ function reformatDurationCell(value: string, target: DurationFormat): string {
   return `${hh}:${mm}:00`;
 }
 
-export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLabel, timesheet, wisePaymentReference, wiseAmounts, fx }: Props) {
+export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLabel, timesheet, wisePaymentReference, wiseAmounts, fx, allowPayout = true }: Props) {
   const [open, setOpen] = useState(false);
   const [exporting, setExporting]                 = useState(false);
   const [format, setFormat]                       = useState<ExportFormat>('csv');
@@ -206,7 +208,7 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
   }, [effectiveRows, mode, includeNotes, includeWeekendHours, includeTotals, durationFormat, selectedMembers, durationKeys]);
 
   // Templates only apply to CSV; Markdown/JSON always use the standard shape.
-  const activeTemplate: CsvTemplate = format === 'csv' ? csvTemplate : 'standard';
+  const activeTemplate: CsvTemplate = format !== 'csv' || (csvTemplate === 'wise' && !allowPayout) ? 'standard' : csvTemplate;
   const canTimesheet = !!effectiveTimesheet;
 
   const selectedTimesheetRows = useMemo(
@@ -365,7 +367,7 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
                       {rangeMode === 'custom' ? 'Timesheet' : 'Weekly Timesheet'} — Romega payroll layout
                     </option>
                   )}
-                  <option value="wise">Wise payout — Selected-recipients template</option>
+                  {allowPayout && <option value="wise">Wise payout — Selected-recipients template</option>}
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-(--rs-neutral-grey-400)" />
               </div>
