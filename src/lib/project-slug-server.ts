@@ -8,15 +8,20 @@ import { projectPath, projectRouteLookup, type ProjectQuery } from '@/lib/projec
  * id → slug for every project (active and archived). Small table, cached for
  * five minutes and busted on project create.
  *
- * Safe before the slug migration: if projects.slug does not exist yet, this
- * returns an empty map, so every link falls back to the numeric URL and no
- * redirect happens.
+ * Safe before the slug migration: if projects.slug does not exist yet,
+ * getProjectSlugMap() returns an empty map, so every link falls back to the
+ * numeric URL and no redirect happens. That pre-migration result is never
+ * cached, so slugs show up as soon as the migration is applied instead of
+ * waiting for a stale cache entry to expire.
  */
+class SlugColumnMissing extends Error {}
+
 async function loadProjectSlugMap(): Promise<Record<string, string>> {
   const sb = createAdminClient();
   const { data, error } = await sb.from('projects').select('id, slug');
   if (error) {
-    if (isMissingSlugColumn(error.message)) return {};
+    // Thrown (not returned) so unstable_cache does not store the empty result.
+    if (isMissingSlugColumn(error.message)) throw new SlugColumnMissing(error.message);
     throw new Error(`project slugs: ${error.message}`);
   }
   const map: Record<string, string> = {};
@@ -31,12 +36,21 @@ async function loadProjectSlugMap(): Promise<Record<string, string>> {
 // does not touch the Next.js cache at load time.
 let cachedLoader: (() => Promise<Record<string, string>>) | null = null;
 
-export function getProjectSlugMap(): Promise<Record<string, string>> {
-  cachedLoader ??= unstable_cache(loadProjectSlugMap, ['project-slug-map'], {
+export async function getProjectSlugMap(): Promise<Record<string, string>> {
+  // Key bumped from 'project-slug-map' so any empty map cached by the earlier
+  // version of this code is ignored.
+  cachedLoader ??= unstable_cache(loadProjectSlugMap, ['project-slug-map-v2'], {
     revalidate: 300,
     tags: [PROJECT_SLUGS_TAG],
   });
-  return cachedLoader();
+  try {
+    return await cachedLoader();
+  } catch (err) {
+    if (err instanceof SlugColumnMissing || (err instanceof Error && isMissingSlugColumn(err.message))) {
+      return {};
+    }
+    throw err;
+  }
 }
 
 /** Resolve a `/projects/[id]` route param (numeric id or slug) to the project id + slug. */
