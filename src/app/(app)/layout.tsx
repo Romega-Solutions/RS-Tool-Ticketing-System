@@ -14,6 +14,8 @@ import { NavProgress } from "@/components/nav-progress.client";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import ViewTab from "@/components/view-tab";
+import { PreviewRoleSwitcher } from "@/components/preview-role-switcher.client";
+import { isPreviewRoleSwitcherEnabled, previewRoleForEmail } from "@/lib/preview-role-switcher";
 
 const MEDITATION_NOTES = [
   "Pause for one full breath before your next task. A calmer start usually creates a clearer outcome.",
@@ -134,6 +136,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         </main>
         <FloatingGuide isAdmin={canAccessAdmin(session.role)} />
       </div>
+      {/* Preview deployments only: every guard is re-checked server-side here
+          and again by /api/preview/switch-role. Hidden while an admin is
+          using the regular view-as, which stays unchanged. */}
+      {!isView && isPreviewRoleSwitcherEnabled() && (
+        <PreviewRoleSwitcher variant="app" currentRole={previewRoleForEmail(session.email)} />
+      )}
     </div>
   );
 }
