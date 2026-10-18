@@ -1,4 +1,6 @@
 import { Suspense, type ReactNode } from 'react';
+import { projectPath } from '@/lib/project-slug';
+import { getProjectSlugMap } from '@/lib/project-slug-server';
 import { getSession } from '@/lib/session';
 import {
   describeDashboardActivity,
@@ -341,6 +343,7 @@ type ItemMeta = {
   _projectId: string;
   _projectName: string;
   _projectIdentifier: string;
+  _projectSlug?: string | null;
 };
 
 function PriorityBadge({ priority }: { priority: string }) {
@@ -392,6 +395,7 @@ async function TicketsSection({ viewer, userId, userEmail }: { viewer: ProjectVi
             _projectId: p.id,
             _projectName: p.name,
             _projectIdentifier: p.identifier,
+            _projectSlug: p.slug ?? null,
           }));
         }),
       ),
@@ -408,6 +412,10 @@ async function TicketsSection({ viewer, userId, userEmail }: { viewer: ProjectVi
   } catch (err) {
     loadError = err instanceof Error ? err.message : 'Failed to load workspace data';
   }
+
+  // id → slug for links that only carry a project id (activity rows). Empty
+  // before the slug migration, which keeps numeric URLs.
+  const projectSlugs: Record<string, string> = await getProjectSlugMap().catch(() => ({}));
 
   const projectStats = projects.map(p => {
     const items = allItems.filter(i => i._projectId === p.id);
@@ -543,7 +551,7 @@ async function TicketsSection({ viewer, userId, userEmail }: { viewer: ProjectVi
                 ) : (
                   <div className="space-y-2.5">
                     {blockers.map(b => (
-                      <Link key={b.id} href={`/projects/${b._projectId}`} className="block rounded-lg border border-red-100 bg-red-50 p-3 transition-colors hover:border-red-200">
+                      <Link key={b.id} href={projectPath({ id: b._projectId, slug: b._projectSlug })} className="block rounded-lg border border-red-100 bg-red-50 p-3 transition-colors hover:border-red-200">
                         <div className="font-medium text-red-800 text-sm">{b.name}</div>
                         <div className="text-xs text-red-500 mt-0.5">
                           {b._projectIdentifier} · {b._projectName}
@@ -577,7 +585,7 @@ async function TicketsSection({ viewer, userId, userEmail }: { viewer: ProjectVi
                     {myTasks.map(t => (
                       <Link
                         key={t.id}
-                        href={`/projects/${t._projectId}`}
+                        href={projectPath({ id: t._projectId, slug: t._projectSlug })}
                         className="flex items-start justify-between rounded-md border border-transparent p-2.5 transition-colors hover:border-(--rs-neutral-grey-100) hover:bg-(--rs-neutral-grey-50)"
                       >
                         <div className="flex min-w-0 items-start gap-2.5">
@@ -623,7 +631,7 @@ async function TicketsSection({ viewer, userId, userEmail }: { viewer: ProjectVi
                     {deadlines.map(t => {
                       const d = new Date(t.target_date!);
                       return (
-                        <Link key={t.id} href={`/projects/${t._projectId}`} className="flex items-start gap-3 rounded-md p-1.5 transition-colors hover:bg-(--rs-neutral-grey-50)">
+                        <Link key={t.id} href={projectPath({ id: t._projectId, slug: t._projectSlug })} className="flex items-start gap-3 rounded-md p-1.5 transition-colors hover:bg-(--rs-neutral-grey-50)">
                           <div className="w-11 shrink-0 overflow-hidden rounded-md border border-(--rs-accent-200) bg-(--rs-accent-100) text-center text-(--rs-accent-800)">
                             <div className="bg-(--rs-accent-200) py-0.5 text-[9px] font-bold uppercase">
                               {d.toLocaleDateString('en-US', { month: 'short' })}
@@ -663,7 +671,7 @@ async function TicketsSection({ viewer, userId, userEmail }: { viewer: ProjectVi
                     {recentActivity.map(entry => (
                       <Link
                         key={entry.id}
-                        href={`/projects/${entry.project_id}`}
+                        href={projectPath({ id: entry.project_id, slug: projectSlugs[String(entry.project_id)] })}
                         className="flex items-start gap-3 rounded-md py-3 first:pt-0 last:pb-0 transition-colors hover:bg-(--rs-neutral-grey-50) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300)"
                       >
                         <span className="mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-(--rs-primary-50) text-(--rs-primary-600)">
@@ -706,7 +714,7 @@ async function TicketsSection({ viewer, userId, userEmail }: { viewer: ProjectVi
             <p className="text-(--rs-neutral-grey-500) col-span-full text-sm italic">No projects found in workspace.</p>
           )}
           {projectStats.map(({ project, total, open, done, blocked }) => (
-            <Link key={project.id} href={`/projects/${project.id}`} className="block h-full min-w-0">
+            <Link key={project.id} href={projectPath(project)} className="block h-full min-w-0">
               <Card className="h-full border-t-4 border-t-(--rs-primary-500) transition-colors hover:border-(--rs-primary-300)">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-xs font-bold uppercase text-(--rs-neutral-grey-400)">

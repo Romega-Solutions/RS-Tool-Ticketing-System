@@ -198,7 +198,7 @@ export default async function ProjectsPage({
                 return (
                   <ProjectCard
                     key={p.id}
-                    project={{ id: p.id, identifier: p.identifier, name: p.name, description: p.description }}
+                    project={{ id: p.id, identifier: p.identifier, name: p.name, description: p.description, slug: p.slug }}
                     stats={m?.stat ?? { total: 0, open: 0, done: 0 }}
                     archived={tab === 'archived'}
                     canArchive={m?.canArchive ?? false}

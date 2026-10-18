@@ -1,3 +1,4 @@
+import { projectPathById } from '@/lib/project-slug-server';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getWorkItemDetail, getComments, getComment, createComment, logActivity, getProjectMembers, getProjectName, getThreadParticipantIds } from '@/lib/tickets';
@@ -81,8 +82,8 @@ export const POST = route(async (req: Request, { params }: { params: Promise<{ i
           snippet:      plain.slice(0, 120),
           // Deep-link straight to the task and the exact comment they were tagged
           // in (the board reads ?task / ?comment to open the sheet and scroll).
-          // Link shape is consumed by the email layer — do NOT change it.
-          link:         `/projects/${detail.project_id}?task=${id}&comment=${created.id}`,
+          // The email layer reads ?task= from this link (parseTaskIdFromLink).
+          link:         await projectPathById(detail.project_id, '', { task: id, comment: created.id }),
         });
       }
     }
@@ -99,7 +100,7 @@ export const POST = route(async (req: Request, { params }: { params: Promise<{ i
           actorName:    session.name,
           projectName:  projectName ?? await getProjectName(detail.project_id),
           snippet:      plain.slice(0, 120),
-          link:         `/projects/${detail.project_id}?task=${id}&comment=${created.id}`,
+          link:         await projectPathById(detail.project_id, '', { task: id, comment: created.id }),
         });
       }
     }
