@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Loader2, CheckSquare, FileText, Clock, CalendarCheck, BellRing, ShieldCheck,
-  Activity as ActivityIcon, Search, Users as UsersIcon,
+  Activity as ActivityIcon, Search, Users as UsersIcon, ChevronDown,
 } from 'lucide-react';
 import { roleLabel, type AppRole } from '@/lib/rbac';
+import { formatRelativeTime, formatManilaDateTime, type ActivityChange } from '@/lib/activity';
 import type { UserRow } from '@/components/user-management-table';
 
 type ActivityType = 'ticket' | 'report' | 'clock' | 'attendance' | 'ping' | 'admin';
@@ -19,6 +20,9 @@ interface ActivityItem {
   type: ActivityType;
   description: string;
   at: string;
+  targetUserId?: number | null;
+  targetUserName?: string | null;
+  changes?: ActivityChange[];
 }
 
 const TYPE_META: Record<ActivityType, { icon: typeof Clock; tint: string }> = {
@@ -30,18 +34,91 @@ const TYPE_META: Record<ActivityType, { icon: typeof Clock; tint: string }> = {
   admin:      { icon: ShieldCheck,   tint: 'bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-700)' },
 };
 
-function relativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (isNaN(then)) return '';
-  const diff = Date.now() - then;
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `${d}d ago`;
-  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+// "Duane Vargas changed a user's role (Admin → Intern)": the description
+// reads as a sentence after the actor's name.
+function afterName(description: string): string {
+  return description.charAt(0).toLowerCase() + description.slice(1);
+}
+
+function ChangeValue({ value }: { value: string | null }) {
+  return value == null
+    ? <span className="text-(--rs-neutral-grey-400)">—</span>
+    : <span className="break-words">{value}</span>;
+}
+
+function ActivityRow({ item, selectedUserId }: { item: ActivityItem; selectedUserId: number | null }) {
+  const [open, setOpen] = useState(false);
+  const meta = TYPE_META[item.type];
+  const Icon = meta.icon;
+  const detailsId = `activity-details-${item.id}`;
+  // In one person's view, hide their own name on their own actions but name
+  // whoever acted on them.
+  const showActor = selectedUserId == null || item.userId !== selectedUserId;
+  const changes = item.changes ?? [];
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        aria-controls={detailsId}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-(--rs-neutral-grey-50) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-(--rs-primary-300)"
+      >
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${meta.tint}`}>
+          <Icon className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-(--rs-neutral-grey-800)">
+            {showActor
+              ? <><span className="font-semibold text-(--rs-neutral-grey-900)">{item.userName}</span> {afterName(item.description)}</>
+              : item.description}
+          </p>
+          {selectedUserId == null && (
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-(--rs-neutral-grey-400)">
+              <span className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 font-medium text-(--rs-neutral-grey-600)">{roleLabel(item.role)}</span>
+              {item.team && <span className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 font-medium text-(--rs-neutral-grey-600)">{item.team}</span>}
+            </div>
+          )}
+        </div>
+        <span className="shrink-0 text-xs text-(--rs-neutral-grey-400) tabular-nums" title={formatManilaDateTime(item.at)}>
+          {formatRelativeTime(item.at)}
+        </span>
+        <ChevronDown className={`h-4 w-4 shrink-0 text-(--rs-neutral-grey-400) transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden />
+      </button>
+      {open && (
+        <div id={detailsId} className="border-t border-(--rs-neutral-grey-100) bg-(--rs-neutral-grey-50) px-4 py-3 pl-16 text-xs text-(--rs-neutral-grey-700)">
+          <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-1">
+            <dt className="text-(--rs-neutral-grey-500)">Actor</dt>
+            <dd>{item.userName}</dd>
+            {item.targetUserId != null && (
+              <>
+                <dt className="text-(--rs-neutral-grey-500)">Target user</dt>
+                <dd>{item.targetUserName ?? `User #${item.targetUserId}`}</dd>
+              </>
+            )}
+            <dt className="text-(--rs-neutral-grey-500)">When</dt>
+            <dd className="tabular-nums">{formatManilaDateTime(item.at)}</dd>
+          </dl>
+          {changes.length > 0 && (
+            <div className="mt-3">
+              <p className="mb-1 font-semibold text-(--rs-neutral-grey-500)">What changed</p>
+              <ul className="space-y-1">
+                {changes.map(c => (
+                  <li key={c.field} className="grid grid-cols-[7rem_1fr] gap-x-3">
+                    <span className="text-(--rs-neutral-grey-500)">{c.label}</span>
+                    {c.hidden
+                      ? <span className="italic text-(--rs-neutral-grey-500)">{c.hidden === 'private' ? 'changed (private)' : 'changed'}</span>
+                      : <span><ChangeValue value={c.from} /> <span aria-hidden>→</span><span className="sr-only">to</span> <ChangeValue value={c.to} /></span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </li>
+  );
 }
 
 export function UserActivityPanel({ users }: { users: UserRow[] }) {
@@ -207,33 +284,7 @@ export function UserActivityPanel({ users }: { users: UserRow[] }) {
           </div>
         ) : (
           <ul className="rounded-xl border border-(--rs-neutral-grey-200) bg-white divide-y divide-(--rs-neutral-grey-100)">
-            {filtered.map(a => {
-              const meta = TYPE_META[a.type];
-              const Icon = meta.icon;
-              return (
-                <li key={a.id} className="flex items-center gap-3 px-4 py-3">
-                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${meta.tint}`}>
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-(--rs-neutral-grey-800)">
-                      {selectedUser
-                        ? a.description
-                        : <><span className="font-semibold text-(--rs-neutral-grey-900)">{a.userName}</span> · {a.description}</>}
-                    </p>
-                    {!selectedUser && (
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-(--rs-neutral-grey-400)">
-                        <span className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 font-medium text-(--rs-neutral-grey-600)">{roleLabel(a.role)}</span>
-                        {a.team && <span className="rounded bg-(--rs-neutral-grey-100) px-1.5 py-0.5 font-medium text-(--rs-neutral-grey-600)">{a.team}</span>}
-                      </div>
-                    )}
-                  </div>
-                  <span className="shrink-0 text-xs text-(--rs-neutral-grey-400) tabular-nums" title={new Date(a.at).toLocaleString()}>
-                    {relativeTime(a.at)}
-                  </span>
-                </li>
-              );
-            })}
+            {filtered.map(a => <ActivityRow key={a.id} item={a} selectedUserId={selectedUserId} />)}
           </ul>
         )}
       </section>
