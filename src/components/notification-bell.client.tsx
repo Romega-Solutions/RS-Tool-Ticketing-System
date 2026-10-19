@@ -35,7 +35,7 @@ function TypeIcon({ type }: { type: string }) {
   if (type === 'project_added') return <FolderPlus className={cls} />;
   if (type === 'task_due')     return <CalendarClock className={cls} />;
   if (type === 'thread_reply') return <MessageSquareReply className={cls} />;
-  if (type === 'time_edit_requested' || type === 'time_edit_decided') return <Timer className={cls} />;
+  if (type.startsWith('time_edit_')) return <Timer className={cls} />;
   return <Bell className={cls} />;
 }
 

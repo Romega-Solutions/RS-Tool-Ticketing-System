@@ -1,26 +1,27 @@
 import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { route, requireReports } from '@/lib/api';
+import { route, requireSession } from '@/lib/api';
 import { computeOvertime } from '@/lib/utils';
 import { weeklySecondsForUser, baseWeeklySecondsForUser } from '@/lib/overtime-server';
-import { notifyTimeEditDecided } from '@/lib/notifications';
+import { notifyTimeEditDecided, notifyTimeEditForwarded, notifyTimeEditRequested } from '@/lib/notifications';
 import { phtDateOf } from '@/lib/pht';
+import { checkDecisionRights, decisionUpdate, validateDecisionNote } from '@/lib/time-approvals';
+import { activeAdminIds, fmtDateLabel, loadDirectory } from '@/lib/time-approvals-server';
 
 export const runtime = 'nodejs';
 
-function fmtDateLabel(date: string): string {
-  const d = new Date(date + 'T00:00:00');
-  if (isNaN(d.getTime())) return date;
-  return d.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' });
-}
-
-// POST /api/attendance/edit-requests — a lead (on the IC's team) or admin
-// decides a pending time-edit request.
-//   { id, action: 'approve' | 'deny', comment? }
-// Approve applies the requested times to the timesheet (recomputing duration +
-// weekly overtime, stamping editedBy/editedAt). Deny requires a comment.
+// POST /api/attendance/edit-requests — decide one step of a pending
+// time-correction request.
+//   { id, action: 'approve' | 'deny', comment }
+// Steps: the requester's supervisor (main lead) first, then an admin. Admins
+// (founder included) may decide any open request, which counts as the admin
+// step. A supervisor rejection is final; a supervisor approval hands the
+// request to the admins. Only an admin approval applies the requested times to
+// the timesheet (recomputing duration + weekly overtime, stamping
+// editedBy/editedAt). Every decision needs a note, and nobody decides their
+// own request.
 export const POST = route(async (req: Request) => {
-  const session = await requireReports();
+  const session = await requireSession();
 
   let body: { id?: number; action?: string; comment?: string } = {};
   try { body = await req.json(); } catch { body = {}; }
@@ -30,10 +31,9 @@ export const POST = route(async (req: Request) => {
   if (!Number.isInteger(id) || id <= 0 || (action !== 'approve' && action !== 'deny')) {
     return NextResponse.json({ error: 'id and action ("approve" | "deny") are required' }, { status: 400 });
   }
-  const comment = String(body.comment ?? '').trim();
-  if (action === 'deny' && !comment) {
-    return NextResponse.json({ error: 'A rejection comment is required when declining.' }, { status: 400 });
-  }
+  const noteCheck = validateDecisionNote(action, body.comment);
+  if (!noteCheck.ok) return NextResponse.json({ error: noteCheck.error }, { status: 400 });
+  const comment = noteCheck.note;
 
   const admin = createAdminClient();
 
@@ -43,31 +43,66 @@ export const POST = route(async (req: Request) => {
     .eq('id', id)
     .maybeSingle();
   if (!reqRow) return NextResponse.json({ error: 'Request not found' }, { status: 404 });
-  if (reqRow.status !== 'pending') {
-    return NextResponse.json({ error: 'This request has already been decided.' }, { status: 409 });
-  }
 
-  // RBAC: a lead may only act on requests from their own team; admins, anyone.
-  const { data: requester } = await admin
-    .from('users').select('id, name, team').eq('id', reqRow.user_id).maybeSingle();
-  if (!requester) return NextResponse.json({ error: 'Requester not found' }, { status: 404 });
-  if (session.role !== 'admin' && (requester.team ?? '') !== (session.team ?? '')) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
+  const rights = checkDecisionRights(
+    {
+      userId:       reqRow.user_id,
+      status:       reqRow.status,
+      stage:        reqRow.stage ?? null,
+      supervisorId: reqRow.supervisor_id ?? null,
+    },
+    { id: session.id, role: session.role },
+  );
+  if (!rights.ok) return NextResponse.json({ error: rights.error }, { status: rights.status });
 
   const nowIso = new Date().toISOString();
   const dateLabel = fmtDateLabel(reqRow.date);
+  const { update, applyTimesheet } = decisionUpdate(rights.step, action, session.id, comment, nowIso);
 
-  if (action === 'deny') {
-    const { error } = await admin.from('timesheet_edit_requests').update({
-      status: 'denied', decided_by: session.id, decided_at: nowIso, decision_comment: comment,
-    }).eq('id', id);
-    if (error) return NextResponse.json({ error: `Could not save decision: ${error.message}` }, { status: 500 });
+  // Saves the decision only if the request is still where we found it, so two
+  // people deciding at once can't both win.
+  const saveDecision = async () => {
+    let q = admin.from('timesheet_edit_requests').update(update).eq('id', id).eq('status', 'pending');
+    q = reqRow.stage == null ? q.is('stage', null) : q.eq('stage', reqRow.stage);
+    const { data, error } = await q.select('id');
+    if (error) return { error: `Could not save decision: ${error.message}`, status: 500 };
+    if (!data || data.length === 0) return { error: 'This request was just decided by someone else. Refresh to see it.', status: 409 };
+    return null;
+  };
+
+  if (!applyTimesheet) {
+    const failed = await saveDecision();
+    if (failed) return NextResponse.json({ error: failed.error }, { status: failed.status });
+
+    if (rights.step === 'supervisor' && action === 'approve') {
+      // Hand over to the admins and let the requester know where it stands.
+      const directory = await loadDirectory(admin);
+      const requesterName = directory.get(reqRow.user_id)?.name ?? 'A teammate';
+      await Promise.all([
+        notifyTimeEditRequested({
+          recipientIds:   activeAdminIds(directory, [reqRow.user_id, session.id]),
+          actorId:        reqRow.user_id,
+          actorName:      requesterName,
+          dateLabel,
+          step:           'admin',
+          supervisorName: session.name,
+        }),
+        notifyTimeEditForwarded({
+          recipientId:    reqRow.user_id,
+          actorId:        session.id,
+          supervisorName: session.name,
+          dateLabel,
+        }),
+      ]);
+      return NextResponse.json({ ok: true, status: 'pending', stage: 'admin' });
+    }
+
+    // A rejection at either step is final.
     await notifyTimeEditDecided({ recipientId: reqRow.user_id, actorId: session.id, approved: false, dateLabel, comment });
     return NextResponse.json({ ok: true, status: 'denied' });
   }
 
-  // APPROVE — apply the requested times to the linked session.
+  // ADMIN APPROVE — apply the requested times to the linked session.
   if (!reqRow.timesheet_id) {
     return NextResponse.json({ error: 'Request has no linked session to update.' }, { status: 400 });
   }
@@ -95,7 +130,7 @@ export const POST = route(async (req: Request) => {
     }
   }
 
-  const update: Record<string, string | number | null> = {
+  const tsUpdate: Record<string, string | number | null> = {
     clocked_in_at:  inDate.toISOString(),
     clocked_out_at: outDate ? outDate.toISOString() : null,
     date:           phtDateOf(inDate),
@@ -109,22 +144,28 @@ export const POST = route(async (req: Request) => {
       baseWeeklySecondsForUser(admin, ts.user_id),
     ]);
     const { isOvertime, overtimeSeconds } = computeOvertime(weekSecondsBefore, durationSeconds, baseSeconds);
-    update.duration_seconds = durationSeconds;
-    update.is_overtime = isOvertime ? 1 : 0;
-    update.overtime_seconds = isOvertime ? overtimeSeconds : null;
+    tsUpdate.duration_seconds = durationSeconds;
+    tsUpdate.is_overtime = isOvertime ? 1 : 0;
+    tsUpdate.overtime_seconds = isOvertime ? overtimeSeconds : null;
   } else {
-    update.duration_seconds = null;
-    update.is_overtime = 0;
-    update.overtime_seconds = null;
+    tsUpdate.duration_seconds = null;
+    tsUpdate.is_overtime = 0;
+    tsUpdate.overtime_seconds = null;
   }
 
-  const { error: upErr } = await admin.from('timesheets').update(update).eq('id', ts.id);
-  if (upErr) return NextResponse.json({ error: `Could not apply edit: ${upErr.message}` }, { status: 500 });
+  // Claim the request before touching the timesheet so a double click (or two
+  // admins at once) can't apply it twice.
+  const failed = await saveDecision();
+  if (failed) return NextResponse.json({ error: failed.error }, { status: failed.status });
 
-  const { error: reqErr } = await admin.from('timesheet_edit_requests').update({
-    status: 'approved', decided_by: session.id, decided_at: nowIso, decision_comment: comment || null,
-  }).eq('id', id);
-  if (reqErr) return NextResponse.json({ error: `Edit applied but status update failed: ${reqErr.message}` }, { status: 500 });
+  const { error: upErr } = await admin.from('timesheets').update(tsUpdate).eq('id', ts.id);
+  if (upErr) {
+    // Put the request back in the admin queue so it can be retried.
+    await admin.from('timesheet_edit_requests').update({
+      status: 'pending', stage: 'admin', decided_by: null, decided_at: null, decision_comment: null,
+    }).eq('id', id);
+    return NextResponse.json({ error: `Could not apply edit: ${upErr.message}` }, { status: 500 });
+  }
 
   await notifyTimeEditDecided({ recipientId: reqRow.user_id, actorId: session.id, approved: true, dateLabel });
   return NextResponse.json({ ok: true, status: 'approved' });

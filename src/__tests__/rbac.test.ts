@@ -13,6 +13,9 @@ import {
   canAccessDevTools,
   emailSignatureAccess,
   roleDisplayLabel,
+  canSeeTimeApprovals,
+  GATEABLE_TOOL_KEYS,
+  isGateableToolKey,
 } from '@/lib/rbac';
 
 describe('roleDisplayLabel', () => {
@@ -104,15 +107,15 @@ describe('hasToolAccess', () => {
   });
 
   it('treats a missing/invalid set as no access', () => {
-    expect(hasToolAccess('attendance', 'ic', null)).toBe(false);
-    expect(hasToolAccess('attendance', 'ic', undefined)).toBe(false);
+    expect(hasToolAccess('pm', 'ic', null)).toBe(false);
+    expect(hasToolAccess('pm', 'ic', undefined)).toBe(false);
   });
 });
 
 describe('canAccessPath', () => {
   it('blocks /admin/* and /rates for non-admin (role-based, not grantable)', () => {
     expect(canAccessPath('/admin/users', 'ic')).toBe(false);
-    expect(canAccessPath('/admin/users', 'lead', ['attendance'])).toBe(false);
+    expect(canAccessPath('/admin/users', 'lead', ['pm'])).toBe(false);
     expect(canAccessPath('/admin/users', 'admin')).toBe(true);
     expect(canAccessPath('/rates', 'lead')).toBe(false);
     expect(canAccessPath('/rates', 'admin')).toBe(true);
@@ -176,9 +179,9 @@ describe('defaultToolAccess', () => {
     expect(defaultToolAccess('ic', 'Finance')).toEqual([]);
   });
 
-  it('adds PM + Briefing + Attendance for any lead, on top of their department tool', () => {
-    expect(defaultToolAccess('lead', 'Sales').sort()).toEqual(['attendance', 'ceo', 'pm', 'sales']);
-    expect(defaultToolAccess('lead', 'Technical').sort()).toEqual(['attendance', 'ceo', 'pm']);
+  it('adds PM + Briefing for any lead, on top of their department tool', () => {
+    expect(defaultToolAccess('lead', 'Sales').sort()).toEqual(['ceo', 'pm', 'sales']);
+    expect(defaultToolAccess('lead', 'Technical').sort()).toEqual(['ceo', 'pm']);
   });
 
   it('never includes Workspace tools (projects is open to all)', () => {
@@ -189,8 +192,29 @@ describe('defaultToolAccess', () => {
 
   it('gives admins every gateable tool', () => {
     expect(defaultToolAccess('admin', null)).toEqual(
-      expect.arrayContaining(['attendance', 'ceo', 'marketing', 'onboarding', 'pm', 'recruiting', 'research', 'sales']),
+      expect.arrayContaining(['ceo', 'marketing', 'onboarding', 'pm', 'recruiting', 'research', 'sales']),
     );
+  });
+
+  it('no longer has an Attendance checkbox (Time Approvals follows the reporting lines)', () => {
+    expect(GATEABLE_TOOL_KEYS).not.toContain('attendance');
+    expect(isGateableToolKey('attendance')).toBe(false);
+    expect(defaultToolAccess('admin', null)).not.toContain('attendance');
+  });
+});
+
+describe('canSeeTimeApprovals', () => {
+  it('shows Time Approvals to admins (founder included) and to anyone with direct reports', () => {
+    expect(canSeeTimeApprovals('admin', false)).toBe(true);
+    expect(canSeeTimeApprovals(normalizeRole('founder'), false)).toBe(true);
+    expect(canSeeTimeApprovals('lead', true)).toBe(true);
+    expect(canSeeTimeApprovals('ic', true)).toBe(true);
+  });
+
+  it('hides it from anyone without reports, whatever their role or old checkbox', () => {
+    expect(canSeeTimeApprovals('lead', false)).toBe(false);
+    expect(canSeeTimeApprovals('ic', false)).toBe(false);
+    expect(canSeeTimeApprovals('intern', false)).toBe(false);
   });
 });
 

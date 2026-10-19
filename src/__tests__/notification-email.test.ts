@@ -63,6 +63,14 @@ describe('shouldEmailNotification — prefs gating', () => {
   it('never emails an unmapped type even with everything ON (in-app bell only)', () => {
     expect(shouldEmailNotification('time_edit_requested', allOn)).toBe(false);
   });
+
+  it('keeps the two-step time approval notices in-app only (email is a separate change)', () => {
+    expect(shouldEmailNotification('time_edit_received', allOn)).toBe(false);
+    expect(shouldEmailNotification('time_edit_update', allOn)).toBe(false);
+    expect(shouldEmailNotification('time_edit_reminder', allOn)).toBe(false);
+    // The requester's final-decision email is unchanged.
+    expect(shouldEmailNotification('time_edit_decided', allOn)).toBe(true);
+  });
 });
 
 describe('parseTaskIdFromLink', () => {
