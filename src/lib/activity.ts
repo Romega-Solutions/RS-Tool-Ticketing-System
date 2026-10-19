@@ -17,15 +17,18 @@ export function auditUserFilter(userId: number): string {
 }
 
 // One field-level change in an activity entry's details dropdown. Values are
-// display strings prepared on the server. When `hidden` is set, `from`/`to`
-// are always null: 'private' = a private field (rate, birth date, email) whose
-// values never leave the server; 'value' = a change we only name (a photo).
+// plain display strings prepared on the server. When `hidden` is set,
+// `from`/`to` are always null: 'private' = a private field (rate, birth date,
+// email) whose values never leave the server; 'value' = a change we only name
+// (a photo, a description). `value` is a single detail with no before/after
+// (a link URL, a comment excerpt, who was assigned).
 export interface ActivityChange {
   field: string;
   label: string;
   from: string | null;
   to: string | null;
   hidden?: 'private' | 'value';
+  value?: string | null;
 }
 
 const MINUTE_MS = 60_000;

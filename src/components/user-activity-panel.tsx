@@ -23,6 +23,8 @@ interface ActivityItem {
   targetUserId?: number | null;
   targetUserName?: string | null;
   changes?: ActivityChange[];
+  workItem?: string | null;
+  project?: string | null;
 }
 
 const TYPE_META: Record<ActivityType, { icon: typeof Clock; tint: string }> = {
@@ -43,7 +45,7 @@ function afterName(description: string): string {
 function ChangeValue({ value }: { value: string | null }) {
   return value == null
     ? <span className="text-(--rs-neutral-grey-400)">—</span>
-    : <span className="break-words">{value}</span>;
+    : <span className="break-words [overflow-wrap:anywhere]">{value}</span>;
 }
 
 function ActivityRow({ item, selectedUserId }: { item: ActivityItem; selectedUserId: number | null }) {
@@ -97,6 +99,18 @@ function ActivityRow({ item, selectedUserId }: { item: ActivityItem; selectedUse
                 <dd>{item.targetUserName ?? `User #${item.targetUserId}`}</dd>
               </>
             )}
+            {item.workItem && (
+              <>
+                <dt className="text-(--rs-neutral-grey-500)">Work item</dt>
+                <dd className="break-words">{item.workItem}</dd>
+              </>
+            )}
+            {item.project && (
+              <>
+                <dt className="text-(--rs-neutral-grey-500)">Project</dt>
+                <dd className="break-words">{item.project}</dd>
+              </>
+            )}
             <dt className="text-(--rs-neutral-grey-500)">When</dt>
             <dd className="tabular-nums">{formatManilaDateTime(item.at)}</dd>
           </dl>
@@ -109,6 +123,8 @@ function ActivityRow({ item, selectedUserId }: { item: ActivityItem; selectedUse
                     <span className="text-(--rs-neutral-grey-500)">{c.label}</span>
                     {c.hidden
                       ? <span className="italic text-(--rs-neutral-grey-500)">{c.hidden === 'private' ? 'changed (private)' : 'changed'}</span>
+                      : c.value !== undefined
+                      ? <ChangeValue value={c.value} />
                       : <span><ChangeValue value={c.from} /> <span aria-hidden>→</span><span className="sr-only">to</span> <ChangeValue value={c.to} /></span>}
                   </li>
                 ))}
