@@ -5,6 +5,8 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { enforceRateLimit, keyByUser } from '@/lib/rate-limit';
 import { uploadUserPhoto, userPhotoUrl } from '@/lib/storage';
 import { photoError, isImageBytes } from '@/lib/user-photo';
+import { findReportingLoop } from '@/lib/reporting-tree';
+import { loadReportingGraph } from '@/lib/reporting-tree-server';
 
 export const runtime = 'nodejs';
 
@@ -31,6 +33,14 @@ export const PUT = route(async (req: Request, { params }: { params: Promise<{ id
   if (reportsToUserId === userId || also.includes(userId)) throw badRequest('A user cannot report to themselves');
 
   const admin = createAdminClient();
+  // Reject a lead who already sits below this user (directly or further
+  // down, through main or "also reports to" links): saving it would make the
+  // chain loop back on itself.
+  const loopAt = findReportingLoop(await loadReportingGraph(admin), userId, reportsToUserId, also);
+  if (loopAt != null) {
+    throw badRequest('That would create a reporting loop: the chosen lead already reports up to this user');
+  }
+
   const { error } = await admin.from('user_reporting').upsert(
     { user_id: userId, reports_to_user_id: reportsToUserId, ...(isHidden !== undefined && { is_hidden: isHidden }), updated_at: new Date().toISOString() },
     { onConflict: 'user_id' },

@@ -127,7 +127,10 @@ function NavLinks({ collapsed = false, role, toolAccess }: { collapsed?: boolean
   const mainItems     = navItems.filter(i => i.category === "main");   // Workspace — open to all
   const leadToolItems = navItems.filter(i => {
     if (i.category !== "leadTools") return false;
-    if (i.href.startsWith('/attendance')) return hasToolAccess('attendance', role, toolAccess);
+    // Attendance is open to everyone; its data is scoped to the viewer's
+    // reporting chain. Time Approvals keeps its existing checkbox gate.
+    if (i.href === '/attendance') return true;
+    if (i.href.startsWith('/attendance/')) return hasToolAccess('attendance', role, toolAccess);
     if (i.href.startsWith('/ceo/')) return hasToolAccess('ceo', role, toolAccess);
     if (i.href.startsWith('/marketing/')) return hasToolAccess('marketing', role, toolAccess);
     if (i.href.startsWith('/onboarders')) return hasToolAccess('onboarding', role, toolAccess);

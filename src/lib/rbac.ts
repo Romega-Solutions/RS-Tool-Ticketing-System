@@ -19,7 +19,10 @@ export const GATEABLE_TOOLS: ReadonlyArray<{
   // Ordered to match the "Team Tools" sidebar section (alphabetical by label);
   // this order also drives the Tool Access matrix columns. Workspace tools
   // (Projects, Time Requests, …) are open to all and are intentionally NOT here.
-  { key: 'attendance', label: 'Attendance',       prefixes: ['/attendance'] },   // /attendance only — /attendance/requests (Time Requests) is open to all
+  // Attendance itself is open to everyone (its data is scoped to the viewer's
+  // reporting chain server-side), so the key guards no path. The checkbox now
+  // only decides whether the Time Approvals sidebar link shows.
+  { key: 'attendance', label: 'Attendance',       prefixes: [] },
   { key: 'ceo',        label: 'Briefing',         prefixes: ['/ceo'] },
   { key: 'marketing',  label: 'Marketing',        prefixes: ['/marketing'] },
   { key: 'onboarding', label: 'Onboarding',       prefixes: ['/onboarders'] },
@@ -168,9 +171,9 @@ export function canAccessPath(pathname: string, role: AppRole, toolAccess: strin
   // /learning and /learning/certificates are open to all signed-in users.
   if (pathname.startsWith('/admin')) return canAccessAdmin(role);
   if (pathname.startsWith('/rates')) return canAccessAdmin(role);
-  // Time Requests is a Workspace tool — open to everyone. Checked before the
-  // '/attendance' gate below, whose prefix this path would otherwise match.
-  if (pathname.startsWith('/attendance/requests')) return true;
+  // Attendance (scoped to the viewer's reporting chain by its API) and Time
+  // Requests are open to everyone.
+  if (pathname === '/attendance' || pathname.startsWith('/attendance/')) return true;
   // The checkbox-gated Team Tools: access is per-user (users.tool_access).
   // Workspace tools (e.g. /projects) aren't listed, so they fall through to open.
   for (const tool of GATEABLE_TOOLS) {
