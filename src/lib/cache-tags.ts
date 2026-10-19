@@ -21,3 +21,6 @@ export function projectLabelsTag(projectId: number | string): string {
 export function projectCyclesTag(projectId: number | string): string {
   return `project-${projectId}-cycles`;
 }
+
+// id → slug map for readable project URLs (busted on project create).
+export const PROJECT_SLUGS_TAG = 'project-slugs';

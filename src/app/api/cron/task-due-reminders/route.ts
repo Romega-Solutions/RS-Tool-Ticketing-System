@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { route, requireBearer } from '@/lib/api';
 import { createNotification } from '@/lib/notifications';
+import { projectPath } from '@/lib/project-slug';
+import { getProjectSlugMap } from '@/lib/project-slug-server';
 
 export const runtime = 'nodejs';
 
@@ -33,6 +35,9 @@ export const GET = route(async (req: Request) => {
     return NextResponse.json({ ranAt: new Date().toISOString(), created: 0, note: error.message });
   }
 
+  // Readable link when the project has a slug; numeric otherwise (pre-migration).
+  const slugs: Record<string, string> = await getProjectSlugMap().catch(() => ({}));
+
   let created = 0;
   for (const it of (items ?? []) as Array<Record<string, unknown>>) {
     if (it.completed_at) continue; // already done
@@ -42,13 +47,17 @@ export const GET = route(async (req: Request) => {
       .filter(Boolean);
     if (!assignees.length) continue;
 
-    const link = `/projects/${Number(it.project_id)}?task=${Number(it.id)}`;
+    const query = { task: Number(it.id) };
+    const numericLink = projectPath({ id: Number(it.project_id) }, '', query);
+    const link = projectPath({ id: Number(it.project_id), slug: slugs[String(it.project_id)] }, '', query);
 
     // Who already received a due reminder for this item today?
     const { data: existing } = await sb.from('notifications')
       .select('user_id')
       .eq('type', 'task_due')
-      .eq('link', link)
+      // Match both link shapes so the day the slug migration lands cannot
+      // double-send a reminder that already went out with the numeric link.
+      .in('link', link === numericLink ? [link] : [link, numericLink])
       .gte('created_at', todayStart);
     const already = new Set((existing ?? []).map(r => Number((r as { user_id: number }).user_id)));
 

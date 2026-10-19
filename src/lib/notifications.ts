@@ -1,5 +1,6 @@
 import { createAdminClient } from '@/lib/supabase/admin';
 import { sendEmail } from '@/lib/n8n';
+import { projectPathById } from '@/lib/project-slug-server';
 import { renderNotificationEmail, type NotificationTaskMeta } from '@/lib/email-templates';
 
 // In-app notification helpers. Backed by the `notifications` table (see
@@ -65,8 +66,9 @@ export function shouldEmailNotification(type: NotificationType, prefs: Notificat
   return key != null && prefs.email && prefs[key];
 }
 
-// Pull the work-item id out of a notification link, e.g.
-// `/projects/3?task=42&comment=7` → 42. Returns null when absent/non-numeric.
+// Pull the work-item id out of a notification link. Works for both the numeric
+// and the readable project URL, e.g. `/projects/3?task=42&comment=7` and
+// `/projects/romega-portal-general?task=42` → 42. Null when absent/non-numeric.
 export function parseTaskIdFromLink(link: string | null | undefined): number | null {
   if (!link) return null;
   const m = /[?&]task=(\d+)/.exec(link);
@@ -334,7 +336,7 @@ export async function notifyProjectAdded(opts: {
     type:    'project_added',
     title:   `You have been added to ${opts.projectName}`,
     body:    `${opts.actorName} added you to this project.`,
-    link:    `/projects/${opts.projectId}`,
+    link:    await projectPathById(opts.projectId),
   });
 }
 
@@ -352,6 +354,6 @@ export async function notifyTaskAssigned(opts: {
     type:    'task_assigned',
     title:   `You were assigned to "${opts.workItem.name}"`,
     body:    'You have been added as an assignee on this task.',
-    link:    `/projects/${opts.workItem.projectId}?task=${opts.workItem.id}`,
+    link:    await projectPathById(opts.workItem.projectId, '', { task: opts.workItem.id }),
   });
 }

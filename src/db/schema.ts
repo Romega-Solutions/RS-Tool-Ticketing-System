@@ -466,6 +466,9 @@ export const projects = pgTable('projects', {
   id:          serial('id').primaryKey(),
   identifier:  text('identifier').notNull().unique(),
   name:        text('name').notNull(),
+  // Readable URL key (/projects/{slug}). Set once at create; not rewritten on rename.
+  // Added by drizzle/0015_projects_slug.sql (nullable) and 0016 (NOT NULL).
+  slug:        text('slug').unique(),
   description: text('description'),
   team:        text('team'),
   network:     integer('network').notNull().default(2),
