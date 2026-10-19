@@ -4,6 +4,9 @@ import { route, requireAdmin, badRequest } from '@/lib/api';
 import { normalizeRole, type AppRole } from '@/lib/rbac';
 import { parseActivityUserId, auditUserFilter, type ActivityChange } from '@/lib/activity';
 import { describeAudit, presentAuditChanges } from '@/lib/audit';
+import {
+  collectActivityRefs, describeWorkItemActivity, type ActivityWorkItem, type WorkItemActivityRow,
+} from '@/lib/activity-describe';
 
 export const runtime = 'nodejs';
 
@@ -28,24 +31,42 @@ interface Activity {
   targetUserId?: number | null;
   targetUserName?: string | null;
   changes?: ActivityChange[];
+  // Work item entries only: plain-text names (never links).
+  workItem?: string | null;
+  project?: string | null;
 }
 
 const PER_SOURCE = 60;
 const TOTAL = 150;
 
-function describeTicket(action: string): string {
-  switch (action) {
-    case 'created':       return 'Created a work item';
-    case 'edited':        return 'Edited a work item';
-    case 'state_changed': return 'Moved a work item to a new state';
-    case 'assigned':      return 'Assigned a work item';
-    case 'unassigned':    return 'Unassigned a work item';
-    case 'commented':     return 'Commented on a work item';
-    case 'archived':      return 'Archived a work item';
-    case 'link_added':    return 'Added a link to a work item';
-    case 'link_removed':  return 'Removed a link from a work item';
-    default:              return `Work item ${action}`;
-  }
+type Nested = Record<string, unknown>;
+
+// PostgREST returns a to-one embed as an object (or a one-element array).
+function firstNested(v: unknown): Nested | null {
+  if (Array.isArray(v)) return (v[0] as Nested | undefined) ?? null;
+  return v && typeof v === 'object' ? (v as Nested) : null;
+}
+
+function toActivityWorkItem(raw: unknown): ActivityWorkItem | null {
+  const w = firstNested(raw);
+  if (!w) return null;
+  const p = firstNested(w.projects);
+  return {
+    id: Number(w.id),
+    sequenceId: w.sequence_id == null ? null : Number(w.sequence_id),
+    name: String(w.name ?? ''),
+    projectName: p?.name == null ? null : String(p.name),
+    projectIdentifier: p?.identifier == null ? null : String(p.identifier),
+  };
+}
+
+// id → name for a small set of ids, in one query; empty set = no query.
+async function namesById(
+  sb: ReturnType<typeof createAdminClient>, table: string, ids: number[],
+): Promise<Map<number, string>> {
+  if (ids.length === 0) return new Map();
+  const { data } = await sb.from(table).select('id, name').in('id', ids);
+  return new Map(((data ?? []) as { id: number; name: string }[]).map(r => [Number(r.id), String(r.name)]));
 }
 
 export const GET = route(async (req: Request) => {
@@ -69,7 +90,7 @@ export const GET = route(async (req: Request) => {
   const activities: Activity[] = [];
   const add = (
     userId: number | null | undefined, id: string, type: ActivityType, description: string, at: string | null,
-    extra?: Pick<Activity, 'targetUserId' | 'targetUserName' | 'changes'>,
+    extra?: Pick<Activity, 'targetUserId' | 'targetUserName' | 'changes' | 'workItem' | 'project'>,
   ) => {
     if (userId == null || !at) return;
     const u = userMap.get(userId);
@@ -78,14 +99,33 @@ export const GET = route(async (req: Request) => {
   };
   const nameOf = (id: number) => userMap.get(id)?.name ?? null;
 
-  // 1. Work item activity
+  // 1. Work item activity, named specifically: the item and its project come
+  // embedded in the same query; state, cycle and parent names are resolved
+  // with one query per kind for the whole page (no per-row lookups).
   let wiaQ = sb.from('work_item_activity')
-    .select('id, actor_id, action, created_at')
+    .select('id, actor_id, action, work_item_id, from_value, to_value, created_at, work_items(id, sequence_id, name, projects(name, identifier))')
     .order('created_at', { ascending: false }).limit(perSource);
   if (userId != null) wiaQ = wiaQ.eq('actor_id', userId);
   const { data: wia } = await wiaQ;
-  for (const a of (wia ?? []) as { id: number; actor_id: number; action: string; created_at: string | null }[]) {
-    add(a.actor_id, `wia-${a.id}`, 'ticket', describeTicket(a.action), a.created_at);
+  type WiaRow = WorkItemActivityRow & { id: number; actor_id: number; created_at: string | null; work_items: unknown };
+  const wiaRows = (wia ?? []) as WiaRow[];
+  const refs = collectActivityRefs(wiaRows);
+  const [stateNames, cycleNames, parentNames] = await Promise.all([
+    namesById(sb, 'project_states', refs.stateIds),
+    namesById(sb, 'cycles', refs.cycleIds),
+    namesById(sb, 'work_items', refs.itemIds),
+  ]);
+  for (const a of wiaRows) {
+    const d = describeWorkItemActivity(a, {
+      item:      toActivityWorkItem(a.work_items),
+      stateName: id => stateNames.get(id) ?? null,
+      userName:  nameOf,
+      cycleName: id => cycleNames.get(id) ?? null,
+      itemName:  id => parentNames.get(id) ?? null,
+    });
+    add(a.actor_id, `wia-${a.id}`, 'ticket', d.description, a.created_at, {
+      workItem: d.workItem, project: d.project, changes: d.changes,
+    });
   }
 
   // 2. Weekly reports submitted

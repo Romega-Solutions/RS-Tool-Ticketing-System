@@ -86,6 +86,43 @@ describe('reporting line + photo routes write activity log entries', () => {
   });
 });
 
+describe('GET /api/admin/activity — work item entries', () => {
+  beforeEach(() => { vi.resetModules(); vi.restoreAllMocks(); });
+
+  it('names the item, project and states with one batched lookup per kind, as plain text', async () => {
+    mockCommon();
+    const item = { id: 191, sequence_id: 12, name: 'Fix login', projects: { name: 'Website', identifier: 'WEB' } };
+    const chains = mockDb({
+      users: { data: [{ id: 1, name: 'Admin', role: 'admin', team: null }, { id: 7, name: 'Jane Cruz', role: 'ic', team: 'Eng' }] },
+      work_item_activity: { data: [
+        { id: 1, actor_id: 1, action: 'state_changed', work_item_id: 191, from_value: '1', to_value: '2', created_at: '2026-10-19T17:05:54Z', work_items: item },
+        { id: 2, actor_id: 1, action: 'assigned', work_item_id: 191, from_value: null, to_value: '7', created_at: '2026-10-19T17:04:00Z', work_items: [item] },
+        { id: 3, actor_id: 1, action: 'state_changed', work_item_id: 191, from_value: '2', to_value: '1', created_at: '2026-10-19T17:03:00Z', work_items: item },
+      ] },
+      project_states: { data: [{ id: 1, name: 'In Progress' }, { id: 2, name: 'Done' }] },
+      weekly_reports: { data: [] },
+      timesheets: { data: [] },
+      attendance: { data: [] },
+      presence_pings: { data: [] },
+      audit_log: { data: [] },
+    });
+    const { GET } = await import('@/app/api/admin/activity/route');
+    const res = await GET(new Request('http://localhost/api/admin/activity'));
+    const body = await res.json() as { activities: Record<string, unknown>[] };
+
+    expect(chains.project_states.in).toHaveBeenCalledTimes(1);
+    expect(chains.project_states.in).toHaveBeenCalledWith('id', [1, 2]);
+    expect(body.activities.find(a => a.id === 'wia-1')).toMatchObject({
+      description: 'Moved "Fix login" to Done in Website',
+      workItem: 'WEB-12 Fix login',
+      project: 'Website',
+      changes: [{ field: 'state', label: 'State', from: 'In Progress', to: 'Done' }],
+    });
+    expect(body.activities.find(a => a.id === 'wia-2')).toMatchObject({ description: 'Assigned Jane Cruz to "Fix login" in Website' });
+    expect(JSON.stringify(body)).not.toContain('href');
+  });
+});
+
 describe('GET /api/admin/activity — audit entries', () => {
   beforeEach(() => { vi.resetModules(); vi.restoreAllMocks(); });
 
@@ -136,5 +173,39 @@ describe('GET /api/admin/activity — audit entries', () => {
     for (const secret of ['7.25', '1999-03-04', '1999-04-03', 'jane@gmail.com', 'jane@romega-solutions.com']) {
       expect(raw).not.toContain(secret);
     }
+  });
+});
+
+describe('work item label routes store the label name in the activity row', () => {
+  beforeEach(() => { vi.resetModules(); vi.restoreAllMocks(); });
+
+  async function setup(labels: { data: unknown }) {
+    mockCommon();
+    const logActivity = vi.fn();
+    vi.doMock('@/lib/tickets', () => ({
+      applyLabel: vi.fn(), removeLabel: vi.fn(), logActivity,
+      getWorkItemDetail: vi.fn().mockResolvedValue({ id: '191', project_id: '3' }),
+    }));
+    vi.doMock('@/lib/permissions', () => ({ canEditWorkItem: vi.fn().mockResolvedValue(true) }));
+    mockDb({ labels });
+    const mod = await import('@/app/api/tickets/work-items/[id]/labels/route');
+    return { ...mod, logActivity };
+  }
+  const ctx = { params: Promise.resolve({ id: '191' }) };
+
+  it('adds: "+<id>:<name>"', async () => {
+    const { POST, logActivity } = await setup({ data: { name: 'Bug' } });
+    const res = await POST(new Request('http://localhost/x', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ labelId: 3 }),
+    }), ctx);
+    expect(res.status).toBe(200);
+    expect(logActivity).toHaveBeenCalledWith(191, 1, 'edited', 'label', '+3:Bug');
+  });
+
+  it('removes: "-<id>:<name>", falling back to the id alone if the name is unknown', async () => {
+    const { DELETE, logActivity } = await setup({ data: null });
+    const res = await DELETE(new Request('http://localhost/x?labelId=3', { method: 'DELETE' }), ctx);
+    expect(res.status).toBe(200);
+    expect(logActivity).toHaveBeenCalledWith(191, 1, 'edited', 'label', '-3');
   });
 });
