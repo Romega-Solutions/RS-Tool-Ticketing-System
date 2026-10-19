@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getPhotoResolver } from '@/lib/orgchart';
-import { route, requireAdmin, requireTool, parseBody, badRequest } from '@/lib/api';
+import { getUserPhotoResolver } from '@/lib/storage';
+import { route, requireAdmin, requireSession, parseBody, badRequest } from '@/lib/api';
+import { getVisibleUserIds } from '@/lib/reporting-tree-server';
 import { WEEKLY_CAP_SECONDS } from '@/lib/utils';
 import { isValidDateRange } from '@/lib/export-utils';
 
@@ -99,11 +100,11 @@ type AttendanceRow = {
 };
 
 export const GET = route(async (req: Request) => {
-  // Same gate as the page itself (src/app/(app)/attendance/page.tsx): the
-  // per-user Attendance checkbox, not a hardcoded lead/admin role check —
-  // otherwise a checkbox-granted IC/intern can open the page but the team
-  // roster/records fetch below 403s.
-  const session = await requireTool('attendance');
+  // Open to every signed-in user, like the page. What they get back is scoped
+  // here: admins see everyone; everyone else sees themselves plus everyone
+  // below them in the reporting chain (see src/lib/reporting-tree.ts).
+  const session = await requireSession();
+  const isAdmin = session.role === 'admin';
 
   const { searchParams } = new URL(req.url);
 
@@ -118,14 +119,18 @@ export const GET = route(async (req: Request) => {
   }
 
   const admin = createAdminClient();
+  const visible = await getVisibleUserIds(session, admin);
+  // Hourly rates (and the pay figures the client derives from them) are
+  // admin-only, so non-admins never get the column at all.
+  const rateCol = isAdmin ? ', hourly_rate_usd' : '';
+  const rateOf = (u: { hourly_rate_usd?: number | string | null }) =>
+    isAdmin && u.hourly_rate_usd != null ? Number(u.hourly_rate_usd) : null;
 
   if (startParam && endParam) {
-    let usersQuery = admin.from('users').select('id, name, email, team, role, member_code, hourly_rate_usd').eq('is_active', 1);
-    if (session.role !== 'admin') {
-      usersQuery = usersQuery.eq('team', session.team ?? '');
-    }
+    let usersQuery = admin.from('users').select(`id, name, email, team, role, member_code${rateCol}`).eq('is_active', 1);
+    if (visible !== 'all') usersQuery = usersQuery.in('id', visible);
     const { data: teamUsersData } = await usersQuery;
-    const teamUsers = (teamUsersData ?? []) as { id: number; name: string; email: string | null; team: string | null; role: string; member_code: string | null; hourly_rate_usd: number | string | null }[];
+    const teamUsers = (teamUsersData ?? []) as unknown as { id: number; name: string; email: string | null; team: string | null; role: string; member_code: string | null; hourly_rate_usd?: number | string | null }[];
     const userIds = teamUsers.map(u => u.id);
 
     const { data: tsData } = userIds.length > 0
@@ -142,7 +147,7 @@ export const GET = route(async (req: Request) => {
     const usersOut = teamUsers.map(u => ({
       id: u.id, name: u.name, team: u.team, role: u.role,
       memberCode: u.member_code ?? null,
-      hourlyRateUsd: u.hourly_rate_usd == null ? null : Number(u.hourly_rate_usd),
+      hourlyRateUsd: rateOf(u),
     }));
 
     return NextResponse.json({ start: startParam, end: endParam, users: usersOut, timesheetsByDay });
@@ -155,17 +160,15 @@ export const GET = route(async (req: Request) => {
       return NextResponse.json({ error: 'Invalid month format (YYYY-MM)' }, { status: 400 });
     }
 
-    let usersQuery = admin.from('users').select('id, name, email, team, role, member_code, hourly_rate_usd').eq('is_active', 1);
-    if (session.role !== 'admin') {
-      usersQuery = usersQuery.eq('team', session.team ?? '');
-    }
+    let usersQuery = admin.from('users').select(`id, name, email, team, role, member_code${rateCol}`).eq('is_active', 1);
+    if (visible !== 'all') usersQuery = usersQuery.in('id', visible);
 
     const [{ data: teamUsersData }, resolvePhoto] = await Promise.all([
       usersQuery,
-      getPhotoResolver(),
+      getUserPhotoResolver(),
     ]);
-    const teamUsers = teamUsersData ?? [];
-    const userIds = teamUsers.map((u: { id: number }) => u.id);
+    const teamUsers = (teamUsersData ?? []) as unknown as { id: number; name: string; email: string | null; team: string | null; role: string; hourly_rate_usd?: number | string | null }[];
+    const userIds = teamUsers.map(u => u.id);
 
     const lastDayNum = new Date(Number(monthParam.split('-')[0]), Number(monthParam.split('-')[1]), 0).getDate();
     const monthStart = `${monthParam}-01`;
@@ -184,7 +187,7 @@ export const GET = route(async (req: Request) => {
     const workdays = countWorkdaysInMonth(monthParam);
     const recordsByUserAndWeek = new Map(records.map(record => [`${record.user_id}:${record.week_start}`, record] as const));
 
-    const summary = teamUsers.map((user: { id: number; name: string; email: string | null; team: string | null; role: string; hourly_rate_usd: number | string | null }) => {
+    const summary = teamUsers.map(user => {
       let present = 0, wfh = 0, leave = 0, absent = 0, weekendWork = 0;
       const [year, month] = monthParam.split('-').map(Number);
       const lastDay = new Date(year, month, 0).getDate();
@@ -212,7 +215,7 @@ export const GET = route(async (req: Request) => {
       return {
         userId: user.id, name: user.name, team: user.team, role: user.role,
         photoUrl: resolvePhoto({ name: user.name, email: user.email }),
-        hourlyRateUsd: user.hourly_rate_usd == null ? null : Number(user.hourly_rate_usd),
+        hourlyRateUsd: rateOf(user),
         present, wfh, leave, absent, weekendWork, workdays,
       };
     });
@@ -233,18 +236,23 @@ export const GET = route(async (req: Request) => {
   const weekStart = getMondayOfWeek(weekParam);
   if (!weekStart) throw badRequest('week must be a Monday date (YYYY-MM-DD)');
 
-  let usersQuery = admin.from('users').select('id, name, email, team, role, member_code, hourly_rate_usd, approved_hours_per_week').eq('is_active', 1);
-  if (session.role !== 'admin') {
-    usersQuery = usersQuery.eq('team', session.team ?? '');
+  let usersQuery = admin.from('users').select(`id, name, email, team, role, member_code, approved_hours_per_week${rateCol}`).eq('is_active', 1);
+  // Records are scoped too: without the user filter this returned every
+  // user's attendance for the week to any caller.
+  let recordsQuery = admin.from('attendance').select('*').eq('week_start', weekStart);
+  if (visible !== 'all') {
+    usersQuery = usersQuery.in('id', visible);
+    recordsQuery = recordsQuery.in('user_id', visible);
   }
 
   const [{ data: rawRecordsData }, { data: teamUsersData2 }, resolvePhoto] = await Promise.all([
-    admin.from('attendance').select('*').eq('week_start', weekStart),
+    recordsQuery,
     usersQuery,
-    getPhotoResolver(),
+    getUserPhotoResolver(),
   ]);
   const rawRecords = rawRecordsData ?? [];
-  const teamUsers = teamUsersData2 ?? [];
+  type WeekUser = { id: number; name: string; email: string | null; team: string | null; role: string; member_code: string | null; approved_hours_per_week?: number | null; hourly_rate_usd?: number | string | null };
+  const teamUsers = (teamUsersData2 ?? []) as unknown as WeekUser[];
 
   // Resolve attendance editor display names for the audit-trail tooltip.
   const attEditorIds = [...new Set((rawRecords as AttendanceRow[])
@@ -257,7 +265,7 @@ export const GET = route(async (req: Request) => {
   for (let i = 0; i < 7; i++) {
     weekDates.push(toLocalISO(new Date(base.getTime() + i * 86400000)));
   }
-  const userIds = (teamUsers as { id: number }[]).map(u => u.id);
+  const userIds = teamUsers.map(u => u.id);
 
   const [editorsResult, tsResult, openResult, grantResult] = await Promise.all([
     attEditorIds.length > 0
@@ -313,7 +321,7 @@ export const GET = route(async (req: Request) => {
   const openSessions: Record<number, string> = {};
   const allowanceByUser: Record<number, number> = {};
   const baseByUser: Record<number, number> = {};
-  for (const u of teamUsers as { id: number; approved_hours_per_week?: number | null }[]) {
+  for (const u of teamUsers) {
     baseByUser[u.id] = (u.approved_hours_per_week != null ? Number(u.approved_hours_per_week) : 15) * 3600;
   }
   for (const id of userIds) allowanceByUser[id] = baseByUser[id] ?? WEEKLY_CAP_SECONDS;
@@ -324,12 +332,12 @@ export const GET = route(async (req: Request) => {
     allowanceByUser[g.user_id] = (allowanceByUser[g.user_id] ?? WEEKLY_CAP_SECONDS) + (g.granted_seconds ?? 0);
   }
 
-  const usersOut = (teamUsers as { id: number; name: string; email: string | null; team: string | null; role: string; member_code: string | null; hourly_rate_usd: number | string | null }[])
+  const usersOut = teamUsers
     .map(u => ({
       id: u.id, name: u.name, team: u.team, role: u.role,
       memberCode: u.member_code ?? null,
       photoUrl: resolvePhoto({ name: u.name, email: u.email }),
-      hourlyRateUsd: u.hourly_rate_usd == null ? null : Number(u.hourly_rate_usd),
+      hourlyRateUsd: rateOf(u),
     }));
 
   return NextResponse.json({ weekStart, records, users: usersOut, timesheetsByDay, openSessions, allowanceByUser });

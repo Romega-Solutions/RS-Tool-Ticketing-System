@@ -102,6 +102,16 @@ export async function canArchiveWorkItem(user: SessionUser, projectId: number): 
 export async function canManageProject(user: SessionUser, projectId: number): Promise<boolean> {
   return (await getProjectCaps(user, projectId)).canManage;
 }
+/**
+ * Board columns (add / rename / reorder / delete custom states). Wider than
+ * canManage: any non-intern project member/lead can shape their board, plus
+ * global admins. Viewers and interns can't.
+ */
+export async function canEditProjectColumns(user: SessionUser, projectId: number): Promise<boolean> {
+  const role = await getProjectRole(user, projectId);
+  if (role === 'lead') return true;
+  return role === 'member' && user.role !== 'intern';
+}
 /** Editing a project's own fields (name/description) is a settings action. */
 export async function canEditProject(user: SessionUser, projectId: number): Promise<boolean> {
   return (await getProjectCaps(user, projectId)).canManage;

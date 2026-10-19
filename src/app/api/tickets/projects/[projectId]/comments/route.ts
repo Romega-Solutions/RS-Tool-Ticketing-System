@@ -1,3 +1,4 @@
+import { projectPathById } from '@/lib/project-slug-server';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getProjectComments, createProjectComment, getProjectMembers, getProjectName } from '@/lib/tickets';
@@ -58,7 +59,7 @@ export const POST = route(async (req: Request, { params }: { params: Promise<{ p
           snippet:      plain.slice(0, 120),
           // Deep-link straight to the project discussion page and the exact
           // comment they were tagged in.
-          link:         `/projects/${projectId}/discussion?comment=${created.id}`,
+          link:         await projectPathById(projectId, 'discussion', { comment: created.id }),
         });
       }
     }

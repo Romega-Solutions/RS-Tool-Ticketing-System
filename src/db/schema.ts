@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean, index, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean, index, uniqueIndex, primaryKey, check, timestamp } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id:            serial('id').primaryKey(),
@@ -201,6 +201,32 @@ export const candidates = pgTable('candidates', {
   index('candidates_assigned_to_idx').on(t.assignedTo),
   index('candidates_created_by_idx').on(t.createdBy),
   index('candidates_status_idx').on(t.status),
+]);
+
+// Open roles. Created outside drizzle-kit (docs/migrations/add-ats-history-and-positions.sql
+// and extend-positions-fields.sql). `slug` is the stable public apply key
+// (drizzle/0014_positions_slug.sql). Title edits must not rewrite it.
+export const positions = pgTable('positions', {
+  id:             serial('id').primaryKey(),
+  jobTitle:       text('job_title').notNull(),
+  // Legacy free-text client. Unused by the app; left in place by the extend migration.
+  client:         text('client'),
+  location:       text('location'),
+  jobDescription: text('job_description'),
+  isOpen:         boolean('is_open').notNull().default(true),
+  createdBy:      integer('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt:      timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
+  updatedAt:      timestamp('updated_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
+  placementType:  text('placement_type').notNull().default('internal'),
+  compensation:   text('compensation'),
+  employmentType: text('employment_type').notNull().default('full_time'),
+  openings:       integer('openings').notNull().default(1),
+  // Nullable until 0014_positions_slug.sql is applied. Unique when present.
+  slug:           text('slug'),
+}, (t) => [
+  index('positions_open_idx').on(t.isOpen),
+  index('positions_created_by_idx').on(t.createdBy),
+  uniqueIndex('positions_slug_unique_idx').on(t.slug),
 ]);
 
 // Generic request + raw-submission store for candidate-facing pre-employment
@@ -440,6 +466,9 @@ export const projects = pgTable('projects', {
   id:          serial('id').primaryKey(),
   identifier:  text('identifier').notNull().unique(),
   name:        text('name').notNull(),
+  // Readable URL key (/projects/{slug}). Set once at create; not rewritten on rename.
+  // Added by drizzle/0015_projects_slug.sql (nullable) and 0016 (NOT NULL).
+  slug:        text('slug').unique(),
   description: text('description'),
   team:        text('team'),
   network:     integer('network').notNull().default(2),
@@ -460,6 +489,7 @@ export const projectStates = pgTable('project_states', {
   group:     text('group').notNull(), // backlog|unstarted|started|completed|cancelled
   color:     text('color').notNull().default('#6b7280'),
   sequence:  integer('sequence').notNull().default(0),
+  isDefault: boolean('is_default').notNull().default(false), // seeded column — can't be deleted
 });
 
 export const cycles = pgTable('cycles', {
@@ -781,3 +811,42 @@ export const emailTemplates = pgTable('email_templates', {
   updatedAt: text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedBy: integer('updated_by'),
 });
+
+// ── People: departments + reporting lines ─────────────────────────────────
+// The portal is the source of truth for who reports to whom. `users` is left
+// untouched: a person's department stays in `users.team` (labelled
+// "Department" in the UI) and everything else hangs off `users.id` here.
+// Created by drizzle/0013_departments_reporting_lines.sql.
+
+// Department list + display info. `name` matches the values in `users.team`.
+export const departments = pgTable('departments', {
+  id:           serial('id').primaryKey(),
+  name:         text('name').notNull().unique(),
+  color:        text('color'),
+  displayOrder: integer('display_order').notNull().default(0),
+}).enableRLS();
+
+// One row per user. No row / null reports_to_user_id = reports to the founder
+// (Robbie Galoso) by default. photo_path is an object key in the public
+// `user-photos` storage bucket.
+export const userReporting = pgTable('user_reporting', {
+  userId:          integer('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  reportsToUserId: integer('reports_to_user_id').references(() => users.id, { onDelete: 'set null' }),
+  photoPath:       text('photo_path'),
+  displayOrder:    integer('display_order').notNull().default(0),
+  isHidden:        boolean('is_hidden').notNull().default(false),
+  updatedAt:       text('updated_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (t) => [
+  index('user_reporting_reports_to_idx').on(t.reportsToUserId),
+  check('user_reporting_not_self', sql`${t.reportsToUserId} IS NULL OR ${t.reportsToUserId} <> ${t.userId}`),
+]).enableRLS();
+
+// Secondary ("also reports to") leads — any number per user.
+export const userSecondaryLeads = pgTable('user_secondary_leads', {
+  userId:              integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  alsoReportsToUserId: integer('also_reports_to_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+}, (t) => [
+  primaryKey({ columns: [t.userId, t.alsoReportsToUserId] }),
+  index('user_secondary_leads_also_reports_to_idx').on(t.alsoReportsToUserId),
+  check('user_secondary_leads_not_self', sql`${t.userId} <> ${t.alsoReportsToUserId}`),
+]).enableRLS();

@@ -19,7 +19,10 @@ export const GATEABLE_TOOLS: ReadonlyArray<{
   // Ordered to match the "Team Tools" sidebar section (alphabetical by label);
   // this order also drives the Tool Access matrix columns. Workspace tools
   // (Projects, Time Requests, …) are open to all and are intentionally NOT here.
-  { key: 'attendance', label: 'Attendance',       prefixes: ['/attendance'] },   // /attendance only — /attendance/requests (Time Requests) is open to all
+  // Attendance itself is open to everyone (its data is scoped to the viewer's
+  // reporting chain server-side), so the key guards no path. The checkbox now
+  // only decides whether the Time Approvals sidebar link shows.
+  { key: 'attendance', label: 'Attendance',       prefixes: [] },
   { key: 'ceo',        label: 'Briefing',         prefixes: ['/ceo'] },
   { key: 'marketing',  label: 'Marketing',        prefixes: ['/marketing'] },
   { key: 'onboarding', label: 'Onboarding',       prefixes: ['/onboarders'] },
@@ -50,15 +53,14 @@ export function hasToolAccess(
 // Keyed by the canonical department names (lowercased); a couple of aliases are
 // included for robustness against older team strings.
 const DEPARTMENT_TOOLS: Record<string, GateableToolKey[]> = {
-  'executive':       [],
-  'finance':         [],
-  'human resource':  ['recruiting', 'onboarding'],
-  'human resources': ['recruiting', 'onboarding'],
-  'marketing':       ['marketing'],
-  'market intelligence':         ['research'],
-  'market research & analytics': ['research'],
-  'sales':           ['sales'],
-  'technical':       [],
+  'technical':           [],
+  'hr':                  ['recruiting', 'onboarding'],
+  'human resource':      ['recruiting', 'onboarding'],
+  'human resources':     ['recruiting', 'onboarding'],
+  'sales':               ['sales'],
+  'marketing':           ['marketing'],
+  'market intelligence': ['research'],
+  'management':          [],
 };
 
 // Compute the day-one Team-Tool set for a new user from role + department:
@@ -113,7 +115,7 @@ export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string
   // to leads. Interns are still excluded.
   const normalizeTeamName = (value: string | null | undefined) => String(value ?? '').trim().toLowerCase();
   const LEAD_TOOL_TEAMS: Record<LeadToolKey, string[]> = {
-    ceo: ['executive', 'executive & admin', 'admin'],
+    ceo: ['management', 'executive', 'executive & admin', 'admin'],
     pm: ['operations', 'project management', 'design/pm'],
     sales: ['sales', 'sales & account management'],
     marketing: ['marketing', 'marketing & brand content', 'hr/marketing'],
@@ -124,7 +126,7 @@ export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string
     onboarding: [
       'recruiting', 'talent acquisition', 'people operations', 'operations',
       'hr', 'human resources', 'people', 'hr/marketing',
-      'executive', 'executive & admin', 'admin',
+      'management', 'executive', 'executive & admin', 'admin',
     ],
   };
   // ICs on a core recruiting/HR team get the Recruiting tool too (not other lead tools).
@@ -139,7 +141,7 @@ export function canAccessLeadTool(tool: LeadToolKey, role: AppRole, team: string
 
 // ── Romega Tools hub (external app launchers) ────────────────────────────────
 // "HR" for tool-gating purposes = the people/HR team plus the exec/admin group.
-const HR_TEAMS = ['hr/marketing', 'executive & admin', 'admin'];
+const HR_TEAMS = ['hr', 'management', 'hr/marketing', 'executive & admin', 'admin'];
 
 export function isHrTeam(team: string | null): boolean {
   return HR_TEAMS.includes(String(team ?? '').trim().toLowerCase());
@@ -170,9 +172,9 @@ export function canAccessPath(pathname: string, role: AppRole, toolAccess: strin
   // /learning and /learning/certificates are open to all signed-in users.
   if (pathname.startsWith('/admin')) return canAccessAdmin(role);
   if (pathname.startsWith('/rates')) return canAccessAdmin(role);
-  // Time Requests is a Workspace tool — open to everyone. Checked before the
-  // '/attendance' gate below, whose prefix this path would otherwise match.
-  if (pathname.startsWith('/attendance/requests')) return true;
+  // Attendance (scoped to the viewer's reporting chain by its API) and Time
+  // Requests are open to everyone.
+  if (pathname === '/attendance' || pathname.startsWith('/attendance/')) return true;
   // The checkbox-gated Team Tools: access is per-user (users.tool_access).
   // Workspace tools (e.g. /projects) aren't listed, so they fall through to open.
   for (const tool of GATEABLE_TOOLS) {

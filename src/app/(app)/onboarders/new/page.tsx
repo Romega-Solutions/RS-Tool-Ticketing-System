@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getSession } from '@/lib/session';
 import { hasToolAccess } from '@/lib/rbac';
-import { APP_DEPARTMENTS } from '@/lib/orgchart';
+import { DEPARTMENTS } from '@/lib/departments';
 import { createOnboarder } from '../actions';
 import { getGlobalOnboardingLeadSetting, listOnboardingLeadOptions } from '@/lib/onboarding-lead';
 
@@ -81,7 +81,7 @@ export default async function NewOnboarderPage() {
                     className="appearance-none flex h-11 w-full rounded-xl border border-(--rs-neutral-grey-200) bg-white pl-3 pr-9 py-2 text-sm text-(--rs-neutral-grey-900) outline-none transition-all focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100) cursor-pointer"
                   >
                     <option value="" disabled style={{ backgroundColor: '#fff', color: '#0f172a' }}>— Select department —</option>
-                    {APP_DEPARTMENTS.map(d => (
+                    {DEPARTMENTS.map(d => (
                       <option key={d} value={d} style={{ backgroundColor: '#fff', color: '#0f172a' }}>{d}</option>
                     ))}
                   </select>

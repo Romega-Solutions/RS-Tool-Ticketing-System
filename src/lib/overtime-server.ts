@@ -1,7 +1,6 @@
 import { createAdminClient } from './supabase/admin';
 import { weekDates, weekStartMonday, planEnforcement } from './overtime-policy';
 import { WEEKLY_CAP_SECONDS } from './utils';
-import { clockOut } from './presence';
 import { HttpError } from './api/errors';
 
 // Server-only data helpers for the overtime policy. Kept out of the pure
@@ -131,7 +130,7 @@ export async function weeklyAllowanceForUsers(admin: Admin, userIds: number[], n
 /**
  * Close-on-read enforcement. If `userId` has an open session that the weekly-cap
  * policy says must end now, close it server-side immediately — write
- * clocked_out_at + duration + overtime and drop them from in-memory presence.
+ * clocked_out_at + duration + overtime.
  * Returns the close result, or null when there was nothing to close.
  *
  * This is what makes the 15h cap real without trusting the browser guardrail or
@@ -180,7 +179,6 @@ export async function enforceUserOpenSession(
     return null;
   }
 
-  clockOut(userId);
   return { closed: true, durationSeconds: plan.durationSeconds, reason: plan.reason };
 }
 
@@ -262,7 +260,6 @@ export async function sweepOpenSessions(admin: Admin, now: Date): Promise<SweepR
       continue;
     }
 
-    clockOut(row.user_id);
     closed.push({ userId: row.user_id, durationSeconds: plan.durationSeconds, reason: plan.reason });
   }
 

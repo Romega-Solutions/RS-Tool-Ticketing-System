@@ -147,7 +147,7 @@ src/
       learning/ learning/certificates/   admin/ admin/learning/ admin/users/ admin/overtime/
       recruiting/ sales/ marketing/ ceo/ pm/ onboarders/
     api/            ← ~51 route handlers (auth, attendance, presence, reports, lms, tickets,
-                       recruiting/public, onboarding, ceo, pm, cron, fx, orgchart, admin, profile)
+                       recruiting/public, onboarding, ceo, pm, cron, fx, admin, profile)
     apply/[positionId]/   ← public job application form (no auth)
     auth/callback/        ← Supabase OAuth + legacy password callback
     onboarding/  guide/  login/
@@ -159,7 +159,7 @@ src/
     session.ts      ← getSession()
     rbac.ts         ← role normalization + path/tool access
     n8n.ts groq.ts  ← integration clients
-    overtime-policy.ts overtime-server.ts presence.ts tickets.ts lms*.ts onboarders.ts orgchart.ts
+    overtime-policy.ts overtime-server.ts presence.ts tickets.ts lms*.ts onboarders.ts
     storage.ts format.ts export-utils.ts utils.ts
   proxy.ts          ← Supabase session refresh + auth guard
 ```
@@ -200,7 +200,6 @@ UI components come from **shadcn/ui** (`components.json` at root). The codebase 
 | `APP_BASE_URL` / `NEXT_PUBLIC_BASE_URL` | Public URL of this app (for n8n callbacks / OG metadata) |
 | `GROQ_API_KEY` | LLM features (briefing, status drafter, content repurposer) |
 | `WISE_API_TOKEN` / `WISE_API_URL` | Live USD→PHP rate (falls back to open.er-api.com if empty) |
-| `ORG_CHART_API_KEY` | Org-chart photo/person lookup |
 | `N8N_*_URL` | n8n webhook URLs (resume parser, ATS comms, onboarding sequence) |
 | `SUPABASE_RESUMES_BUCKET` / `SUPABASE_ONBOARDER_BUCKET` | Storage bucket names (default `candidate-resumes` / `onboarder-docs`) |
 | `PUBLIC_APPLICATIONS_TOKEN` | Shared bearer token for external `/api/public/applications/[positionId]` posts |

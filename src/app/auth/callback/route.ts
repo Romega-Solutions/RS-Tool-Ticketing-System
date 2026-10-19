@@ -1,7 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { lookupOrgAuthProfileByEmail } from '@/lib/orgchart';
 
 export const runtime = 'nodejs';
 
@@ -43,63 +42,17 @@ export async function GET(request: NextRequest) {
   const authUser = session.user;
   const email    = authUser.email!;
 
+  // Accounts are created by an admin in User Management — the portal is the
+  // source of truth. A sign-in for an email with no account is rejected.
   const admin = createAdminClient();
-  const orgProfile = await lookupOrgAuthProfileByEmail(email);
-
-  // Create public.users row if this is a fresh sign-up
   const { data: existing } = await admin
     .from('users')
-    .select('id, team')
+    .select('id')
     .eq('email', email)
     .maybeSingle();
 
-  let isNewUser = false;
   if (!existing) {
-    if (!orgProfile) {
-      return NextResponse.redirect(new URL('/login?error=not_allowed', request.url));
-    }
-    const now = new Date().toISOString();
-    const { error: insertError } = await admin.from('users').upsert({
-      username:      orgProfile.username,
-      password_hash: '',
-      name:          orgProfile.name,
-      email:         orgProfile.email,
-      role:          orgProfile.role,
-      team:          orgProfile.team,
-      job_title:     orgProfile.jobTitle,
-      is_active:     1,
-      created_at:    now,
-      updated_at:    now,
-    }, { onConflict: 'email', ignoreDuplicates: true });
-    if (insertError) {
-      console.error('[auth/callback] users insert failed:', insertError);
-      return NextResponse.redirect(new URL('/login?error=signup_failed', request.url));
-    }
-    // ignoreDuplicates silently no-ops on username clashes etc., so re-fetch
-    // and hard-fail rather than redirecting to /onboarding with no DB row.
-    const { data: verify } = await admin
-      .from('users')
-      .select('id')
-      .eq('email', email)
-      .maybeSingle();
-    if (!verify) {
-      console.error('[auth/callback] users row missing after upsert for', email);
-      return NextResponse.redirect(new URL('/login?error=signup_failed', request.url));
-    }
-    isNewUser = true;
-  } else if (orgProfile) {
-    // Only the department follows the org chart on sign-in. Name and job
-    // title are admin-owned (legal name / contract title) once the account
-    // exists, so they're never overwritten here.
-    await admin.from('users').update({
-      team:       orgProfile.team,
-      updated_at: new Date().toISOString(),
-    }).eq('email', email);
-  }
-
-  // Send new users to onboarding to complete their profile
-  if (isNewUser || !(orgProfile?.team ?? existing?.team)) {
-    response.headers.set('location', new URL('/onboarding', origin).toString());
+    return NextResponse.redirect(new URL('/login?error=not_allowed', request.url));
   }
 
   return response;

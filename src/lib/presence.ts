@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { AppRole } from './rbac';
 import { normalizePingMessage, normalizePingReply } from './presence-ping';
 
@@ -70,81 +71,24 @@ export type PresencePingSnapshot = {
   received: PresencePingRecord[];
 };
 
-// ── In-memory store ────────────────────────────────────────────────────────────
-// Resets on server restart — acceptable for a small internal tool.
-// Polled by clients (not pushed over a held-open connection) — see /api/presence/live.
-
-const online:    Map<number, PresenceUser>                          = new Map();
-const presencePings: Map<string, PresencePingRecord>                 = new Map();
-let pingSequence = 0;
+// Nothing is kept in memory here: serverless instances don't share state. Who
+// is online comes from open `timesheets` rows (presence-online.ts) and pings
+// live in the `presence_pings` table (presence-ping-store.ts).
 
 export const PRESENCE_PING_RESPONSE_WINDOW_MS = 60 * 60 * 1000;
 
-// ── Visibility check ───────────────────────────────────────────────────────────
-// Returns true if a viewer is allowed to see targetUser's presence.
-
-function canSee(
-  viewerRole: AppRole,
-  viewerTeam: string | null,
-  viewerUserId: number,
-  target: PresenceUser,
-): boolean {
-  if (viewerRole === 'admin')   return true;
-  if (target.userId === viewerUserId) return true;
-  if (viewerRole === 'lead' && target.role === 'ic' && target.team === viewerTeam) return true;
-  return false;
-}
-
 type PingResult =
   | { ok: true; event: PresencePingEvent; record: PresencePingRecord }
-  | { ok: false; reason: 'self' | 'not_online' };
+  | { ok: false; reason: 'self' };
 
 // ── Public API ─────────────────────────────────────────────────────────────────
-
-export function clockIn(user: PresenceUser): void {
-  online.set(user.userId, user);
-}
-
-export function clockOut(userId: number): void {
-  online.delete(userId);
-}
-
-/** Filtered snapshot of who is currently online, visible to this viewer. */
-export function getOnline(
-  viewerRole: AppRole,
-  viewerTeam: string | null,
-  viewerUserId: number,
-): PresenceUser[] {
-  return [...online.values()].filter(u => canSee(viewerRole, viewerTeam, viewerUserId, u));
-}
-
-/** Open user's own timesheet entry in the store (for widget restore on refresh). */
-export function getMyEntry(userId: number): PresenceUser | undefined {
-  return online.get(userId);
-}
-
-/** All online users — no visibility filter. Used by the live page. */
-export function getAllOnline(): PresenceUser[] {
-  return [...online.values()];
-}
 
 function pingDeadline(createdAt: string): string {
   return new Date(Date.parse(createdAt) + PRESENCE_PING_RESPONSE_WINDOW_MS).toISOString();
 }
 
 function nextPingId(createdAt: string, fromUserId: number, toUserId: number): string {
-  pingSequence += 1;
-  return `${createdAt}-${fromUserId}-${toUserId}-${pingSequence}`;
-}
-
-function markExpiredPresencePings(now = new Date()): void {
-  const nowMs = now.getTime();
-  for (const record of presencePings.values()) {
-    if (record.status !== 'pending') continue;
-    if (Date.parse(record.deadlineAt) > nowMs) continue;
-    record.status = 'missed';
-    record.missedAt = now.toISOString();
-  }
+  return `${createdAt}-${fromUserId}-${toUserId}-${randomUUID().slice(0, 8)}`;
 }
 
 function emptyPingSummary(userId: number): PresencePingUserSummary {
@@ -182,8 +126,8 @@ export function sendPresencePing({
   message?: string | null;
   createdAt?: string;
 }): PingResult {
+  // Whether the target is clocked in is checked by the caller against the DB.
   if (from.userId === toUserId) return { ok: false, reason: 'self' };
-  if (!online.has(toUserId)) return { ok: false, reason: 'not_online' };
 
   const id = nextPingId(createdAt, from.userId, toUserId);
   const deadlineAt = pingDeadline(createdAt);
@@ -205,34 +149,8 @@ export function sendPresencePing({
     acknowledgedAt: null,
     missedAt: null,
   };
-  presencePings.set(id, record);
 
   return { ok: true, event, record };
-}
-
-export function acknowledgePresencePing({
-  eventId,
-  userId,
-  replyMessage,
-  now = new Date(),
-}: {
-  eventId: string;
-  userId: number;
-  replyMessage?: string | null;
-  now?: Date;
-}): { ok: true; record: PresencePingRecord } | { ok: false; reason: 'not_found' | 'forbidden' | 'expired'; record?: PresencePingRecord } {
-  const record = presencePings.get(eventId);
-  if (!record) return { ok: false, reason: 'not_found' };
-  if (record.targetUserId !== userId) return { ok: false, reason: 'forbidden' };
-
-  markExpiredPresencePings(now);
-  if (record.status === 'missed') return { ok: false, reason: 'expired', record };
-  if (record.status === 'acknowledged') return { ok: true, record };
-
-  record.status = 'acknowledged';
-  record.replyMessage = normalizePingReply(replyMessage);
-  record.acknowledgedAt = now.toISOString();
-  return { ok: true, record };
 }
 
 export function sendPresencePingReply({
@@ -311,24 +229,4 @@ export function createPresencePingSnapshotFromRecords(
     sent: sent.sort(newestFirst),
     received: received.sort(newestFirst),
   };
-}
-
-export function getPresencePingSnapshotForUser(userId: number, now = new Date()): PresencePingSnapshot {
-  markExpiredPresencePings(now);
-  return createPresencePingSnapshotFromRecords([...presencePings.values()], userId, now);
-}
-
-/** Seed users from DB without broadcasting. Used for post-restart hydration. */
-export function seedUsers(users: PresenceUser[]): void {
-  for (const u of users) {
-    if (!online.has(u.userId)) {
-      online.set(u.userId, u);
-    }
-  }
-}
-
-export function __resetPresenceForTests(): void {
-  online.clear();
-  presencePings.clear();
-  pingSequence = 0;
 }

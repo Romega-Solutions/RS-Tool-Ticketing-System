@@ -7,6 +7,7 @@ import { normalizeRole } from '@/lib/rbac';
 import { mergeNotificationPrefs } from '@/lib/notifications';
 import { route, requireSession, parseBody, badRequest, notFound } from '@/lib/api';
 import { USERS_LIST_TAG } from '@/lib/cache-tags';
+import { userPhotoUrl } from '@/lib/storage';
 
 export const runtime = 'nodejs';
 
@@ -44,6 +45,18 @@ export const GET = route(async () => {
 
   if (!user) throw notFound('User not found');
 
+  // Reporting line + photo (portal-owned). No reports_to = the founder by default.
+  const [{ data: rep }, { data: secondary }, { data: dept }] = await Promise.all([
+    admin.from('user_reporting').select('reports_to_user_id, photo_path').eq('user_id', session.id).maybeSingle(),
+    admin.from('user_secondary_leads').select('also_reports_to_user_id').eq('user_id', session.id),
+    user.team ? admin.from('departments').select('color').eq('name', user.team).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  const leadIds = [rep?.reports_to_user_id, ...(secondary ?? []).map(s => s.also_reports_to_user_id)].filter((id): id is number => id != null);
+  const { data: leads } = leadIds.length
+    ? await admin.from('users').select('id, name').in('id', leadIds)
+    : { data: [] as { id: number; name: string }[] };
+  const nameOf = (id: number) => leads?.find(l => l.id === id)?.name ?? null;
+
   const availableTeams = [...new Set(
     (teamRows ?? [])
       .map((r: { team: string | null }) => r.team)
@@ -70,6 +83,12 @@ export const GET = route(async () => {
       reminderEnabled: Boolean(user.reminder_enabled ?? 1),
       reminderIntervalMinutes: user.reminder_interval_minutes ?? 120,
       notificationPrefs: mergeNotificationPrefs(user.notification_prefs),
+    },
+    reporting: {
+      reportsToName:      rep?.reports_to_user_id ? nameOf(rep.reports_to_user_id) : null,
+      alsoReportsToNames: (secondary ?? []).map(s => nameOf(s.also_reports_to_user_id)).filter(Boolean),
+      photoUrl:           userPhotoUrl(rep?.photo_path),
+      departmentColor:    dept?.color ?? null,
     },
     availableTeams,
     availableJobTitles,

@@ -128,7 +128,10 @@ function NavLinks({ collapsed = false, role, toolAccess }: { collapsed?: boolean
   const mainItems     = navItems.filter(i => i.category === "main");   // Workspace — open to all
   const leadToolItems = navItems.filter(i => {
     if (i.category !== "leadTools") return false;
-    if (i.href.startsWith('/attendance')) return hasToolAccess('attendance', role, toolAccess);
+    // Attendance is open to everyone; its data is scoped to the viewer's
+    // reporting chain. Time Approvals keeps its existing checkbox gate.
+    if (i.href === '/attendance') return true;
+    if (i.href.startsWith('/attendance/')) return hasToolAccess('attendance', role, toolAccess);
     if (i.href.startsWith('/ceo/')) return hasToolAccess('ceo', role, toolAccess);
     if (i.href.startsWith('/marketing/')) return hasToolAccess('marketing', role, toolAccess);
     if (i.href.startsWith('/onboarders')) return hasToolAccess('onboarding', role, toolAccess);
@@ -374,7 +377,7 @@ export function MobileNav({ role, toolAccess }: { role: AppRole; toolAccess: str
       </SheetTrigger>
       <SheetContent side="left" className="w-56 p-0 bg-(--rs-neutral-grey-900) text-white border-r-0">
         <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
-        <SheetDescription className="sr-only">Access the internal ticketing system sections.</SheetDescription>
+        <SheetDescription className="sr-only">Access the RS Portal sections.</SheetDescription>
 
         <div className="flex flex-col h-full">
           {/* Mobile header — logo only, no extra text */}

@@ -35,6 +35,7 @@ function ClockConfirmDialog({
   onConfirm,
   busy,
   elapsed,
+  error,
 }: {
   action: Exclude<PendingAction, null>;
   noteDraft: string;
@@ -43,6 +44,7 @@ function ClockConfirmDialog({
   onConfirm: () => void;
   busy: boolean;
   elapsed: number;
+  error: string;
 }) {
   const isClockIn = action === 'clock-in';
 
@@ -99,6 +101,12 @@ function ClockConfirmDialog({
               {noteDraft.length}/300
             </div>
           </div>
+
+          {error && (
+            <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </p>
+          )}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-(--rs-neutral-grey-100) px-5 py-4">
@@ -418,15 +426,16 @@ export function ClockWidget({
     setError('');
     try {
       const res = await fetch('/api/presence/clock-out', { method: 'POST' });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; alreadyClockedOut?: boolean };
       if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
         setError(data.error ?? 'Failed to clock out');
         return;
       }
 
       // Roll the just-finished session into the week total so the budget bar
-      // stays accurate without waiting for a reload.
-      const finishedSeconds = elapsedRef.current;
+      // stays accurate without waiting for a reload. If the server had already
+      // closed it (cron, admin, another tab), it's already counted.
+      const finishedSeconds = data.alreadyClockedOut ? 0 : elapsedRef.current;
       setWeekSecondsBefore(w => w + finishedSeconds);
       weekBeforeRef.current += finishedSeconds;
 
@@ -540,6 +549,7 @@ export function ClockWidget({
             onConfirm={pendingAction === 'clock-in' ? confirmClockIn : confirmClockOut}
             busy={busy}
             elapsed={elapsed}
+            error={error}
           />
         )}
       </>
@@ -642,6 +652,7 @@ export function ClockWidget({
           onConfirm={pendingAction === 'clock-in' ? confirmClockIn : confirmClockOut}
           busy={busy}
           elapsed={elapsed}
+          error={error}
         />
       )}
     </>

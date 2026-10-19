@@ -1,30 +1,53 @@
 import Link from 'next/link';
-import { redirect, notFound } from 'next/navigation';
+import { redirect, notFound, permanentRedirect } from 'next/navigation';
+import { projectPath } from '@/lib/project-slug';
+import { resolveProjectParam } from '@/lib/project-slug-server';
 import { ArrowLeft } from 'lucide-react';
 import { getSession } from '@/lib/session';
-import { getProjects, getLabels, getProjectMembers, getCycles } from '@/lib/tickets';
-import { canManageProject, canReteamProject } from '@/lib/permissions';
+import { getProjects, getProjectStates, getLabels, getProjectMembers, getCycles } from '@/lib/tickets';
+import { canManageProject, canReteamProject, canEditProjectColumns, getProjectCaps } from '@/lib/permissions';
 import { ProjectSettingsClient } from '@/components/project-settings-client';
 
 export default async function ProjectSettingsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await getSession();
   if (!session) redirect('/login');
 
-  const { id } = await params;
-  if (!(await canManageProject(session, Number(id)))) redirect(`/projects/${id}`);
+  // Slug or numeric id; unknown keys behave like a missing numeric id.
+  const { id: rawId } = await params;
+  const resolved = await resolveProjectParam(rawId);
+  const id = String(resolved?.id ?? 0);
+  const projectRef = { id, slug: resolved?.slug ?? null };
+  // Leads/admins get every section; other project members (non-intern) only
+  // get Board columns.
+  const [canManage, canEditColumns] = await Promise.all([
+    canManageProject(session, Number(id)),
+    canEditProjectColumns(session, Number(id)),
+  ]);
+  if (!canManage && !canEditColumns) {
+    // Members without settings rights go back to the board; anyone who cannot
+    // see the project (or an unknown key) gets the same bounce to /projects.
+    const canView = resolved ? (await getProjectCaps(session, Number(id))).canView : false;
+    redirect(canView ? projectPath(projectRef) : '/projects');
+  }
+  if (resolved?.slug && rawId !== resolved.slug) {
+    permanentRedirect(projectPath(resolved, 'settings', await searchParams));
+  }
 
   const projects = await getProjects();
   const project = projects.find(p => p.id === id);
   if (!project) notFound();
 
-  const [labels, members, cycles] = await Promise.all([
-    getLabels(id),
-    getProjectMembers(id),
-    getCycles(id),
+  const [states, labels, members, cycles] = await Promise.all([
+    getProjectStates(id),
+    canManage ? getLabels(id) : [],
+    canManage ? getProjectMembers(id) : [],
+    canManage ? getCycles(id) : [],
   ]);
 
   return (
@@ -35,11 +58,13 @@ export default async function ProjectSettingsPage({
             {project.name} — Settings
           </h1>
           <p className="text-(--rs-neutral-grey-500) text-sm mt-1">
-            Manage project details, labels, members, and cycles.
+            {canManage
+              ? 'Manage project details, board columns, labels, members, and cycles.'
+              : 'Manage this project’s board columns.'}
           </p>
         </div>
         <Link
-          href={`/projects/${id}`}
+          href={projectPath(projectRef)}
           className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-md border border-(--rs-neutral-grey-200) bg-white px-3 py-2 text-sm font-medium text-(--rs-neutral-grey-700) transition-colors hover:bg-(--rs-neutral-grey-50) hover:text-(--rs-neutral-grey-900) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--rs-primary-300) sm:self-auto"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
@@ -55,7 +80,9 @@ export default async function ProjectSettingsPage({
           team: project.team,
           autoArchiveDoneDays: project.autoArchiveDoneDays,
         }}
-        canReteam={await canReteamProject(session, Number(id))}
+        canManage={canManage}
+        canReteam={canManage && await canReteamProject(session, Number(id))}
+        initialStates={states}
         initialLabels={labels}
         initialMembers={members}
         initialCycles={cycles}

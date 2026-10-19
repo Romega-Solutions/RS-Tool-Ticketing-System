@@ -119,9 +119,6 @@ describe('canAccessPath', () => {
   });
 
   it('gates the Team Tools by the per-user tool_access set', () => {
-    expect(canAccessPath('/attendance', 'lead', [])).toBe(false);
-    expect(canAccessPath('/attendance', 'lead', ['attendance'])).toBe(true);
-    expect(canAccessPath('/attendance', 'admin', [])).toBe(true);            // admin bypass
     expect(canAccessPath('/sales/leads', 'ic', ['sales'])).toBe(true);
     expect(canAccessPath('/research/new', 'ic', ['research'])).toBe(true);
     expect(canAccessPath('/research', 'ic', ['marketing'])).toBe(false);
@@ -131,9 +128,15 @@ describe('canAccessPath', () => {
   it('treats Workspace tools (Projects, Time Requests) as open to all', () => {
     expect(canAccessPath('/projects', 'ic', [])).toBe(true);
     expect(canAccessPath('/projects', 'intern', [])).toBe(true);
-    // open even though the path starts with /attendance (a gated Team Tool)
     expect(canAccessPath('/attendance/requests', 'ic', [])).toBe(true);
     expect(canAccessPath('/attendance/requests', 'intern', [])).toBe(true);
+  });
+
+  it('opens Attendance to every role (its data is scoped to the reporting chain)', () => {
+    expect(canAccessPath('/attendance', 'intern', [])).toBe(true);
+    expect(canAccessPath('/attendance', 'ic', [])).toBe(true);
+    expect(canAccessPath('/attendance', 'lead', [])).toBe(true);
+    expect(canAccessPath('/attendance', 'admin', [])).toBe(true);
   });
 
   it('allows any non-gated path for all roles', () => {
@@ -165,7 +168,6 @@ describe('defaultToolAccess', () => {
     expect(defaultToolAccess('ic', 'Sales')).toEqual(['sales']);
     expect(defaultToolAccess('ic', 'Marketing')).toEqual(['marketing']);
     expect(defaultToolAccess('ic', 'Market Intelligence')).toEqual(['research']);
-    expect(defaultToolAccess('ic', 'Market Research & Analytics')).toEqual(['research']);
   });
 
   it('gives departments without a default tool (Technical/Executive/Finance) nothing', () => {

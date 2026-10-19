@@ -107,7 +107,7 @@ export default function GuidePage() {
           <div>
             <h1 className="text-3xl font-serif font-bold text-(--rs-neutral-grey-900)">Getting Started</h1>
             <p className="mt-2 text-sm text-(--rs-neutral-grey-500) max-w-md mx-auto">
-              Your visual guide to the RS Ticketing System — everything you need to know before you sign in.
+              Your visual guide to the RS Portal — everything you need to know before you sign in.
             </p>
           </div>
         </div>
@@ -196,7 +196,7 @@ export default function GuidePage() {
         </div>
 
         <p className="mt-8 text-center text-xs text-(--color-foreground-subtle)">
-          © {new Date().getFullYear()} RS Ticketing System · Internal use only
+          © {new Date().getFullYear()} RS Portal · Internal use only
         </p>
       </div>
     </div>
