@@ -8,7 +8,7 @@ export type LeadToolKey = 'ceo' | 'pm' | 'sales' | 'marketing' | 'recruiting' | 
 // Sensitive admin tools (/admin/*, /rates, overtime, manage-learning, dev tools)
 // are intentionally NOT here — they stay strictly admin-role only.
 export type GateableToolKey =
-  | 'attendance' | 'ceo' | 'marketing' | 'onboarding'
+  | 'ceo' | 'marketing' | 'onboarding'
   | 'pm' | 'recruiting' | 'research' | 'sales';
 
 export const GATEABLE_TOOLS: ReadonlyArray<{
@@ -19,10 +19,9 @@ export const GATEABLE_TOOLS: ReadonlyArray<{
   // Ordered to match the "Team Tools" sidebar section (alphabetical by label);
   // this order also drives the Tool Access matrix columns. Workspace tools
   // (Projects, Time Requests, …) are open to all and are intentionally NOT here.
-  // Attendance itself is open to everyone (its data is scoped to the viewer's
-  // reporting chain server-side), so the key guards no path. The checkbox now
-  // only decides whether the Time Approvals sidebar link shows.
-  { key: 'attendance', label: 'Attendance',       prefixes: [] },
+  // Attendance and Time Approvals aren't checkbox tools: Attendance is open to
+  // everyone (scoped to the viewer's reporting chain server-side), and Time
+  // Approvals shows for admins and anyone with people reporting to them.
   { key: 'ceo',        label: 'Briefing',         prefixes: ['/ceo'] },
   { key: 'marketing',  label: 'Marketing',        prefixes: ['/marketing'] },
   { key: 'onboarding', label: 'Onboarding',       prefixes: ['/onboarders'] },
@@ -65,14 +64,14 @@ const DEPARTMENT_TOOLS: Record<string, GateableToolKey[]> = {
 
 // Compute the day-one Team-Tool set for a new user from role + department:
 //   IC / Intern → their department's tool(s) only
-//   Lead        → the above + PM + Briefing + Attendance (cross-team lead tools)
+//   Lead        → the above + PM + Briefing (cross-team lead tools)
 //   Admin       → everything (they bypass at runtime anyway)
 // Workspace tools (Projects, Time Requests, …) are open to all and never stored.
 export function defaultToolAccess(role: AppRole, team: string | null): GateableToolKey[] {
   if (role === 'admin') return [...GATEABLE_TOOL_KEYS];
   const set = new Set<GateableToolKey>();
   for (const t of DEPARTMENT_TOOLS[String(team ?? '').trim().toLowerCase()] ?? []) set.add(t);
-  if (role === 'lead') { set.add('pm'); set.add('ceo'); set.add('attendance'); }
+  if (role === 'lead') { set.add('pm'); set.add('ceo'); }
   return [...set];
 }
 
@@ -96,6 +95,12 @@ export function normalizeRole(role: unknown): AppRole {
 
 export function canAccessReports(role: AppRole): boolean {
   return role === 'lead' || role === 'admin';
+}
+
+// Time Approvals (the time-correction approval queue) is for admins (founder
+// included) and anyone with people reporting to them on a main line.
+export function canSeeTimeApprovals(role: AppRole, hasDirectReports: boolean): boolean {
+  return role === 'admin' || hasDirectReports;
 }
 
 export function canAccessAdmin(role: AppRole): boolean {

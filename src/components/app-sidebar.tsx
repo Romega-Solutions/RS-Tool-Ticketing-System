@@ -122,16 +122,17 @@ function NavSection({
   );
 }
 
-function NavLinks({ collapsed = false, role, toolAccess }: { collapsed?: boolean; role: AppRole; toolAccess: string[] }) {
+function NavLinks({ collapsed = false, role, toolAccess, showTimeApprovals = false }: { collapsed?: boolean; role: AppRole; toolAccess: string[]; showTimeApprovals?: boolean }) {
   const pathname = usePathname();
 
   const mainItems     = navItems.filter(i => i.category === "main");   // Workspace — open to all
   const leadToolItems = navItems.filter(i => {
     if (i.category !== "leadTools") return false;
     // Attendance is open to everyone; its data is scoped to the viewer's
-    // reporting chain. Time Approvals keeps its existing checkbox gate.
+    // reporting chain. Time Approvals shows for admins and anyone with people
+    // reporting to them (decided server-side in the layout).
     if (i.href === '/attendance') return true;
-    if (i.href.startsWith('/attendance/')) return hasToolAccess('attendance', role, toolAccess);
+    if (i.href.startsWith('/attendance/')) return showTimeApprovals;
     if (i.href.startsWith('/ceo/')) return hasToolAccess('ceo', role, toolAccess);
     if (i.href.startsWith('/marketing/')) return hasToolAccess('marketing', role, toolAccess);
     if (i.href.startsWith('/onboarders')) return hasToolAccess('onboarding', role, toolAccess);
@@ -262,7 +263,7 @@ function LogoutButton({ collapsed = false }: { collapsed?: boolean }) {
   );
 }
 
-export function AppSidebar({ role, userName, team, toolAccess, photoUrl }: { role: AppRole; userName: string; team: string | null; toolAccess: string[]; photoUrl?: string | null }) {
+export function AppSidebar({ role, userName, team, toolAccess, photoUrl, showTimeApprovals = false }: { role: AppRole; userName: string; team: string | null; toolAccess: string[]; photoUrl?: string | null; showTimeApprovals?: boolean }) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -319,7 +320,7 @@ export function AppSidebar({ role, userName, team, toolAccess, photoUrl }: { rol
 
       {/* Nav */}
       <div className={`flex-1 ${collapsed ? "px-2 py-3" : "px-3 py-3"} flex flex-col overflow-hidden`}>
-        <NavLinks collapsed={collapsed} role={role} toolAccess={toolAccess} />
+        <NavLinks collapsed={collapsed} role={role} toolAccess={toolAccess} showTimeApprovals={showTimeApprovals} />
       </div>
 
       {/* Footer */}
@@ -369,7 +370,7 @@ export function AppSidebar({ role, userName, team, toolAccess, photoUrl }: { rol
   );
 }
 
-export function MobileNav({ role, toolAccess }: { role: AppRole; toolAccess: string[] }) {
+export function MobileNav({ role, toolAccess, showTimeApprovals = false }: { role: AppRole; toolAccess: string[]; showTimeApprovals?: boolean }) {
   return (
     <Sheet>
       <SheetTrigger render={<Button variant="ghost" size="icon" className="md:hidden" aria-label="Open navigation menu" />}>
@@ -395,7 +396,7 @@ export function MobileNav({ role, toolAccess }: { role: AppRole; toolAccess: str
           </div>
 
           <div className="flex-1 px-3 py-3 overflow-y-auto flex flex-col">
-            <NavLinks role={role} toolAccess={toolAccess} />
+            <NavLinks role={role} toolAccess={toolAccess} showTimeApprovals={showTimeApprovals} />
             <div className="mt-auto pt-4 border-t border-white/10 space-y-0.5">
               <Link
                 href="/profile"
