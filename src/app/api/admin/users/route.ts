@@ -3,7 +3,7 @@ import { unstable_cache, revalidateTag } from 'next/cache';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { hash } from 'bcryptjs';
 import { route, requireAdmin } from '@/lib/api';
-import { recordAudit, deriveUserPatchAction } from '@/lib/audit';
+import { recordAudit, buildUserPatchAudit } from '@/lib/audit';
 import { enforceRateLimit, keyByUser } from '@/lib/rate-limit';
 import { isGateableToolKey, defaultToolAccess, normalizeRole } from '@/lib/rbac';
 import { USERS_LIST_TAG } from '@/lib/cache-tags';
@@ -494,7 +494,7 @@ export const PATCH = route(async (req: Request) => {
   const admin = createAdminClient();
   const { data: before } = await admin
     .from('users')
-    .select('role, is_active, tool_access, name, username, email, job_title')
+    .select('role, is_active, tool_access, name, username, email, job_title, team, member_code, hourly_rate_usd, date_of_birth, start_date, end_date, drive_url, approved_hours_per_week, schedule_pht_start, schedule_pht_end')
     .eq('id', body.id)
     .maybeSingle();
 
@@ -566,9 +566,9 @@ export const PATCH = route(async (req: Request) => {
     if (added.length || removed.length) {
       await recordAudit({ actorId: session.id, action: 'user.tool_access_changed', targetUserId: body.id, details: { added, removed } });
     }
-    // Audit role/active/other-field edits as before (skip the vague 'user.updated'
-    // when the only change was tool access).
-    const roleChanged = String(before.role) !== String(updated.role);
+    // Audit role/active/other-field edits with a per-field before/after
+    // (private values are masked when the log is read). Skipped when nothing
+    // actually changed, and identity/tool access are logged on their own.
     const activeChanged = Number(before.is_active) !== Number(updated.is_active);
     const identityChanges: Record<string, { from: unknown; to: unknown }> = {};
     if (String(before.name) !== String(updated.name)) identityChanges.name = { from: before.name, to: updated.name };
@@ -578,21 +578,18 @@ export const PATCH = route(async (req: Request) => {
     if (Object.keys(identityChanges).length) {
       await recordAudit({ actorId: session.id, action: 'user.identity_changed', targetUserId: body.id, details: identityChanges });
     }
-    const otherFieldChanged = body.team !== undefined || body.memberCode !== undefined || body.hourlyRateUsd !== undefined
-      || body.dateOfBirth !== undefined || body.startDate !== undefined || body.endDate !== undefined || body.driveUrl !== undefined
-      || body.approvedHoursPerWeek !== undefined || body.schedulePhtStart !== undefined || body.schedulePhtEnd !== undefined;
     // Deactivation removes the user from every project — membership and
     // any work items they were still assigned to — so they stop showing
     // up anywhere in ticketing once they're no longer active.
     if (activeChanged && Number(updated.is_active) === 0) {
       await removeUserFromAllProjects(body.id);
     }
-    if (roleChanged || activeChanged || otherFieldChanged) {
-      const { action, details } = deriveUserPatchAction(
-        { role: String(before.role), is_active: Number(before.is_active) },
-        { role: String(updated.role), is_active: Number(updated.is_active) },
-      );
-      await recordAudit({ actorId: session.id, action, targetUserId: body.id, details });
+    const patchAudit = buildUserPatchAudit(
+      { ...before, role: String(before.role), is_active: Number(before.is_active) },
+      { ...updated, role: String(updated.role), is_active: Number(updated.is_active) },
+    );
+    if (patchAudit) {
+      await recordAudit({ actorId: session.id, action: patchAudit.action, targetUserId: body.id, details: patchAudit.details });
     }
   }
 

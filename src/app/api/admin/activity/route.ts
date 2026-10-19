@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { route, requireAdmin, badRequest } from '@/lib/api';
 import { normalizeRole, type AppRole } from '@/lib/rbac';
-import { parseActivityUserId } from '@/lib/activity';
-import { describeAudit } from '@/lib/audit';
+import { parseActivityUserId, auditUserFilter, type ActivityChange } from '@/lib/activity';
+import { describeAudit, presentAuditChanges } from '@/lib/audit';
 
 export const runtime = 'nodejs';
 
@@ -23,6 +23,11 @@ interface Activity {
   type: ActivityType;
   description: string;
   at: string; // ISO timestamp
+  // Admin (audit) entries only: who the action was done to, and the
+  // field-by-field changes. Private values are already stripped here.
+  targetUserId?: number | null;
+  targetUserName?: string | null;
+  changes?: ActivityChange[];
 }
 
 const PER_SOURCE = 60;
@@ -62,12 +67,16 @@ export const GET = route(async (req: Request) => {
   }
 
   const activities: Activity[] = [];
-  const add = (userId: number | null | undefined, id: string, type: ActivityType, description: string, at: string | null) => {
+  const add = (
+    userId: number | null | undefined, id: string, type: ActivityType, description: string, at: string | null,
+    extra?: Pick<Activity, 'targetUserId' | 'targetUserName' | 'changes'>,
+  ) => {
     if (userId == null || !at) return;
     const u = userMap.get(userId);
     if (!u) return; // actor no longer exists — skip
-    activities.push({ id, userId, userName: u.name, role: u.role, team: u.team, type, description, at });
+    activities.push({ id, userId, userName: u.name, role: u.role, team: u.team, type, description, at, ...extra });
   };
+  const nameOf = (id: number) => userMap.get(id)?.name ?? null;
 
   // 1. Work item activity
   let wiaQ = sb.from('work_item_activity')
@@ -120,14 +129,20 @@ export const GET = route(async (req: Request) => {
     add(p.from_user_id, `pp-${p.id}`, 'ping', 'Sent a live ping', p.created_at);
   }
 
-  // 6. Admin actions (audit log)
+  // 6. Admin actions (audit log). For one person this covers what they did
+  // AND what was done to them. Raw details never leave the server: they are
+  // turned into display-ready changes with private values removed.
   let auQ = sb.from('audit_log')
-    .select('id, actor_id, action, details, created_at')
+    .select('id, actor_id, action, target_user_id, details, created_at')
     .order('created_at', { ascending: false }).limit(perSource);
-  if (userId != null) auQ = auQ.eq('actor_id', userId);
+  if (userId != null) auQ = auQ.or(auditUserFilter(userId));
   const { data: au } = await auQ;
-  for (const a of (au ?? []) as { id: number; actor_id: number; action: string; details: Record<string, unknown> | null; created_at: string | null }[]) {
-    add(a.actor_id, `audit-${a.id}`, 'admin', describeAudit(a.action, a.details), a.created_at);
+  for (const a of (au ?? []) as { id: number; actor_id: number; action: string; target_user_id: number | null; details: Record<string, unknown> | null; created_at: string | null }[]) {
+    add(a.actor_id, `audit-${a.id}`, 'admin', describeAudit(a.action, a.details), a.created_at, {
+      targetUserId:   a.target_user_id ?? null,
+      targetUserName: a.target_user_id == null ? null : nameOf(a.target_user_id),
+      changes:        presentAuditChanges(a.action, a.details, nameOf),
+    });
   }
 
   activities.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
