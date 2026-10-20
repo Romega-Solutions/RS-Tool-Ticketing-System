@@ -36,12 +36,16 @@ function chainable(result: { data: unknown; error?: unknown }) {
   return obj as { then: unknown } & Record<string, ReturnType<typeof vi.fn>>;
 }
 
-function mockAttendanceTables({ users, timesheets }: { users: unknown[]; timesheets: unknown[] }) {
+function mockAttendanceTables({ users, timesheets, reporting = [] }: { users: unknown[]; timesheets: unknown[]; reporting?: unknown[] }) {
   const usersChain = chainable({ data: users });
   const timesheetsChain = chainable({ data: timesheets });
+  const reportingChain = chainable({ data: reporting });
+  const secondaryChain = chainable({ data: [] });
   const from = vi.fn((table: string) => {
     if (table === 'users') return usersChain;
     if (table === 'timesheets') return timesheetsChain;
+    if (table === 'user_reporting') return reportingChain;
+    if (table === 'user_secondary_leads') return secondaryChain;
     throw new Error(`no mock for table ${table}`);
   });
   vi.doMock('@/lib/supabase/admin', () => ({ createAdminClient: vi.fn(() => ({ from })) }));
@@ -79,10 +83,14 @@ describe('GET /api/attendance?start=&end= (custom range)', () => {
     expect(res.status).toBe(400);
   });
 
-  it('scopes users to the caller\'s team for a non-admin lead', async () => {
+  it('scopes users to the caller\'s reporting chain for a non-admin lead, without rates', async () => {
     mockSession(user({ role: 'lead', team: 'Engineering' }));
     const { usersChain } = mockAttendanceTables({
-      users: [{ id: 1, name: 'Jane', email: 'jane@romega-solutions.com', team: 'Engineering', role: 'ic', member_code: 'JD01', hourly_rate_usd: 10 }],
+      users: [
+        { id: 11, name: 'Ken', email: 'ken@romega-solutions.com', team: 'Engineering', role: 'lead', is_active: 1, member_code: null },
+        { id: 1, name: 'Jane', email: 'jane@romega-solutions.com', team: 'Engineering', role: 'ic', is_active: 1, member_code: 'JD01', hourly_rate_usd: 10 },
+      ],
+      reporting: [{ user_id: 1, reports_to_user_id: 11, is_hidden: false }],
       timesheets: [
         { user_id: 1, date: '2026-07-01', duration_seconds: 3600 },
         { user_id: 1, date: '2026-07-02', duration_seconds: 1800 },
@@ -94,11 +102,15 @@ describe('GET /api/attendance?start=&end= (custom range)', () => {
     const data = await res.json();
 
     expect(res.status).toBe(200);
-    expect(usersChain.eq).toHaveBeenCalledWith('team', 'Engineering');
+    expect(usersChain.eq).not.toHaveBeenCalledWith('team', expect.anything());
+    expect(usersChain.in).toHaveBeenCalledWith('id', [11, 1]);
+    expect(usersChain.select).not.toHaveBeenCalledWith(expect.stringContaining('hourly_rate_usd'));
     expect(data.start).toBe('2026-07-01');
     expect(data.end).toBe('2026-07-02');
+    // The double ignores filters, so both rows come back; the rate is still stripped.
     expect(data.users).toEqual([
-      { id: 1, name: 'Jane', team: 'Engineering', role: 'ic', memberCode: 'JD01', hourlyRateUsd: 10 },
+      { id: 11, name: 'Ken', team: 'Engineering', role: 'lead', memberCode: null, hourlyRateUsd: null },
+      { id: 1, name: 'Jane', team: 'Engineering', role: 'ic', memberCode: 'JD01', hourlyRateUsd: null },
     ]);
     expect(data.timesheetsByDay).toEqual({
       '1:2026-07-01': 3600,
@@ -106,24 +118,27 @@ describe('GET /api/attendance?start=&end= (custom range)', () => {
     });
   });
 
-  it('does not team-scope users for an admin', async () => {
+  it('does not scope users for an admin and keeps rates', async () => {
     mockSession(user({ role: 'admin', team: null }));
     const { usersChain } = mockAttendanceTables({
-      users: [{ id: 1, name: 'Jane', email: 'jane@romega-solutions.com', team: 'Engineering', role: 'ic', member_code: null, hourly_rate_usd: null }],
+      users: [{ id: 1, name: 'Jane', email: 'jane@romega-solutions.com', team: 'Engineering', role: 'ic', member_code: null, hourly_rate_usd: 12.5 }],
       timesheets: [],
     });
 
     const { GET } = await import('@/app/api/attendance/route');
     const res = await GET(getReq('start=2026-07-01&end=2026-07-02'));
+    const data = await res.json();
 
     expect(res.status).toBe(200);
     expect(usersChain.eq).not.toHaveBeenCalledWith('team', expect.anything());
+    expect(usersChain.in).not.toHaveBeenCalled();
+    expect(data.users[0].hourlyRateUsd).toBe(12.5);
   });
 
-  it('lets an IC granted the Attendance checkbox see their team\'s roster', async () => {
-    mockSession(user({ role: 'ic', team: 'Engineering', toolAccess: ['attendance'] }));
-    mockAttendanceTables({
-      users: [{ id: 1, name: 'Jane', email: 'jane@romega-solutions.com', team: 'Engineering', role: 'ic', member_code: null, hourly_rate_usd: null }],
+  it('lets an IC without the Attendance checkbox in, scoped to themselves', async () => {
+    mockSession(user({ role: 'ic', team: 'Engineering', toolAccess: [] }));
+    const { usersChain } = mockAttendanceTables({
+      users: [{ id: 11, name: 'Ken', email: 'ken@romega-solutions.com', team: 'Engineering', role: 'ic', is_active: 1, member_code: null }],
       timesheets: [],
     });
 
@@ -131,14 +146,15 @@ describe('GET /api/attendance?start=&end= (custom range)', () => {
     const res = await GET(getReq('start=2026-07-01&end=2026-07-02'));
 
     expect(res.status).toBe(200);
+    expect(usersChain.in).toHaveBeenCalledWith('id', [11]);
   });
 
-  it('still blocks an IC without the Attendance checkbox', async () => {
-    mockSession(user({ role: 'ic', team: 'Engineering', toolAccess: [] }));
+  it('still requires a signed-in user', async () => {
+    mockSession(null);
 
     const { GET } = await import('@/app/api/attendance/route');
     const res = await GET(getReq('start=2026-07-01&end=2026-07-02'));
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
   });
 });

@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { computeOvertime } from '@/lib/utils';
 import { weeklySecondsForUser, baseWeeklySecondsForUser } from '@/lib/overtime-server';
-import { route, requireAdmin, requireTool } from '@/lib/api';
+import { route, requireAdmin, requireSession } from '@/lib/api';
+import { canSeeUserAttendance } from '@/lib/reporting-tree-server';
 import { addDaysYmd, dayOfWeekYmd, isValidYmd, mondayOfYmd, phtDateOf, phtDatesTouched } from '@/lib/pht';
 
 export const runtime = 'nodejs';
@@ -79,11 +80,11 @@ async function findOverlappingSession(
 
 // GET /api/admin/timesheets?userId=X&week=YYYY-MM-DD
 // Returns all clock-in/out sessions for a specific user for that week.
-// Gated the same way as the Attendance page/roster fetch: the per-user
-// Attendance checkbox (requireTool), not a hardcoded lead/admin role.
-// Non-admins can only view their own team (checked below).
+// Open to any signed-in user, like the Attendance page, but non-admins can
+// only read sessions for themselves or someone below them in the reporting
+// chain (checked below).
 export const GET = route(async (req: Request) => {
-  const session = await requireTool('attendance');
+  const session = await requireSession();
 
   const { searchParams } = new URL(req.url);
   const userIdParam = searchParams.get('userId');
@@ -107,7 +108,7 @@ export const GET = route(async (req: Request) => {
 
   const { data: targetUser } = await admin
     .from('users')
-    .select('id, name, team, is_active')
+    .select('id, name, is_active')
     .eq('id', userId)
     .maybeSingle();
 
@@ -115,7 +116,7 @@ export const GET = route(async (req: Request) => {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
-  if (session.role !== 'admin' && targetUser.team !== session.team) {
+  if (!(await canSeeUserAttendance(session, userId, admin))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 

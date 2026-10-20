@@ -109,10 +109,21 @@ export const timesheetEditRequests = pgTable('timesheet_edit_requests', {
   requestedAt:       text('requested_at').notNull().default(sql`CURRENT_TIMESTAMP`),
   decidedBy:         integer('decided_by'),
   decidedAt:         text('decided_at'),
-  decisionComment:   text('decision_comment'),             // mandatory on denial
+  decisionComment:   text('decision_comment'),             // final decider's note (admin step, or the supervisor's rejection reason)
+  // Two-step approval (drizzle/0017_two_step_time_approvals.sql): the main lead
+  // decides first, then an admin. decided_by/decided_at/decision_comment above
+  // record whoever closed the request.
+  stage:                text('stage'),                       // supervisor | admin | done (null = admin step)
+  supervisorId:         integer('supervisor_id').references(() => users.id, { onDelete: 'set null' }),
+  supervisorDecision:   text('supervisor_decision'),         // approved | denied
+  supervisorNote:       text('supervisor_note'),
+  supervisorDecidedAt:  text('supervisor_decided_at'),
+  supervisorRemindedAt: text('supervisor_reminded_at'),
 }, (t) => [
   index('timesheet_edit_requests_user_idx').on(t.userId),
   index('timesheet_edit_requests_timesheet_idx').on(t.timesheetId),
+  index('timesheet_edit_requests_supervisor_idx').on(t.supervisorId),
+  index('timesheet_edit_requests_status_stage_idx').on(t.status, t.stage),
 ]);
 
 export const presencePings = pgTable('presence_pings', {

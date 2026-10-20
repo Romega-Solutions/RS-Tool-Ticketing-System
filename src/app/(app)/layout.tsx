@@ -2,7 +2,8 @@ import { ReactNode } from "react";
 import { AppSidebar, MobileNav } from "@/components/app-sidebar";
 import { getSessionResult } from "@/lib/session";
 import { hasSupabaseConfig } from "@/lib/supabase/config";
-import { canAccessPath, defaultLandingPath, canAccessAdmin } from "@/lib/rbac";
+import { canAccessPath, defaultLandingPath, canAccessAdmin, canSeeTimeApprovals } from "@/lib/rbac";
+import { hasDirectReports } from "@/lib/time-approvals-server";
 import { getUserPhotoResolver } from "@/lib/storage";
 import { hasIncompleteHardCourse, isPathExemptFromHardEnforcement } from "@/lib/lms-enforcement";
 import { ClockWidget } from "@/components/clock-widget";
@@ -90,6 +91,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const quoteSeed = new Date().getDate() + (session.id ?? 0);
   const quote = await getDailyQuote(quoteSeed);
   const myPhotoUrl = (await getUserPhotoResolver())({ name: session.name, email: session.email });
+  // Time Approvals: admins, plus anyone with people reporting to them.
+  const showTimeApprovals = canSeeTimeApprovals(
+    session.role,
+    session.role !== 'admin' && await hasDirectReports(session.id),
+  );
 
   return (
     <div>
@@ -99,11 +105,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       
       <div className="flex h-screen bg-(--rs-primary-50) overflow-hidden text-(--rs-neutral-grey-900)">
         <NavProgress />
-        <AppSidebar role={session.role} userName={session.name} team={session.team} toolAccess={session.toolAccess} photoUrl={myPhotoUrl} />
+        <AppSidebar role={session.role} userName={session.name} team={session.team} toolAccess={session.toolAccess} photoUrl={myPhotoUrl} showTimeApprovals={showTimeApprovals} />
         <main className="flex-1 flex flex-col h-full overflow-hidden w-full">
           <header className="shrink-0 border-b border-[rgba(15,23,42,0.08)] bg-white px-4 py-3 shadow-[0_1px_3px_rgba(15,23,42,0.06)] md:px-8">
             <div className="flex items-center justify-between gap-4">
-              <MobileNav role={session.role} toolAccess={session.toolAccess} />
+              <MobileNav role={session.role} toolAccess={session.toolAccess} showTimeApprovals={showTimeApprovals} />
 
               <div className="min-w-0 flex-1">
                 <h2 className="font-serif text-base font-bold text-(--rs-neutral-grey-900) md:text-lg leading-tight">
