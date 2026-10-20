@@ -139,7 +139,10 @@ describe('buildFakeDataset', () => {
     expect(direct.some((u) => u.testRole === 'ic')).toBe(true);
     const second = data.users.filter((u) => direct.some((d) => d.key === u.reportsToKey));
     expect(second.some((u) => u.testRole === 'intern')).toBe(true);
-    expect(lead.toolAccess).toContain('attendance');
+    // Attendance is no longer a tool grant: everyone sees it, scoped to their
+    // reporting chain. The lead still gets the lead tool defaults.
+    expect(lead.toolAccess).toContain('pm');
+    expect(lead.toolAccess).not.toContain('attendance');
   });
 
   it('copies project shape with fake names and drops unknown users', () => {
