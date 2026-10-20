@@ -25,11 +25,11 @@ export const metadata: Metadata = {
   description: "Task management and reporting for Romega Solutions",
   icons: {
     icon: [
-      { url: "/images/rs-icon.png", type: "image/png" },
-      { url: "/images/rs-favicon.ico", type: "image/x-icon" },
+      { url: "/images/rs-tab-favicon.ico", sizes: "any" },
+      { url: "/images/rs-tab-icon.png", type: "image/png", sizes: "192x192" },
     ],
-    shortcut: "/images/rs-favicon.ico",
-    apple: "/images/rs-icon.png",
+    shortcut: "/images/rs-tab-favicon.ico",
+    apple: { url: "/images/rs-apple-icon.png", sizes: "180x180" },
   },
   openGraph: {
     title: "RS Portal",
