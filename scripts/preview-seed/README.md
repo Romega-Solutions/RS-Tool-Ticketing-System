@@ -39,6 +39,10 @@ one-time link generated on the server, and only on a preview deployment.
   `TARGET_SUPABASE_URL`.
 - It refuses to write to production (`cqyzzgfpjtyujjotezij`), checked on the
   flag, the URL and a legacy JWT key.
+- It only writes to a project on the hard-coded non-production allowlist in
+  `src/lib/supabase-project-guard.ts` (today only rs-dev,
+  `cgstmdpbzjuwwoudfeqk`), given as a standard `https://<ref>.supabase.co`
+  URL. The preview "View as" switcher uses the same allowlist.
 - It refuses when the target is the same project as the source.
 - It refuses a target that already has users who are not on
   `@preview.invalid`, unless you pass `--allow-other-users`.

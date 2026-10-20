@@ -10,16 +10,22 @@
 //      'production', local dev has none).
 //   2. PREVIEW_ROLE_SWITCHER must be exactly 'true'. This is a server-only env
 //      var (no NEXT_PUBLIC_ prefix), so it is never bundled into the browser.
-//   3. The Supabase project must not be the production project. Both the URL
-//      and, when it is a legacy JWT, the secret key's project ref are checked.
+//   3. The Supabase URL must be https://<ref>.supabase.co with a ref on the
+//      hard-coded non-production allowlist (never production), and the
+//      secret key, of any type, must not belong to production or, for a
+//      legacy JWT, to another project. See lib/supabase-project-guard.ts.
 //   4. Only the five known @preview.invalid accounts can ever be signed into.
 //
 // This module has no Next.js or Supabase imports so every guard can be unit
 // tested with a plain env object.
 
 import { PREVIEW_ROLES, type PreviewRole } from '@/lib/preview-roles';
+import { checkNonProductionProject } from '@/lib/supabase-project-guard';
 
 export { PREVIEW_ROLES, PREVIEW_ROLE_LABELS, type PreviewRole } from '@/lib/preview-roles';
+export {
+  PRODUCTION_SUPABASE_REF, NON_PRODUCTION_SUPABASE_REFS, mentionsProductionProject,
+} from '@/lib/supabase-project-guard';
 
 export const PREVIEW_EMAIL_DOMAIN = '@preview.invalid';
 
@@ -33,32 +39,11 @@ export const PREVIEW_ROLE_EMAILS: Readonly<Record<PreviewRole, string>> = Object
   intern: 'intern@preview.invalid',
 });
 
-export const PRODUCTION_SUPABASE_REF = 'cqyzzgfpjtyujjotezij';
-
 type Env = Record<string, string | undefined>;
 
 export type SwitcherStatus =
   | { enabled: true }
   | { enabled: false; reason: string };
-
-function decodeJwtRef(key: string): string | null {
-  const parts = key.split('.');
-  if (parts.length !== 3) return null;
-  try {
-    const json = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
-    const payload = JSON.parse(json) as { ref?: unknown };
-    return typeof payload.ref === 'string' ? payload.ref : null;
-  } catch {
-    return null;
-  }
-}
-
-/** True when a Supabase URL or key string points at the production project. */
-export function mentionsProductionProject(value: string | undefined | null): boolean {
-  if (!value) return false;
-  if (value.toLowerCase().includes(PRODUCTION_SUPABASE_REF)) return true;
-  return decodeJwtRef(value)?.toLowerCase() === PRODUCTION_SUPABASE_REF;
-}
 
 function evaluate(env: Env): SwitcherStatus {
   if (env.VERCEL_ENV !== 'preview') {
@@ -67,26 +52,8 @@ function evaluate(env: Env): SwitcherStatus {
   if (env.PREVIEW_ROLE_SWITCHER !== 'true') {
     return { enabled: false, reason: 'PREVIEW_ROLE_SWITCHER is not "true"' };
   }
-  const url = env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  if (!url) {
-    return { enabled: false, reason: 'Supabase URL is not configured' };
-  }
-  let host: string;
-  try {
-    host = new URL(url).host;
-  } catch {
-    return { enabled: false, reason: 'Supabase URL is not a valid URL' };
-  }
-  if (mentionsProductionProject(url) || mentionsProductionProject(host)) {
-    return { enabled: false, reason: 'Supabase URL points at production' };
-  }
-  const secret = env.SUPABASE_SECRET_KEY?.trim();
-  if (!secret) {
-    return { enabled: false, reason: 'Supabase secret key is not configured' };
-  }
-  if (mentionsProductionProject(secret)) {
-    return { enabled: false, reason: 'Supabase secret key belongs to production' };
-  }
+  const project = checkNonProductionProject(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SECRET_KEY);
+  if (!project.ok) return { enabled: false, reason: project.reason };
   return { enabled: true };
 }
 

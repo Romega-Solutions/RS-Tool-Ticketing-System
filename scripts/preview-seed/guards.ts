@@ -1,7 +1,11 @@
 // Safety checks for the preview seed. Pure functions so they can be unit
 // tested without touching any database.
 
-export const PRODUCTION_SUPABASE_REF = 'cqyzzgfpjtyujjotezij';
+import {
+  PRODUCTION_SUPABASE_REF, checkNonProductionProject, jwtRef, mentionsProductionProject,
+} from '../../src/lib/supabase-project-guard';
+
+export { PRODUCTION_SUPABASE_REF, jwtRef };
 export const SEED_EMAIL_DOMAIN = '@preview.invalid';
 export const SEED_MARKER = '[preview-seed]';
 
@@ -19,25 +23,6 @@ export function supabaseRef(value: string | undefined | null): string | null {
   } catch {
     return null;
   }
-}
-
-/** Project ref embedded in a legacy JWT key, if it is one. */
-export function jwtRef(key: string | undefined | null): string | null {
-  const parts = String(key ?? '').split('.');
-  if (parts.length !== 3) return null;
-  try {
-    const payload = JSON.parse(
-      Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'),
-    ) as { ref?: unknown };
-    return typeof payload.ref === 'string' ? payload.ref.toLowerCase() : null;
-  } catch {
-    return null;
-  }
-}
-
-function mentionsProduction(value: string | undefined | null): boolean {
-  const raw = String(value ?? '').toLowerCase();
-  return raw.includes(PRODUCTION_SUPABASE_REF) || jwtRef(raw) === PRODUCTION_SUPABASE_REF;
 }
 
 export type TargetInput = {
@@ -73,11 +58,17 @@ export function checkTarget(input: TargetInput): TargetCheck {
   if (
     flagRef === PRODUCTION_SUPABASE_REF
     || urlRef === PRODUCTION_SUPABASE_REF
-    || mentionsProduction(input.targetFlag)
-    || mentionsProduction(url)
-    || mentionsProduction(input.targetKey)
+    || mentionsProductionProject(input.targetFlag)
+    || mentionsProductionProject(url)
+    || mentionsProductionProject(input.targetKey)
   ) {
     return { ok: false, error: 'Refusing to write: the target is the production project.' };
+  }
+  // Same allowlist as the preview role switcher: only known non-production
+  // projects, standard URL only, and the key must not belong elsewhere.
+  const project = checkNonProductionProject(url, input.targetKey);
+  if (!project.ok) {
+    return { ok: false, error: `Refusing to write: ${project.reason}.` };
   }
   if (flagRef !== urlRef) {
     return { ok: false, error: `--target (${flagRef}) does not match TARGET_SUPABASE_URL (${urlRef}).` };
