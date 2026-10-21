@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
 import { MyTimeClient, type MySession, type MyRequest } from './my-time-client';
+import { stageLabel } from '@/lib/time-approvals';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +49,13 @@ export default async function MyTimePage() {
     requestedAt:       r.requested_at as string,
     decidedAt:         (r.decided_at as string | null) ?? null,
     decisionComment:   (r.decision_comment as string | null) ?? null,
+    stageLabel:        stageLabel({
+      status:       r.status as string,
+      stage:        (r.stage as string | null) ?? null,
+      supervisorId: (r.supervisor_id as number | null) ?? null,
+    }),
+    supervisorDecision: (r.supervisor_decision as MyRequest['supervisorDecision']) ?? null,
+    supervisorNote:     (r.supervisor_note as string | null) ?? null,
   }));
 
   const pendingByTimesheet = new Set(

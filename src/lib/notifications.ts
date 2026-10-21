@@ -15,7 +15,10 @@ import { renderNotificationEmail, type NotificationTaskMeta } from '@/lib/email-
 
 export type NotificationType =
   | 'project_added' | 'mentioned' | 'task_due' | 'task_assigned'
-  | 'time_edit_requested' | 'time_edit_decided' | 'thread_reply';
+  | 'time_edit_requested' | 'time_edit_decided' | 'thread_reply'
+  // In-app only (never mapped in EMAIL_PREF_KEY): filing receipt, supervisor
+  // approved / waiting on admin, and the supervisor's "still waiting" reminder.
+  | 'time_edit_received' | 'time_edit_update' | 'time_edit_reminder';
 
 // ── Per-user email preferences ─────────────────────────────────────────────
 // Mirrors users.notification_prefs (jsonb, default all-on — see schema.ts).
@@ -285,22 +288,82 @@ export async function notifyThreadReply(opts: {
   })));
 }
 
-// Attendance time-edit request → notify the approvers (the IC's team leads + admins).
+// Attendance time-edit request → notify whoever decides the current step: the
+// requester's supervisor (main lead), or the admins at the admin step.
 export async function notifyTimeEditRequested(opts: {
   recipientIds: number[];
   actorId:      number;
   actorName:    string;
   dateLabel:    string;
+  /** 'admin' after the supervisor approved (or when the supervisor step was skipped). */
+  step?:           'supervisor' | 'admin';
+  supervisorName?: string | null;
 }): Promise<void> {
   const unique = [...new Set(opts.recipientIds)];
+  const body = opts.step === 'admin' && opts.supervisorName
+    ? `For ${opts.dateLabel}. Approved by ${opts.supervisorName}; needs an admin decision in Time Approvals.`
+    : opts.step === 'admin'
+      ? `For ${opts.dateLabel}. Needs an admin decision in Time Approvals.`
+      : `For ${opts.dateLabel}. Review it in Time Approvals.`;
   await Promise.all(unique.map(userId => createNotification({
     userId,
     actorId: opts.actorId,
     type:    'time_edit_requested',
     title:   `${opts.actorName} requested a time correction`,
-    body:    `For ${opts.dateLabel}. Review it in the approval queue.`,
+    body,
     link:    '/attendance/requests',
   })));
+}
+
+// Receipt for the requester once their correction is filed (in-app only).
+// No actorId: the requester is both actor and recipient here, and
+// createNotification skips self-notifications when an actor is given.
+export async function notifyTimeEditReceived(opts: {
+  recipientId: number;
+  dateLabel:   string;
+  step:        'supervisor' | 'admin';
+}): Promise<void> {
+  await createNotification({
+    userId: opts.recipientId,
+    type:   'time_edit_received',
+    title:  'Your time correction was received',
+    body:   opts.step === 'supervisor'
+      ? `Your ${opts.dateLabel} request is waiting for your supervisor, then an admin.`
+      : `Your ${opts.dateLabel} request is waiting for an admin.`,
+    link:   '/my-time',
+  });
+}
+
+// The supervisor approved; the request now waits on an admin (in-app only).
+export async function notifyTimeEditForwarded(opts: {
+  recipientId:    number;
+  actorId:        number;
+  supervisorName: string;
+  dateLabel:      string;
+}): Promise<void> {
+  await createNotification({
+    userId:  opts.recipientId,
+    actorId: opts.actorId,
+    type:    'time_edit_update',
+    title:   'Your supervisor approved your time correction',
+    body:    `${opts.supervisorName} approved your ${opts.dateLabel} request. It now needs an admin's approval before your timesheet changes.`,
+    link:    '/my-time',
+  });
+}
+
+// One reminder to a supervisor who hasn't acted for 2 working days (in-app only).
+export async function notifyTimeEditReminder(opts: {
+  recipientId:   number;
+  requesterName: string;
+  dateLabel:     string;
+}): Promise<void> {
+  await createNotification({
+    userId: opts.recipientId,
+    type:   'time_edit_reminder',
+    title:  `Reminder: ${opts.requesterName}'s time correction is waiting for you`,
+    body:   `For ${opts.dateLabel}. Approve or reject it in Time Approvals.`,
+    link:   '/attendance/requests',
+  });
 }
 
 // Decision on a time-edit request → notify the IC who filed it.

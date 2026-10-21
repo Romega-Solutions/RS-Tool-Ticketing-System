@@ -34,6 +34,10 @@ export type MyRequest = {
   requestedAt:       string;
   decidedAt:         string | null;
   decisionComment:   string | null;
+  /** e.g. "Waiting for supervisor", "Waiting for admin", "Approved". */
+  stageLabel:        string;
+  supervisorDecision: 'approved' | 'denied' | null;
+  supervisorNote:     string | null;
 };
 
 // ── formatting helpers ──────────────────────────────────────────────────────
@@ -112,7 +116,7 @@ export function MyTimeClient({ sessions, requests }: { sessions: MySession[]; re
       {tab === 'logins' && (
         <section className="space-y-3">
           <p className="text-sm text-(--rs-neutral-grey-500)">
-            Your recent clock sessions. Spot a mistake? Click “Request correction” and your team lead will review it.
+            Your recent clock sessions. Spot a mistake? Click “Request correction”: your supervisor reviews it first, then an admin, and your timesheet changes once an admin approves.
           </p>
           {sessions.length === 0 ? (
             <Card><CardContent className="p-8 text-center text-sm text-(--rs-neutral-grey-500)">
@@ -179,7 +183,7 @@ export function MyTimeClient({ sessions, requests }: { sessions: MySession[]; re
                         {fmtTime(r.requestedClockIn ?? r.currentClockIn)} <span className="text-(--rs-neutral-grey-400)">→</span> {fmtTime(r.requestedClockOut ?? r.currentClockOut)}
                       </span>
                       <span className={`ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${b.cls}`}>
-                        <b.Icon className="h-3 w-3" /> {b.label}
+                        <b.Icon className="h-3 w-3" /> {r.status === 'pending' ? r.stageLabel : b.label}
                       </span>
                     </div>
                     <p className="text-sm text-(--rs-neutral-grey-600)">{r.reason}</p>
@@ -188,9 +192,19 @@ export function MyTimeClient({ sessions, requests }: { sessions: MySession[]; re
                         <Paperclip className="h-3 w-3" /> {r.documentName}
                       </p>
                     )}
+                    {r.supervisorDecision === 'approved' && r.supervisorNote && (
+                      <p className="rounded-md bg-green-50 px-2.5 py-1.5 text-xs text-green-700">
+                        <strong>Supervisor’s note:</strong> {r.supervisorNote}
+                      </p>
+                    )}
                     {r.status === 'denied' && r.decisionComment && (
                       <p className="rounded-md bg-red-50 px-2.5 py-1.5 text-xs text-red-700">
-                        <strong>Lead’s note:</strong> {r.decisionComment}
+                        <strong>{r.supervisorDecision === 'denied' ? 'Supervisor’s reason' : r.supervisorDecision ? 'Admin’s reason' : 'Reason'}:</strong> {r.decisionComment}
+                      </p>
+                    )}
+                    {r.status === 'approved' && r.decisionComment && (
+                      <p className="rounded-md bg-green-50 px-2.5 py-1.5 text-xs text-green-700">
+                        <strong>{r.supervisorDecision ? 'Admin’s note' : 'Note'}:</strong> {r.decisionComment}
                       </p>
                     )}
                   </div>
@@ -266,7 +280,7 @@ function RequestModal({ session, onClose, onSaved }: { session: MySession; onClo
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-(--rs-accent-700)" />
             <p className="text-xs leading-relaxed text-(--rs-accent-800)">
               <strong>Important:</strong> Provide a highly detailed reason and upload supporting documentation where applicable.
-              Vague, incomplete, or unexplained requests will be subject to disapproval by your lead.
+              Vague, incomplete, or unexplained requests may be declined by your supervisor or an admin.
             </p>
           </div>
 

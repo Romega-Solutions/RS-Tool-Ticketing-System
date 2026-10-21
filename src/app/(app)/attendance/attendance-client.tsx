@@ -1180,6 +1180,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                 wisePaymentReference={`Payroll Period ${fmtDate(monday)} - ${fmtDate(sunday)}`}
                 wiseAmounts={weeklyWiseAmounts}
                 fx={fx ?? undefined}
+                allowPayout={isAdmin}
               />
             </div>
           </div>
@@ -1413,6 +1414,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                 rangeLabel={fmtMonth(month)}
                 wisePaymentReference={`Payroll Period ${fmtMonth(month)}`}
                 wiseAmounts={monthlyWiseAmounts}
+                allowPayout={isAdmin}
               />
             </div>
           </div>

@@ -12,6 +12,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import Mention from '@tiptap/extension-mention';
 import {
   Bold, Italic, Underline as UnderlineIcon, Strikethrough, List, ListOrdered, Smile,
+  Heading2, Heading3, Quote, Link2,
 } from 'lucide-react';
 
 // Shared WYSIWYG editor, generalized from the recruiting job-description editor.
@@ -46,6 +47,9 @@ export interface RichTextEditorProps {
   mentionUsers?: RichTextMentionUser[];
   /** Adds an emoji-picker button. */
   enableEmoji?: boolean;
+  /** Adds long-form controls (H2/H3, blockquote, link) for article writing.
+   *  All of these already exist in StarterKit and the sanitizer allowlist. */
+  enableArticleFormats?: boolean;
   /** Chat-style mode for comment composers: hides the formatting toolbar
    *  entirely, tightens padding, and floats the emoji button inside the
    *  input instead of in a toolbar row. */
@@ -133,7 +137,19 @@ function ToolbarButton({
   );
 }
 
-function Toolbar({ editor, trailing }: { editor: Editor | null; trailing?: React.ReactNode }) {
+// Prompt-based link editing: empty input removes the link. Only http(s) and
+// mailto survive the sanitizer, so a bare domain gets https:// prepended.
+function editLink(editor: Editor) {
+  const current = (editor.getAttributes('link').href as string | undefined) ?? '';
+  const input = window.prompt('Link URL (leave empty to remove)', current);
+  if (input === null) return;
+  const url = input.trim();
+  if (!url) { editor.chain().focus().extendMarkRange('link').unsetLink().run(); return; }
+  const href = /^(https?:|mailto:)/i.test(url) ? url : `https://${url}`;
+  editor.chain().focus().extendMarkRange('link').setLink({ href }).run();
+}
+
+function Toolbar({ editor, trailing, articleFormats = false }: { editor: Editor | null; trailing?: React.ReactNode; articleFormats?: boolean }) {
   // While the font-size field is focused, its displayed text is driven by
   // this draft instead of the editor's (clamped) attribute. Without it, every
   // keystroke re-derives the shown value from the clamped mark, so typing the
@@ -148,6 +164,13 @@ function Toolbar({ editor, trailing }: { editor: Editor | null; trailing?: React
 
   return (
     <div className="flex flex-wrap items-center gap-1 border-b border-(--rs-neutral-grey-200) bg-(--rs-neutral-grey-50) px-2 py-1.5">
+      {articleFormats && (
+        <>
+          <ToolbarButton label="Heading"    active={editor.isActive('heading', { level: 2 })} onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}><Heading2 className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="Subheading" active={editor.isActive('heading', { level: 3 })} onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}><Heading3 className="h-4 w-4" /></ToolbarButton>
+          <span className="mx-1 h-5 w-px bg-(--rs-neutral-grey-200)" />
+        </>
+      )}
       <ToolbarButton label="Bold"          active={editor.isActive('bold')}      onClick={() => editor.chain().focus().toggleBold().run()}><Bold className="h-4 w-4" /></ToolbarButton>
       <ToolbarButton label="Italic"        active={editor.isActive('italic')}    onClick={() => editor.chain().focus().toggleItalic().run()}><Italic className="h-4 w-4" /></ToolbarButton>
       <ToolbarButton label="Underline"     active={editor.isActive('underline')} onClick={() => editor.chain().focus().toggleUnderline().run()}><UnderlineIcon className="h-4 w-4" /></ToolbarButton>
@@ -157,6 +180,12 @@ function Toolbar({ editor, trailing }: { editor: Editor | null; trailing?: React
 
       <ToolbarButton label="Bullet list"   active={editor.isActive('bulletList')}  onClick={() => editor.chain().focus().toggleBulletList().run()}><List className="h-4 w-4" /></ToolbarButton>
       <ToolbarButton label="Numbered list" active={editor.isActive('orderedList')} onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered className="h-4 w-4" /></ToolbarButton>
+      {articleFormats && (
+        <>
+          <ToolbarButton label="Quote" active={editor.isActive('blockquote')} onClick={() => editor.chain().focus().toggleBlockquote().run()}><Quote className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="Link"  active={editor.isActive('link')}       onClick={() => editLink(editor)}><Link2 className="h-4 w-4" /></ToolbarButton>
+        </>
+      )}
 
       <span className="mx-1 h-5 w-px bg-(--rs-neutral-grey-200)" />
 
@@ -229,6 +258,7 @@ export function RichTextEditor({
   enableMentions = false,
   mentionUsers = [],
   enableEmoji = false,
+  enableArticleFormats = false,
   hideToolbar = false,
   onSubmit,
 }: RichTextEditorProps) {
@@ -376,6 +406,7 @@ export function RichTextEditor({
         {!hideToolbar && (
           <Toolbar
             editor={editor}
+            articleFormats={enableArticleFormats}
             trailing={enableEmoji ? (
               <>
                 <span className="mx-1 h-5 w-px bg-(--rs-neutral-grey-200)" />
