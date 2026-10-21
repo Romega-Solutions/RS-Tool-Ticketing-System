@@ -134,15 +134,18 @@ export const GET = route(async (req: Request) => {
     const userIds = teamUsers.map(u => u.id);
 
     const { data: tsData } = userIds.length > 0
-      ? await admin.from('timesheets').select('user_id, date, duration_seconds')
-          .in('user_id', userIds).gte('date', startParam).lte('date', endParam).not('duration_seconds', 'is', null)
-      : { data: [] as { user_id: number; date: string; duration_seconds: number }[] };
+      ? await admin.from('timesheets').select('user_id, date, clocked_in_at, clocked_out_at, duration_seconds')
+          .in('user_id', userIds).gte('date', startParam).lte('date', endParam).order('clocked_in_at')
+      : { data: [] as { user_id: number; date: string; clocked_in_at: string; clocked_out_at: string | null; duration_seconds: number | null }[] };
 
     const timesheetsByDay: Record<string, number> = {};
-    for (const ts of (tsData ?? []) as { user_id: number; date: string; duration_seconds: number }[]) {
-      const key = `${ts.user_id}:${ts.date}`;
-      timesheetsByDay[key] = (timesheetsByDay[key] ?? 0) + ts.duration_seconds;
-    }
+    const sessions = ((tsData ?? []) as { user_id: number; date: string; clocked_in_at: string; clocked_out_at: string | null; duration_seconds: number | null }[]).map(ts => {
+      if (ts.duration_seconds != null) {
+        const key = `${ts.user_id}:${ts.date}`;
+        timesheetsByDay[key] = (timesheetsByDay[key] ?? 0) + ts.duration_seconds;
+      }
+      return { userId: ts.user_id, date: ts.date, clockedInAt: ts.clocked_in_at, clockedOutAt: ts.clocked_out_at };
+    });
 
     const usersOut = teamUsers.map(u => ({
       id: u.id, name: u.name, team: u.team, role: u.role,
@@ -150,7 +153,7 @@ export const GET = route(async (req: Request) => {
       hourlyRateUsd: rateOf(u),
     }));
 
-    return NextResponse.json({ start: startParam, end: endParam, users: usersOut, timesheetsByDay });
+    return NextResponse.json({ start: startParam, end: endParam, users: usersOut, timesheetsByDay, sessions });
   }
 
   const monthParam = searchParams.get('month');

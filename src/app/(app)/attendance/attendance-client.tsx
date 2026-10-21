@@ -1174,6 +1174,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                 baseName={`attendance_week_${weekStart}`}
                 rows={weeklyExportRows}
                 jsonMeta={{ weekStart, weekEnd: toLocalISO(sunday) }}
+                pageRange={{ start: weekStart, end: toLocalISO(sunday) }}
                 rangeLabel={`${fmtDate(monday)} – ${fmtDate(sunday)}, ${sunday.getFullYear()}`}
                 timesheet={{ rows: timesheetMemberRows, meta: timesheetMeta }}
                 wisePaymentReference={`Payroll Period ${fmtDate(monday)} - ${fmtDate(sunday)}`}

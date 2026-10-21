@@ -29,7 +29,7 @@ function getReq(qs: string) {
 // `then` like the real postgrest-js builder does when awaited directly.
 function chainable(result: { data: unknown; error?: unknown }) {
   const obj: Record<string, unknown> = {};
-  for (const method of ['select', 'eq', 'in', 'gte', 'lte', 'not']) {
+  for (const method of ['select', 'eq', 'in', 'gte', 'lte', 'not', 'order']) {
     obj[method] = vi.fn(() => obj);
   }
   obj.then = (resolve: (v: typeof result) => void) => resolve(result);
