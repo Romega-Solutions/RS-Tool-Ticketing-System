@@ -6,6 +6,7 @@ import { ApplyForm } from './apply-form';
 import { RichText } from '@/components/rich-text';
 import { ATS_POSITIONS_TAG, atsPositionTag } from '@/lib/cache-tags';
 import { isMissingSlugColumn, positionApplyLookup } from '@/lib/recruiting/position-slug';
+import { employmentLabel } from '@/lib/employment-types';
 
 const POSITION_DETAIL_COLUMNS =
   'id, job_title, location, compensation, employment_type, openings, job_description, is_open';
@@ -21,9 +22,6 @@ type Position = {
   is_open:         boolean;
 };
 
-function employmentLabel(v: string | null) {
-  return v === 'part_time' ? 'Part time' : 'Full time';
-}
 
 async function getCachedPosition(id: number) {
   return unstable_cache(

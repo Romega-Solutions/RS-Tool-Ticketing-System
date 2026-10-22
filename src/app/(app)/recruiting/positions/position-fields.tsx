@@ -1,5 +1,6 @@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { EMPLOYMENT_TYPE_OPTIONS, isEmploymentType } from '@/lib/employment-types';
 
 const inputClass =
   'h-11 rounded-xl border-(--rs-neutral-grey-200) focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100)';
@@ -12,7 +13,7 @@ export type PositionDefaults = {
   placement_type?:  string | null;  // 'internal' | 'external'
   location?:        string | null;
   compensation?:    string | null;
-  employment_type?: string | null;  // 'full_time' | 'part_time'
+  employment_type?: string | null;  // see EMPLOYMENT_TYPES
   openings?:        number | null;
   job_description?: string | null;
 };
@@ -24,7 +25,9 @@ export type PositionDefaults = {
  */
 export function PositionDetailFields({ defaults }: { defaults?: PositionDefaults }) {
   const placement  = defaults?.placement_type ?? 'internal';
-  const employment = defaults?.employment_type ?? 'full_time';
+  // No preselection: new positions must pick a type; edits show the saved value
+  // (an unknown legacy value also falls back to the placeholder).
+  const employment = isEmploymentType(defaults?.employment_type) ? defaults.employment_type : '';
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-4">
@@ -46,10 +49,12 @@ export function PositionDetailFields({ defaults }: { defaults?: PositionDefaults
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="employmentType" className="text-(--rs-neutral-grey-700) font-medium">Employment type</Label>
-        <select id="employmentType" name="employmentType" defaultValue={employment} className={selectClass}>
-          <option value="full_time">Full time</option>
-          <option value="part_time">Part time</option>
+        <Label htmlFor="employmentType" className="text-(--rs-neutral-grey-700) font-medium">Employment type *</Label>
+        <select id="employmentType" name="employmentType" required defaultValue={employment} className={selectClass}>
+          <option value="" disabled>Select a type</option>
+          {EMPLOYMENT_TYPE_OPTIONS.map(o => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
         </select>
       </div>
       <div className="space-y-1.5">

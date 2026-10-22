@@ -230,6 +230,8 @@ export const positions = pgTable('positions', {
   updatedAt:      timestamp('updated_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
   placementType:  text('placement_type').notNull().default('internal'),
   compensation:   text('compensation'),
+  // 'full_time' | 'part_time' | 'contractual' | 'internship' (src/lib/employment-types.ts),
+  // enforced by positions_employment_type_check (drizzle/0019).
   employmentType: text('employment_type').notNull().default('full_time'),
   openings:       integer('openings').notNull().default(1),
   // Nullable until 0014_positions_slug.sql is applied. Unique when present.
@@ -238,6 +240,7 @@ export const positions = pgTable('positions', {
   index('positions_open_idx').on(t.isOpen),
   index('positions_created_by_idx').on(t.createdBy),
   uniqueIndex('positions_slug_unique_idx').on(t.slug),
+  check('positions_employment_type_check', sql`${t.employmentType} IN ('full_time', 'part_time', 'contractual', 'internship')`),
 ]);
 
 // Generic request + raw-submission store for candidate-facing pre-employment

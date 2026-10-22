@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Pencil, MapPin, Users2 } from 'lucide-react';
 import { PositionStatusToggle, PositionDelete } from './position-row';
 import { CopyApplicationLinkButton } from './copy-link-button';
+import { employmentLabel } from '@/lib/employment-types';
 
 export type Position = {
   id:              number;
@@ -11,7 +12,7 @@ export type Position = {
   placement_type:  string | null;  // 'internal' | 'external'
   location:        string | null;
   compensation:    string | null;
-  employment_type: string | null;  // 'full_time' | 'part_time'
+  employment_type: string | null;  // see EMPLOYMENT_TYPES
   openings:        number | null;
   job_description: string | null;  // sanitized HTML
   is_open:         boolean;
@@ -27,9 +28,6 @@ function formatDate(iso: string) {
   catch { return iso; }
 }
 
-function employmentLabel(v: string | null) {
-  return v === 'part_time' ? 'Part time' : 'Full time';
-}
 
 function descriptionPreview(html: string | null) {
   if (!html) return '';

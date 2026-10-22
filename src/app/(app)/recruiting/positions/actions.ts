@@ -8,11 +8,12 @@ import { sanitizeRichText, isRichTextEmpty } from '@/lib/sanitize';
 import { ATS_POSITIONS_TAG, atsPositionTag } from '@/lib/cache-tags';
 import { allocatePositionSlug, isMissingSlugColumn, slugifyPositionTitle } from '@/lib/recruiting/position-slug';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { parseEmploymentType } from '@/lib/employment-types';
 
 const PLACEMENTS  = new Set(['internal', 'external']);
-const EMPLOYMENTS = new Set(['full_time', 'part_time']);
 
 // Pulls the new structured fields out of FormData with safe fallbacks.
+// Throws on an invalid employment type.
 function readPositionFields(formData: FormData) {
   const jobTitle    = String(formData.get('jobTitle') ?? '').trim();
   const location    = String(formData.get('location') ?? '').trim() || null;
@@ -21,8 +22,9 @@ function readPositionFields(formData: FormData) {
   const placementRaw  = String(formData.get('placementType') ?? '').trim();
   const placementType = PLACEMENTS.has(placementRaw) ? placementRaw : 'internal';
 
-  const employmentRaw  = String(formData.get('employmentType') ?? '').trim();
-  const employmentType = EMPLOYMENTS.has(employmentRaw) ? employmentRaw : 'full_time';
+  // Only the 4 known types are accepted; anything else is a form error
+  // (never silently saved as full_time).
+  const employmentType = parseEmploymentType(formData.get('employmentType'));
 
   const openingsNum = Math.trunc(Number(formData.get('openings')));
   const openings    = Number.isFinite(openingsNum) && openingsNum > 0 ? openingsNum : 1;

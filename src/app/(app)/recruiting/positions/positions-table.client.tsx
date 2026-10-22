@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Briefcase, ArrowUp, ArrowDown, ChevronsUpDown, Search } from 'lucide-react';
 import { PositionTableRow, type Position } from './position-table-row';
+import { EMPLOYMENT_TYPE_OPTIONS, type EmploymentType } from '@/lib/employment-types';
 
 type SortKey =
   | 'job_title' | 'placement_type' | 'location' | 'employment_type'
@@ -40,7 +41,7 @@ export function PositionsTable({ positions }: { positions: Position[] }) {
   const [search, setSearch]       = useState('');
   const [status, setStatus]       = useState<'all' | 'open' | 'closed'>('all');
   const [placement, setPlacement] = useState<'all' | 'internal' | 'external'>('all');
-  const [type, setType]           = useState<'all' | 'full_time' | 'part_time'>('all');
+  const [type, setType]           = useState<'all' | EmploymentType>('all');
   const [sortKey, setSortKey]     = useState<SortKey>('created_at');
   const [sortDir, setSortDir]     = useState<SortDir>('desc');
 
@@ -66,7 +67,7 @@ export function PositionsTable({ positions }: { positions: Position[] }) {
     }
     if (status !== 'all')    r = r.filter(p => (status === 'open' ? p.is_open : !p.is_open));
     if (placement !== 'all') r = r.filter(p => (p.placement_type ?? 'internal') === placement);
-    if (type !== 'all')      r = r.filter(p => (p.employment_type ?? 'full_time') === type);
+    if (type !== 'all')      r = r.filter(p => p.employment_type === type);
 
     return [...r].sort((a, b) => {
       const av = sortValue(a, sortKey);
@@ -121,8 +122,9 @@ export function PositionsTable({ positions }: { positions: Position[] }) {
           </select>
           <select aria-label="Filter by type" value={type} onChange={e => setType(e.target.value as typeof type)} className={selectClass}>
             <option value="all">All types</option>
-            <option value="full_time">Full time</option>
-            <option value="part_time">Part time</option>
+            {EMPLOYMENT_TYPE_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
           </select>
         </div>
 
