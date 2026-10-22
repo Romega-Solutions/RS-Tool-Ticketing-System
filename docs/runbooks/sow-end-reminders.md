@@ -30,3 +30,7 @@ If a row is stuck, first confirm in the sender's Gmail "Sent" folder whether the
 email went out. If it did, mark the row `sent`; if not, email HR by hand (or,
 with approval, delete the row so the next run retries while the milestone is
 still current). Any write on prod needs Duane's OK.
+
+## Launch note
+
+In `send` mode with `SOW_ALERTS_START_DATE` unset, the cutoff is "today", so a missed weekday run will not catch up. At launch, set `SOW_ALERTS_START_DATE` to the launch day: that blocks backfill and keeps missed-day catch-up working.
