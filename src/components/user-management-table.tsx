@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { ChevronDown, Pencil, X, Loader2, UserPlus, Eye, EyeOff, Users, UserMinus, RotateCcw, FileText, ArrowUp, ArrowDown, ChevronsUpDown, SlidersHorizontal, Mail, MailCheck, Filter } from 'lucide-react';
+import { manilaToday, sowBadge, isSowEnding } from '@/lib/sow-alerts';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -142,8 +143,8 @@ const COLS_KEY = 'usersTableColumns:v1';
 type ActiveFilter = 'all' | 'active' | 'inactive';
 const NO_TEAM = '__no_team__';
 const FILTERS_KEY = 'usersTableFilters:v1';
-type PersistedFilters = { roles: string[]; teams: string[]; active: ActiveFilter };
-const DEFAULT_FILTERS: PersistedFilters = { roles: [], teams: [], active: 'active' };
+type PersistedFilters = { roles: string[]; teams: string[]; active: ActiveFilter; sowEnding?: boolean };
+const DEFAULT_FILTERS: PersistedFilters = { roles: [], teams: [], active: 'active', sowEnding: false };
 
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every(x => typeof x === 'string');
 const parseCols = (stored: unknown): ColKey[] =>
@@ -154,8 +155,24 @@ const parseFilters = (stored: unknown): PersistedFilters => {
     roles: isStringArray(s.roles) ? s.roles : [],
     teams: isStringArray(s.teams) ? s.teams : [],
     active: s.active === 'all' || s.active === 'active' || s.active === 'inactive' ? s.active : DEFAULT_FILTERS.active,
+    sowEnding: s.sowEnding === true,
   };
 };
+
+function SowEndBadge({ endDate, today }: { endDate: string | null; today: string }) {
+  const badge = sowBadge(endDate, today);
+  if (!badge) return null;
+  const tone = badge.kind === 'ended'
+    ? 'bg-(--rs-neutral-grey-100) text-(--rs-neutral-grey-600)'
+    : badge.urgent
+      ? 'bg-red-50 text-red-700 border border-red-200'
+      : 'bg-amber-50 text-amber-800 border border-amber-200';
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium whitespace-nowrap ${tone}`}>
+      {badge.label}
+    </span>
+  );
+}
 
 function formatUsd(value: number | null): string {
   if (value == null) return '';
@@ -254,8 +271,12 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
   const filterTeams = useMemo(() => new Set(storedFilters.teams), [storedFilters]);
   const filterActive = storedFilters.active;
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
-  const persistFilters = (roles: Set<string>, teams: Set<string>, active: ActiveFilter) =>
-    setStoredFilters({ roles: [...roles], teams: [...teams], active });
+  const filterSowEnding = storedFilters.sowEnding === true;
+  const persistFilters = (roles: Set<string>, teams: Set<string>, active: ActiveFilter, sowEnding = filterSowEnding) =>
+    setStoredFilters({ roles: [...roles], teams: [...teams], active, sowEnding });
+  const toggleFilterSowEnding = () => persistFilters(filterRoles, filterTeams, filterActive, !filterSowEnding);
+  // Manila "today" for the SOW badge/filter (same zone the alert cron uses).
+  const sowToday = useMemo(() => manilaToday(), []);
   const toggleFilterRole = (role: string) => {
     const next = new Set(filterRoles);
     if (next.has(role)) next.delete(role); else next.add(role);
@@ -267,7 +288,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
     persistFilters(filterRoles, next, filterActive);
   };
   const setFilterActivePersisted = (active: ActiveFilter) => persistFilters(filterRoles, filterTeams, active);
-  const clearFilters = () => persistFilters(new Set(), new Set(), 'all');
+  const clearFilters = () => persistFilters(new Set(), new Set(), 'all', false);
 
   // Distinct roles/teams actually present in the data, for the filter menu.
   const availableRoles = useMemo(
@@ -283,7 +304,7 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
     [userList],
   );
   const activeFilterCount =
-    filterRoles.size + filterTeams.size + (filterActive !== 'all' ? 1 : 0);
+    filterRoles.size + filterTeams.size + (filterActive !== 'all' ? 1 : 0) + (filterSowEnding ? 1 : 0);
 
   useEffect(() => {
     const supabase = createClient();
@@ -335,9 +356,10 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
       if (filterActive === 'inactive' && u.isActive) return false;
       if (filterRoles.size > 0 && !filterRoles.has(u.role)) return false;
       if (filterTeams.size > 0 && !filterTeams.has(u.team || NO_TEAM)) return false;
+      if (filterSowEnding && !isSowEnding(u.endDate, sowToday)) return false;
       return true;
     });
-  }, [userList, filterActive, filterRoles, filterTeams]);
+  }, [userList, filterActive, filterRoles, filterTeams, filterSowEnding, sowToday]);
   const sortedUsers = useMemo(() => {
     const dirMul = sort.dir === 'asc' ? 1 : -1;
     return [...filteredUsers].sort((a, b) => {
@@ -623,6 +645,16 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                   ))}
                 </div>
 
+                <label className="flex items-center gap-2.5 mx-0 px-2 py-1.5 rounded-lg hover:bg-(--rs-neutral-grey-50) cursor-pointer text-sm text-(--rs-neutral-grey-700) border-t border-(--rs-neutral-grey-100)">
+                  <input
+                    type="checkbox"
+                    checked={filterSowEnding}
+                    onChange={toggleFilterSowEnding}
+                    className="w-4 h-4 rounded accent-(--rs-primary-500)"
+                  />
+                  SOW ending (75 days or less)
+                </label>
+
                 <p className="px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider text-(--rs-neutral-grey-400) border-t border-(--rs-neutral-grey-100)">Role</p>
                 <div className="max-h-40 overflow-y-auto">
                   {availableRoles.map(role => (
@@ -818,7 +850,10 @@ export function UserManagementTable({ initialUsers, currentUserId }: { initialUs
                     {show('endDate') && (
                       <td className="px-4 py-3">
                         {user.endDate ? (
-                          <span className="text-xs text-(--rs-neutral-grey-700) whitespace-nowrap">{fmtDate(user.endDate)}</span>
+                          <div className="flex flex-col items-start gap-1">
+                            <span className="text-xs text-(--rs-neutral-grey-700) whitespace-nowrap">{fmtDate(user.endDate)}</span>
+                            <SowEndBadge endDate={user.endDate} today={sowToday} />
+                          </div>
                         ) : (
                           <span className="text-xs text-(--rs-neutral-grey-300) italic">—</span>
                         )}

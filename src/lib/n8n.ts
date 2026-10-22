@@ -391,29 +391,48 @@ export async function sendAccountSetupEmail(msg: {
 // (point it at an HTML-capable Gmail sender); otherwise we fall back to the
 // account-setup webhook (N8N_ACCOUNT_SETUP_URL).
 //
-// Contract: POST { to, subject, body, html }.
+// Contract: POST { to, subject, body, html, cc? }.
+//   - `cc` (optional) is a comma-separated address list. The n8n Gmail node
+//     must map it to its CC option; until it does, CC is silently dropped.
 //   - `body` carries the PLAIN-TEXT version. The current OpenClaw Gmail node
 //     sends `body` as text, so recipients get a readable email even on the
 //     fallback webhook (never a wall of raw HTML tags).
 //   - `html` carries the branded HTML for an HTML-capable sender to render.
 //
-// FIRE-AND-FORGET: returns void, never throws, never blocks the caller. The
+// `sendEmail` is FIRE-AND-FORGET: returns void, never throws, never blocks the caller. The
 // HTTP POST runs in the background — callers must NOT await delivery — so that
 // posting a comment / saving a task is never slowed or broken by email latency
 // or a wedged n8n.
 // ─────────────────────────────────────────────────────────────────────────────
-export function sendEmail(msg: {
+export type EmailMessage = {
   to:      string;
+  /** Optional CC list. Sent as a comma-separated string (the n8n Gmail node's format). */
+  cc?:     string[];
   subject: string;
   html:    string;
   text?:   string;
-}): void {
-  const url = process.env.N8N_NOTIFICATION_EMAIL_URL?.trim()
+};
+
+function notificationEmailUrl(): string {
+  return process.env.N8N_NOTIFICATION_EMAIL_URL?.trim()
     || process.env.N8N_ACCOUNT_SETUP_URL?.trim()
     || '';
-  if (!url || !msg.to?.trim()) return; // not configured / no recipient → silent no-op
+}
 
+// Webhook payload. `cc` is only included when non-empty so the existing n8n
+// workflow (which ignores unknown keys) keeps working unchanged.
+export function buildEmailPayload(msg: EmailMessage): Record<string, string> {
   const text = msg.text ?? msg.html.replace(/<[^>]+>/g, '').trim();
+  const cc = [...new Set((msg.cc ?? []).map(e => e.trim()).filter(Boolean))]
+    .filter(e => e.toLowerCase() !== msg.to.trim().toLowerCase());
+  const payload: Record<string, string> = { to: msg.to, subject: msg.subject, body: text, html: msg.html };
+  if (cc.length) payload.cc = cc.join(', ');
+  return payload;
+}
+
+export function sendEmail(msg: EmailMessage): void {
+  const url = notificationEmailUrl();
+  if (!url || !msg.to?.trim()) return; // not configured / no recipient → silent no-op
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8_000);
@@ -421,7 +440,7 @@ export function sendEmail(msg: {
   void fetch(url, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ to: msg.to, subject: msg.subject, body: text, html: msg.html }),
+    body:    JSON.stringify(buildEmailPayload(msg)),
     signal:  controller.signal,
   })
     .then((res) => {
@@ -432,6 +451,33 @@ export function sendEmail(msg: {
       clearTimeout(timer);
       console.error('[notifications/email] send failed:', err instanceof Error ? err.message : err);
     });
+}
+
+export type EmailSendResult = { ok: true } | { ok: false; error: string };
+
+// Awaited variant: resolves only once n8n has answered, so callers that dedupe
+// on "really sent" (the SOW end-date alerts) can record sent vs failed.
+export async function sendEmailAwaited(msg: EmailMessage, timeoutMs = 15_000): Promise<EmailSendResult> {
+  const url = notificationEmailUrl();
+  if (!url) return { ok: false, error: 'email webhook not configured' };
+  if (!msg.to?.trim()) return { ok: false, error: 'no recipient' };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(buildEmailPayload(msg)),
+      signal:  controller.signal,
+    });
+    if (!res.ok) return { ok: false, error: `n8n responded ${res.status}` };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function parseResumeWithN8n(

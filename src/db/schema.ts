@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean, index, uniqueIndex, primaryKey, check, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean, index, uniqueIndex, primaryKey, check, timestamp, smallint } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id:            serial('id').primaryKey(),
@@ -860,4 +860,23 @@ export const userSecondaryLeads = pgTable('user_secondary_leads', {
   primaryKey({ columns: [t.userId, t.alsoReportsToUserId] }),
   index('user_secondary_leads_also_reports_to_idx').on(t.alsoReportsToUserId),
   check('user_secondary_leads_not_self', sql`${t.userId} <> ${t.alsoReportsToUserId}`),
+]).enableRLS();
+
+// SOW end-date alert log (drizzle/0018_sow_end_reminders.sql). One row per
+// (user, end_date, milestone): the unique key is the dedupe, and a changed
+// end_date starts a fresh schedule. status: pending → sent | failed, or
+// skipped (an older milestone superseded by a newer one on the same run).
+export const sowEndReminders = pgTable('sow_end_reminders', {
+  id:            serial('id').primaryKey(),
+  userId:        integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  endDate:       text('end_date').notNull(),
+  milestoneDays: smallint('milestone_days').notNull(),
+  sentAt:        timestamp('sent_at', { withTimezone: true, mode: 'string' }),
+  status:        text('status').notNull().default('pending'),
+  error:         text('error'),
+  createdAt:     timestamp('created_at', { withTimezone: true, mode: 'string' }).notNull().defaultNow(),
+}, (t) => [
+  unique('sow_end_reminders_user_end_milestone_key').on(t.userId, t.endDate, t.milestoneDays),
+  check('sow_end_reminders_milestone_check', sql`${t.milestoneDays} IN (75, 60, 45)`),
+  check('sow_end_reminders_status_check', sql`${t.status} IN ('pending', 'sent', 'failed', 'skipped')`),
 ]).enableRLS();
