@@ -14,8 +14,6 @@
 --   id 10 Full-stack Developer Intern — Mobile Dating App     part_time  closed
 --   id 11 Front-End Developer Intern                          part_time  open
 --   id 12 Full-Stack Developer Intern                         part_time  open
--- Open question: ids 1 and 2 were full_time. Drop them from the lists below if
--- Duane says "only 6–12".
 
 -- ── 1. BACKUP / VERIFY (read-only). Save this output before step 2. ──────────
 SELECT id, job_title, employment_type, is_open, updated_at
