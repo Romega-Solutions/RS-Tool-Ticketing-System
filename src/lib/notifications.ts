@@ -18,7 +18,9 @@ export type NotificationType =
   | 'time_edit_requested' | 'time_edit_decided' | 'thread_reply'
   // In-app only (never mapped in EMAIL_PREF_KEY): filing receipt, supervisor
   // approved / waiting on admin, and the supervisor's "still waiting" reminder.
-  | 'time_edit_received' | 'time_edit_update' | 'time_edit_reminder';
+  | 'time_edit_received' | 'time_edit_update' | 'time_edit_reminder'
+  // In-app only: SOW end-date milestone (HR admins + the employee's lead).
+  | 'sow_end';
 
 // ── Per-user email preferences ─────────────────────────────────────────────
 // Mirrors users.notification_prefs (jsonb, default all-on — see schema.ts).

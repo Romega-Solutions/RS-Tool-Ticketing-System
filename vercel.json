@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/time-edit-reminders",
       "schedule": "30 1 * * 1-5"
+    },
+    {
+      "path": "/api/cron/sow-end-reminders",
+      "schedule": "0 13 * * 1-5"
     }
   ]
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bell, AtSign, FolderPlus, CalendarClock, CheckCheck, Timer, MessageSquareReply } from 'lucide-react';
+import { Bell, AtSign, FolderPlus, CalendarClock, CheckCheck, Timer, MessageSquareReply, CalendarX } from 'lucide-react';
 import { playRomegaNotificationSound } from '@/lib/notification-sound';
 
 type NotificationItem = {
@@ -36,6 +36,7 @@ function TypeIcon({ type }: { type: string }) {
   if (type === 'task_due')     return <CalendarClock className={cls} />;
   if (type === 'thread_reply') return <MessageSquareReply className={cls} />;
   if (type.startsWith('time_edit_')) return <Timer className={cls} />;
+  if (type === 'sow_end')      return <CalendarX className={cls} />;
   return <Bell className={cls} />;
 }
 
