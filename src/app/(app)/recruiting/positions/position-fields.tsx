@@ -1,5 +1,6 @@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { EMPLOYMENT_TYPE_OPTIONS } from '@/lib/employment-types';
 
 const inputClass =
   'h-11 rounded-xl border-(--rs-neutral-grey-200) focus:border-(--rs-primary-300) focus:ring-4 focus:ring-(--rs-primary-100)';
@@ -12,7 +13,7 @@ export type PositionDefaults = {
   placement_type?:  string | null;  // 'internal' | 'external'
   location?:        string | null;
   compensation?:    string | null;
-  employment_type?: string | null;  // 'full_time' | 'part_time'
+  employment_type?: string | null;  // see EMPLOYMENT_TYPES
   openings?:        number | null;
   job_description?: string | null;
 };
@@ -48,8 +49,9 @@ export function PositionDetailFields({ defaults }: { defaults?: PositionDefaults
       <div className="space-y-1.5">
         <Label htmlFor="employmentType" className="text-(--rs-neutral-grey-700) font-medium">Employment type</Label>
         <select id="employmentType" name="employmentType" defaultValue={employment} className={selectClass}>
-          <option value="full_time">Full time</option>
-          <option value="part_time">Part time</option>
+          {EMPLOYMENT_TYPE_OPTIONS.map(o => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
         </select>
       </div>
       <div className="space-y-1.5">
