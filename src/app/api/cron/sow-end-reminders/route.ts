@@ -7,16 +7,13 @@ import { renderNotificationEmail } from '@/lib/email-templates';
 import { isHrTeam } from '@/lib/rbac';
 import { findFounderId } from '@/lib/reporting-tree';
 import {
-  manilaToday, planMilestone, sowAlertMode, sowCcRecipients, addDays, parseIsoDate,
+  manilaToday, planMilestone, sowAlertMode, sowCcRecipients, parseIsoDate, resolveLaunchCutoff, sowBellBody,
   type SowPerson,
 } from '@/lib/sow-alerts';
 
 export const runtime = 'nodejs';
 
 const DEFAULT_TO = 'hr@romega-solutions.com';
-// Without SOW_ALERTS_START_DATE, a milestone may be caught up for at most this
-// many days (covers a weekend plus a missed weekday), never a launch backfill.
-const DEFAULT_CATCHUP_DAYS = 4;
 
 type UserRow = {
   id: number; name: string | null; email: string | null; role: string | null;
@@ -37,8 +34,8 @@ export const GET = route(async (req: Request) => {
   const today = manilaToday();
   if (mode === 'off') return NextResponse.json({ ranAt: new Date().toISOString(), today, mode, planned: 0 });
 
-  const startEnv = process.env.SOW_ALERTS_START_DATE?.trim();
-  const launchCutoff = startEnv && parseIsoDate(startEnv) != null ? startEnv : addDays(today, -DEFAULT_CATCHUP_DAYS);
+  // No backfill: in send mode without SOW_ALERTS_START_DATE the cutoff is today.
+  const launchCutoff = resolveLaunchCutoff(mode, process.env.SOW_ALERTS_START_DATE, today);
 
   const sb = createAdminClient();
   const [{ data: users, error: usersErr }, { data: reporting }] = await Promise.all([
@@ -97,14 +94,17 @@ export const GET = route(async (req: Request) => {
 
     // Older milestones due on the same run are recorded as skipped.
     if (plan.skip.length) {
-      await sb.from('sow_end_reminders').upsert(
+      const { error: skipErr } = await sb.from('sow_end_reminders').upsert(
         plan.skip.map(m => ({ user_id: u.id, end_date: endDate, milestone_days: m, status: 'skipped' })),
         { onConflict: 'user_id,end_date,milestone_days', ignoreDuplicates: true },
       );
+      if (skipErr) console.error(`[sow-alerts] skip record failed for user ${u.id}: ${skipErr.message}`);
     }
 
     // Claim the milestone. Only a newly inserted row may send (a double run or
-    // a concurrent cron gets nothing back and stops here).
+    // a concurrent cron gets nothing back and stops here). A crash between this
+    // claim and the status update below leaves the row 'pending' and it is not
+    // retried; see docs/runbooks/sow-end-reminders.md.
     const { data: claimed, error: claimErr } = await sb.from('sow_end_reminders')
       .upsert(
         { user_id: u.id, end_date: endDate, milestone_days: plan.send, status: 'pending' },
@@ -134,7 +134,7 @@ export const GET = route(async (req: Request) => {
     bellIds.delete(u.id);
     for (const uid of bellIds) {
       if (!byId.get(uid)?.is_active) continue;
-      await createNotification({ userId: uid, type: 'sow_end', title, body, link });
+      await createNotification({ userId: uid, type: 'sow_end', title, body: sowBellBody(body, sent.ok), link });
     }
 
     results.push({ userId: u.id, milestone: plan.send, status: sent.ok ? 'sent' : 'failed', cc: ccIds.length, founderFallback: usedFounderFallback });

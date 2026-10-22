@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   planMilestone, milestoneSendDate, shiftWeekendToMonday, sowBadge, isSowEnding,
-  sowCcRecipients, sowAlertMode, cronUtcToManila, parseIsoDate, daysBetween, type SowPerson,
+  sowCcRecipients, sowAlertMode, resolveLaunchCutoff, sowBellBody, cronUtcToManila, parseIsoDate, daysBetween, type SowPerson,
 } from '@/lib/sow-alerts';
 
 // 2026-12-31 is a Thursday. Milestones: -75 = 2026-10-17 (Sat), -60 = 2026-11-01 (Sun),
@@ -139,5 +139,31 @@ describe('mode and schedule', () => {
     const c = crons.find(x => x.path === '/api/cron/sow-end-reminders');
     expect(c?.schedule).toBe('0 13 * * 1-5');
     expect(cronUtcToManila(c!.schedule)).toEqual({ hour: 21, minute: 0, days: '1-5' });
+  });
+});
+
+describe('launch cutoff', () => {
+  const today = '2026-10-22';
+  it('send mode without a start date: cutoff is today (no backfill)', () => {
+    expect(resolveLaunchCutoff('send', undefined, today)).toBe(today);
+    expect(resolveLaunchCutoff('send', '  ', today)).toBe(today);
+    expect(resolveLaunchCutoff('send', 'not-a-date', today)).toBe(today);
+    // A Monday milestone missed by one day does not send once sends are on.
+    expect(planMilestone(END, '2026-10-20', new Set(), resolveLaunchCutoff('send', undefined, '2026-10-20')).send).toBeNull();
+    expect(planMilestone(END, '2026-10-19', new Set(), resolveLaunchCutoff('send', undefined, '2026-10-19')).send).toBe(75);
+  });
+  it('a valid start date wins in any mode', () => {
+    expect(resolveLaunchCutoff('send', '2026-10-01', today)).toBe('2026-10-01');
+    expect(resolveLaunchCutoff('log', '2026-10-01', today)).toBe('2026-10-01');
+  });
+  it('log mode keeps a short catch-up window', () => {
+    expect(resolveLaunchCutoff('log', undefined, today)).toBe('2026-10-18');
+  });
+});
+
+describe('bell body', () => {
+  it('flags a failed email', () => {
+    expect(sowBellBody('Body.', true)).toBe('Body.');
+    expect(sowBellBody('Body.', false)).toBe('Body. (email failed)');
   });
 });

@@ -177,3 +177,24 @@ export function cronUtcToManila(schedule: string): { hour: number; minute: numbe
   const [min, hr, , , dow] = schedule.trim().split(/\s+/);
   return { hour: (Number(hr) + 8) % 24, minute: Number(min), days: dow };
 }
+
+/** Days a milestone may be caught up in log-only mode when no start date is set. */
+export const LOG_MODE_CATCHUP_DAYS = 4;
+
+/**
+ * Earliest send date that may email (or be reported in log mode).
+ * A valid SOW_ALERTS_START_DATE always wins. Otherwise, in 'send' mode the
+ * cutoff is today, so turning sends on never backfills older milestones; in
+ * 'log' mode a short catch-up window is shown for the dry run.
+ */
+export function resolveLaunchCutoff(mode: SowAlertMode, startEnv: string | undefined, today: string): string {
+  const start = startEnv?.trim();
+  if (start && parseIsoDate(start) != null) return start;
+  if (mode === 'send') return today;
+  return addDays(today, -LOG_MODE_CATCHUP_DAYS);
+}
+
+/** Bell body; flags a failed email so HR knows to follow up by hand. */
+export function sowBellBody(body: string, emailOk: boolean): string {
+  return emailOk ? body : `${body} (email failed)`;
+}
