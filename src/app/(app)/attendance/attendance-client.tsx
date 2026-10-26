@@ -5,6 +5,7 @@ import { WEEKLY_CAP_SECONDS } from '@/lib/utils';
 import { addDaysYmd, phtDateOf, phtWeekStartOf } from '@/lib/pht';
 import { Button } from '@/components/ui/button';
 import { AttendanceExportSheet } from '@/components/attendance-export-sheet';
+import { monthDateRange } from '@/lib/export-utils';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { PersonAvatar } from '@/components/person-avatar';
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Loader2, Clock, Search, X, Pencil, LogOut, Save, Trash2, ShieldCheck, History, Plus } from 'lucide-react';
@@ -984,7 +985,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
     const saturdaySeconds = timesheetsByDay[`${user.id}:${weekdayDateStrs[5]}`] ?? 0;
     const sundaySeconds = timesheetsByDay[`${user.id}:${weekdayDateStrs[6]}`] ?? 0;
 
-    return {
+    return { userId: user.id, memberCode: user.memberCode ?? null, row: {
       member: user.name,
       team: user.team ?? '',
       monday: rec?.mondayStatus ?? '',
@@ -998,13 +999,14 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
       sunday_hours: fmtSeconds(sundaySeconds),
       week_total_hours: fmtSeconds(weekSeconds),
       notes: rec?.notes ?? '',
-    };
+    } };
   });
 
   // Structured per-day hours for the Romega Weekly Timesheet template.
   const timesheetMemberRows = teamUsers.map(user => {
     const daySeconds = weekdayDateStrs.map(date => timesheetsByDay[`${user.id}:${date}`] ?? 0);
     return {
+      id: user.id,
       name: user.name,
       memberCode: user.memberCode ?? '',
       daySeconds,
@@ -1013,10 +1015,10 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
     };
   });
 
-  // Member name → USD gross for the week (tracked hours × rate), null if no rate.
-  const weeklyWiseAmounts: Record<string, number | null> = Object.fromEntries(
+  // User id → USD gross for the week (tracked hours × rate), null if no rate.
+  const weeklyWiseAmounts: Record<number, number | null> = Object.fromEntries(
     timesheetMemberRows.map(r => [
-      r.name,
+      r.id,
       r.hourlyRateUsd != null ? (r.periodSeconds / 3600) * r.hourlyRateUsd : null,
     ]),
   );
@@ -1030,7 +1032,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
     dayOfWeekLabels: DAY_KEYS.map(k => DAY_LABELS[k]),
   };
 
-  const monthlyExportRows = monthlySummary.map(row => ({
+  const monthlyExportRows = monthlySummary.map(row => ({ userId: row.userId, row: {
     member: row.name,
     team: row.team ?? '',
     present: row.present,
@@ -1041,12 +1043,12 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
     tracked_days: row.present + row.wfh + row.leave + row.absent,
     workdays: monthWorkdays,
     total_hours: fmtSeconds(row.totalSeconds),
-  }));
+  } }));
 
-  // Member name → USD gross for the month (tracked hours × rate), null if no rate.
-  const monthlyWiseAmounts: Record<string, number | null> = Object.fromEntries(
+  // User id → USD gross for the month (tracked hours × rate), null if no rate.
+  const monthlyWiseAmounts: Record<number, number | null> = Object.fromEntries(
     monthlySummary.map(row => [
-      row.name,
+      row.userId,
       row.hourlyRateUsd != null ? (row.totalSeconds / 3600) * row.hourlyRateUsd : null,
     ]),
   );
@@ -1410,6 +1412,7 @@ export function AttendanceClient({ isAdmin = false }: { isAdmin?: boolean }) {
                 mode="monthly"
                 baseName={`attendance_month_${month}`}
                 rows={monthlyExportRows}
+                pageRange={monthDateRange(month)}
                 jsonMeta={{ month, workdays: monthWorkdays }}
                 rangeLabel={fmtMonth(month)}
                 wisePaymentReference={`Payroll Period ${fmtMonth(month)}`}

@@ -100,6 +100,31 @@ describe('GET /api/attendance?start=&end= (paged range export)', () => {
     expect(Object.keys(data.sessions[0]).sort()).toEqual(['clockedInAt', 'clockedOutAt', 'date', 'userId']);
   });
 
+  it('selects and returns no email or role for the people in the range response', async () => {
+    mockSession(user({ role: 'admin' }));
+    const users = table(adminUsers);
+    mockDb({ users, timesheets: table(sessionsFor(1), { paged: true }) });
+    const { GET } = await import('@/app/api/attendance/route');
+    const data = await (await GET(req('start=2026-07-01&end=2026-07-01'))).json();
+
+    const selected = users.select.mock.calls.map(c => String(c[0])).join(' ');
+    expect(selected).not.toMatch(/email|role/);
+    expect(Object.keys(data.users[0]).sort()).toEqual(['hourlyRateUsd', 'id', 'memberCode', 'name', 'team']);
+    expect(JSON.stringify(data)).not.toMatch(/example\.test/);
+  });
+
+  it('does not add the hours of a still-open session to the day totals', async () => {
+    mockSession(user({ role: 'admin' }));
+    const open = { id: 1, user_id: 1, date: '2026-07-01', clocked_in_at: '2026-07-01T01:00:00Z', clocked_out_at: null, duration_seconds: null };
+    const closed = { id: 2, user_id: 1, date: '2026-07-01', clocked_in_at: '2026-07-01T00:00:00Z', clocked_out_at: '2026-07-01T00:30:00Z', duration_seconds: 1800 };
+    mockDb({ users: table(adminUsers), timesheets: table([closed, open], { paged: true }) });
+    const { GET } = await import('@/app/api/attendance/route');
+    const data = await (await GET(req('start=2026-07-01&end=2026-07-01'))).json();
+
+    expect(data.timesheetsByDay['1:2026-07-01']).toBe(1800);
+    expect(data.sessions.map((x: { clockedOutAt: string | null }) => x.clockedOutAt)).toEqual(['2026-07-01T00:30:00Z', null]);
+  });
+
   it('asks for exact counts, a stable order and a fixed clock-in cutoff', async () => {
     mockSession(user({ role: 'admin' }));
     const timesheets = table(sessionsFor(3), { paged: true });

@@ -143,11 +143,11 @@ export const GET = route(async (req: Request) => {
     isAdmin && u.hourly_rate_usd != null ? Number(u.hourly_rate_usd) : null;
 
   if (startParam && endParam) {
-    let usersQuery = admin.from('users').select(`id, name, email, team, role, member_code${rateCol}`).eq('is_active', 1);
+    let usersQuery = admin.from('users').select(`id, name, team, member_code${rateCol}`).eq('is_active', 1);
     if (visible !== 'all') usersQuery = usersQuery.in('id', visible);
     const { data: teamUsersData, error: usersError } = await usersQuery;
     ensureLoaded({ error: usersError });
-    const teamUsers = (teamUsersData ?? []) as unknown as { id: number; name: string; email: string | null; team: string | null; role: string; member_code: string | null; hourly_rate_usd?: number | string | null }[];
+    const teamUsers = (teamUsersData ?? []) as unknown as { id: number; name: string; team: string | null; member_code: string | null; hourly_rate_usd?: number | string | null }[];
     const userIds = teamUsers.map(u => u.id);
 
     type RangeTimesheet = { id: number; user_id: number; date: string; clocked_in_at: string; clocked_out_at: string | null; duration_seconds: number | null };
@@ -171,7 +171,7 @@ export const GET = route(async (req: Request) => {
     });
 
     const usersOut = teamUsers.map(u => ({
-      id: u.id, name: u.name, team: u.team, role: u.role,
+      id: u.id, name: u.name, team: u.team,
       memberCode: u.member_code ?? null,
       hourlyRateUsd: rateOf(u),
     }));
