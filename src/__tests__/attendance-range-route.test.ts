@@ -27,9 +27,9 @@ function getReq(qs: string) {
 // Chainable Supabase query-builder double: every filter method returns itself
 // so any call sequence (.select().eq().eq()...) works, and it resolves via
 // `then` like the real postgrest-js builder does when awaited directly.
-function chainable(result: { data: unknown; error?: unknown }) {
+function chainable(result: { data: unknown; count?: number; error?: unknown }) {
   const obj: Record<string, unknown> = {};
-  for (const method of ['select', 'eq', 'in', 'gte', 'lte', 'not', 'order']) {
+  for (const method of ['select', 'eq', 'in', 'gte', 'lte', 'not', 'order', 'range']) {
     obj[method] = vi.fn(() => obj);
   }
   obj.then = (resolve: (v: typeof result) => void) => resolve(result);
@@ -38,7 +38,7 @@ function chainable(result: { data: unknown; error?: unknown }) {
 
 function mockAttendanceTables({ users, timesheets, reporting = [] }: { users: unknown[]; timesheets: unknown[]; reporting?: unknown[] }) {
   const usersChain = chainable({ data: users });
-  const timesheetsChain = chainable({ data: timesheets });
+  const timesheetsChain = chainable({ data: timesheets, count: timesheets.length });
   const reportingChain = chainable({ data: reporting });
   const secondaryChain = chainable({ data: [] });
   const from = vi.fn((table: string) => {
@@ -92,8 +92,8 @@ describe('GET /api/attendance?start=&end= (custom range)', () => {
       ],
       reporting: [{ user_id: 1, reports_to_user_id: 11, is_hidden: false }],
       timesheets: [
-        { user_id: 1, date: '2026-07-01', duration_seconds: 3600 },
-        { user_id: 1, date: '2026-07-02', duration_seconds: 1800 },
+        { id: 1, user_id: 1, date: '2026-07-01', duration_seconds: 3600 },
+        { id: 2, user_id: 1, date: '2026-07-02', duration_seconds: 1800 },
       ],
     });
 

@@ -259,6 +259,16 @@ function longDateLabel(iso: string): string {
   return `${d.getDate()} ${d.toLocaleDateString('en-US', { month: 'short' })} ${d.getFullYear()}`;
 }
 
+/**
+ * Why a /api/attendance?start=&end= reply must not be exported, or null when it
+ * is safe. Only a reply the server marked `complete: true` may become a file.
+ */
+export function rangeReplyError(reply: { error?: string; complete?: boolean }): string | null {
+  if (reply.error) return reply.error;
+  if (reply.complete !== true) return "Couldn't load the full range. Please try again.";
+  return null;
+}
+
 export function buildCustomRangeExport(
   start: string,
   end: string,
