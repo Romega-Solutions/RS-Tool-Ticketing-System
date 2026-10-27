@@ -21,6 +21,7 @@ import {
   buildWiseCsv,
   buildCustomRangeExport,
   isValidDateRange,
+  rangeReplyError,
   datesBetween,
   type ExportRow,
   type TimesheetMemberRow,
@@ -135,11 +136,13 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
     if (!fetchKey) return;
 
     let cancelled = false;
-    fetch(`/api/attendance?start=${fetchStart}&end=${fetchEnd}`)
+    fetch(`/api/attendance?start=${fetchStart}&end=${fetchEnd}`, { cache: 'no-store' })
       .then(r => r.json())
-      .then((d: { users?: CustomRangeApiUser[]; timesheetsByDay?: Record<string, number>; sessions?: CustomRangeApiSession[]; error?: string }) => {
+      .then((d: { users?: CustomRangeApiUser[]; timesheetsByDay?: Record<string, number>; sessions?: CustomRangeApiSession[]; complete?: boolean; error?: string }) => {
         if (cancelled) return;
-        if (d.error) { setRangeError({ key: fetchKey, message: d.error }); return; }
+        // Never build a file from an error or from a reply the server didn't confirm as complete.
+        const replyError = rangeReplyError(d);
+        if (replyError) { setRangeError({ key: fetchKey, message: replyError }); return; }
         setRangeData(buildCustomRangeExport(fetchStart, fetchEnd, d.users ?? [], d.timesheetsByDay ?? {}, d.sessions ?? []));
       })
       .catch(() => { if (!cancelled) setRangeError({ key: fetchKey, message: 'Failed to load data for this range.' }); });

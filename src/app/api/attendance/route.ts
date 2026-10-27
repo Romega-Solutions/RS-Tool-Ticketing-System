@@ -2,12 +2,25 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getUserPhotoResolver } from '@/lib/storage';
-import { route, requireAdmin, requireSession, parseBody, badRequest } from '@/lib/api';
+import { route, requireAdmin, requireSession, parseBody, badRequest, HttpError } from '@/lib/api';
 import { getVisibleUserIds } from '@/lib/reporting-tree-server';
 import { WEEKLY_CAP_SECONDS } from '@/lib/utils';
 import { isValidDateRange } from '@/lib/export-utils';
+import { fetchAllRows, snapshotCutoff, rangeDayCount, MAX_RANGE_DAYS } from '@/lib/timesheet-paging';
 
 export const runtime = 'nodejs';
+
+// Attendance responses carry HR data (clock times, notes, pay rates): never cache.
+const NO_STORE = { 'Cache-Control': 'private, no-store' };
+
+// A failed read must fail the request, not quietly become an empty list.
+function ensureLoaded(...results: { data?: unknown; error?: { code?: string } | null }[]): void {
+  const failed = results.find(r => r.error);
+  if (failed) {
+    console.error(`[attendance] query failed (code=${failed.error?.code ?? 'unknown'})`);
+    throw new HttpError(500, 'Could not load attendance data. Please try again.');
+  }
+}
 
 const VALID_STATUSES = new Set(['present', 'absent', 'wfh', 'leave', '']);
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
@@ -116,6 +129,9 @@ export const GET = route(async (req: Request) => {
     if (!startParam || !endParam || !isValidDateRange(startParam, endParam)) {
       throw badRequest('start and end must both be valid YYYY-MM-DD dates, with end on or after start');
     }
+    if (rangeDayCount(startParam, endParam) > MAX_RANGE_DAYS) {
+      throw badRequest(`Please choose a range of ${MAX_RANGE_DAYS} days or fewer`);
+    }
   }
 
   const admin = createAdminClient();
@@ -129,17 +145,24 @@ export const GET = route(async (req: Request) => {
   if (startParam && endParam) {
     let usersQuery = admin.from('users').select(`id, name, email, team, role, member_code${rateCol}`).eq('is_active', 1);
     if (visible !== 'all') usersQuery = usersQuery.in('id', visible);
-    const { data: teamUsersData } = await usersQuery;
+    const { data: teamUsersData, error: usersError } = await usersQuery;
+    ensureLoaded({ error: usersError });
     const teamUsers = (teamUsersData ?? []) as unknown as { id: number; name: string; email: string | null; team: string | null; role: string; member_code: string | null; hourly_rate_usd?: number | string | null }[];
     const userIds = teamUsers.map(u => u.id);
 
-    const { data: tsData } = userIds.length > 0
-      ? await admin.from('timesheets').select('user_id, date, clocked_in_at, clocked_out_at, duration_seconds')
-          .in('user_id', userIds).gte('date', startParam).lte('date', endParam).order('clocked_in_at')
-      : { data: [] as { user_id: number; date: string; clocked_in_at: string; clocked_out_at: string | null; duration_seconds: number | null }[] };
+    type RangeTimesheet = { id: number; user_id: number; date: string; clocked_in_at: string; clocked_out_at: string | null; duration_seconds: number | null };
+    // Paged: one response is capped at 1,000 rows. The cutoff keeps sessions that
+    // clock in mid-export from shifting later pages.
+    const cutoff = snapshotCutoff();
+    const timesheetRows = userIds.length > 0
+      ? await fetchAllRows<RangeTimesheet>((from, to) =>
+          admin.from('timesheets').select('id, user_id, date, clocked_in_at, clocked_out_at, duration_seconds', { count: 'exact' })
+            .in('user_id', userIds).gte('date', startParam).lte('date', endParam).lte('clocked_in_at', cutoff)
+            .order('clocked_in_at').order('id').range(from, to))
+      : [];
 
     const timesheetsByDay: Record<string, number> = {};
-    const sessions = ((tsData ?? []) as { user_id: number; date: string; clocked_in_at: string; clocked_out_at: string | null; duration_seconds: number | null }[]).map(ts => {
+    const sessions = timesheetRows.map(ts => {
       if (ts.duration_seconds != null) {
         const key = `${ts.user_id}:${ts.date}`;
         timesheetsByDay[key] = (timesheetsByDay[key] ?? 0) + ts.duration_seconds;
@@ -153,7 +176,11 @@ export const GET = route(async (req: Request) => {
       hourlyRateUsd: rateOf(u),
     }));
 
-    return NextResponse.json({ start: startParam, end: endParam, users: usersOut, timesheetsByDay, sessions });
+    // `complete` tells the client every row was loaded; it refuses to build a file otherwise.
+    return NextResponse.json(
+      { start: startParam, end: endParam, users: usersOut, timesheetsByDay, sessions, rowCount: timesheetRows.length, complete: true },
+      { headers: NO_STORE },
+    );
   }
 
   const monthParam = searchParams.get('month');
@@ -166,10 +193,11 @@ export const GET = route(async (req: Request) => {
     let usersQuery = admin.from('users').select(`id, name, email, team, role, member_code${rateCol}`).eq('is_active', 1);
     if (visible !== 'all') usersQuery = usersQuery.in('id', visible);
 
-    const [{ data: teamUsersData }, resolvePhoto] = await Promise.all([
+    const [{ data: teamUsersData, error: usersError }, resolvePhoto] = await Promise.all([
       usersQuery,
       getUserPhotoResolver(),
     ]);
+    ensureLoaded({ error: usersError });
     const teamUsers = (teamUsersData ?? []) as unknown as { id: number; name: string; email: string | null; team: string | null; role: string; hourly_rate_usd?: number | string | null }[];
     const userIds = teamUsers.map(u => u.id);
 
@@ -177,15 +205,22 @@ export const GET = route(async (req: Request) => {
     const monthStart = `${monthParam}-01`;
     const monthEnd   = `${monthParam}-${String(lastDayNum).padStart(2, '0')}`;
 
-    const [attendanceResult, timesheetResult] = await Promise.all([
+    // The month's hours are summed from every session, so they are paged too: a
+    // single response is capped at 1,000 rows and would silently under-count.
+    type MonthTimesheet = { id: number; user_id: number; duration_seconds: number };
+    const monthCutoff = snapshotCutoff();
+    const [attendanceResult, monthTimesheets] = await Promise.all([
       userIds.length > 0
         ? admin.from('attendance').select('*').in('user_id', userIds).in('week_start', mondays)
-        : Promise.resolve({ data: [] as AttendanceRow[] }),
+        : Promise.resolve({ data: [] as AttendanceRow[], error: null }),
       userIds.length > 0
-        ? admin.from('timesheets').select('user_id, duration_seconds')
-            .in('user_id', userIds).gte('date', monthStart).lte('date', monthEnd).not('duration_seconds', 'is', null)
-        : Promise.resolve({ data: [] as { user_id: number; duration_seconds: number }[] }),
+        ? fetchAllRows<MonthTimesheet>((from, to) =>
+            admin.from('timesheets').select('id, user_id, duration_seconds', { count: 'exact' })
+              .in('user_id', userIds).gte('date', monthStart).lte('date', monthEnd).lte('clocked_in_at', monthCutoff)
+              .not('duration_seconds', 'is', null).order('clocked_in_at').order('id').range(from, to))
+        : Promise.resolve([] as MonthTimesheet[]),
     ]);
+    ensureLoaded({ error: attendanceResult.error });
     const records = (attendanceResult.data ?? []) as AttendanceRow[];
     const workdays = countWorkdaysInMonth(monthParam);
     const recordsByUserAndWeek = new Map(records.map(record => [`${record.user_id}:${record.week_start}`, record] as const));
@@ -225,12 +260,12 @@ export const GET = route(async (req: Request) => {
 
     // Aggregate timesheet hours for the month (fetched in parallel above)
     const monthTsMap: Record<number, number> = {};
-    for (const ts of (timesheetResult.data ?? []) as { user_id: number; duration_seconds: number }[]) {
+    for (const ts of monthTimesheets) {
       monthTsMap[ts.user_id] = (monthTsMap[ts.user_id] ?? 0) + ts.duration_seconds;
     }
 
     const summaryWithHours = summary.map(row => ({ ...row, totalSeconds: monthTsMap[row.userId] ?? 0 }));
-    return NextResponse.json({ month: monthParam, summary: summaryWithHours, workdays });
+    return NextResponse.json({ month: monthParam, summary: summaryWithHours, workdays }, { headers: NO_STORE });
   }
 
   const weekParam = searchParams.get('week');
@@ -248,11 +283,12 @@ export const GET = route(async (req: Request) => {
     recordsQuery = recordsQuery.in('user_id', visible);
   }
 
-  const [{ data: rawRecordsData }, { data: teamUsersData2 }, resolvePhoto] = await Promise.all([
+  const [{ data: rawRecordsData, error: recordsError }, { data: teamUsersData2, error: weekUsersError }, resolvePhoto] = await Promise.all([
     recordsQuery,
     usersQuery,
     getUserPhotoResolver(),
   ]);
+  ensureLoaded({ error: recordsError }, { error: weekUsersError });
   const rawRecords = rawRecordsData ?? [];
   type WeekUser = { id: number; name: string; email: string | null; team: string | null; role: string; member_code: string | null; approved_hours_per_week?: number | null; hourly_rate_usd?: number | string | null };
   const teamUsers = (teamUsersData2 ?? []) as unknown as WeekUser[];
@@ -287,6 +323,8 @@ export const GET = route(async (req: Request) => {
           .in('user_id', userIds).eq('week_start', weekStart).eq('status', 'approved')
       : Promise.resolve({ data: [] as { user_id: number; granted_seconds: number | null }[] }),
   ]);
+
+  ensureLoaded(editorsResult, tsResult, openResult, grantResult);
 
   const attEditorNames: Record<number, string> = {};
   for (const e of (editorsResult.data ?? []) as { id: number; name: string }[]) attEditorNames[e.id] = e.name;
@@ -343,7 +381,7 @@ export const GET = route(async (req: Request) => {
       hourlyRateUsd: rateOf(u),
     }));
 
-  return NextResponse.json({ weekStart, records, users: usersOut, timesheetsByDay, openSessions, allowanceByUser });
+  return NextResponse.json({ weekStart, records, users: usersOut, timesheetsByDay, openSessions, allowanceByUser }, { headers: NO_STORE });
 });
 
 // Attendance edits are admin-only. This legacy self-submit path has no UI caller;

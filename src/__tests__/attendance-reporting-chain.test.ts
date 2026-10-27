@@ -36,16 +36,16 @@ type Chain = Record<string, ReturnType<typeof vi.fn>> & { then: unknown };
 
 // Chainable postgrest double. Filters are recorded, not applied — tests assert
 // on the filter calls (what the database would have been asked for).
-function chainable(result: { data: unknown; error?: unknown }): Chain {
+function chainable(result: { data: unknown; count?: number; error?: unknown }): Chain {
   const obj: Record<string, unknown> = {};
-  for (const m of ['select', 'eq', 'in', 'gte', 'lte', 'not', 'is', 'order', 'neq', 'maybeSingle', 'upsert', 'delete', 'insert']) {
+  for (const m of ['select', 'eq', 'in', 'gte', 'lte', 'not', 'is', 'order', 'range', 'neq', 'maybeSingle', 'upsert', 'delete', 'insert']) {
     obj[m] = vi.fn(() => obj);
   }
   obj.then = (resolve: (v: typeof result) => void) => resolve(result);
   return obj as Chain;
 }
 
-function mockDb(tables: Record<string, { data: unknown; error?: unknown }>) {
+function mockDb(tables: Record<string, { data: unknown; count?: number; error?: unknown }>) {
   const chains: Record<string, Chain> = {};
   const from = vi.fn((table: string) => {
     if (!tables[table]) throw new Error(`no mock for table ${table}`);
@@ -56,13 +56,13 @@ function mockDb(tables: Record<string, { data: unknown; error?: unknown }>) {
   return { chains, from };
 }
 
-function orgTables(extra: Record<string, { data: unknown; error?: unknown }> = {}) {
+function orgTables(extra: Record<string, { data: unknown; count?: number; error?: unknown }> = {}) {
   return {
     users: { data: ORG_USERS },
     user_reporting: { data: ORG_REPORTING },
     user_secondary_leads: { data: [] },
     attendance: { data: [] },
-    timesheets: { data: [] },
+    timesheets: { data: [], count: 0 },
     overtime_requests: { data: [] },
     ...extra,
   };
