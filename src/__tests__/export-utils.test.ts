@@ -73,7 +73,7 @@ describe('buildTimesheetCsv (arbitrary-length ranges)', () => {
     dayOfWeekLabels: ['Wed', 'Thu', 'Fri'],
   };
   const rows: TimesheetMemberRow[] = [
-    { name: 'Jane Doe', memberCode: 'JD01', daySeconds: [3600, 7200, 0], periodSeconds: 10800, hourlyRateUsd: 10 },
+    { id: 1, name: 'Jane Doe', memberCode: 'JD01', daySeconds: [3600, 7200, 0], periodSeconds: 10800, hourlyRateUsd: 10 },
   ];
 
   it('sizes the weekday header row to the actual number of days, not a hardcoded 7', () => {
@@ -116,7 +116,7 @@ describe('buildTimesheetCsv (arbitrary-length ranges)', () => {
       dayOfWeekLabels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
     };
     const weekRows: TimesheetMemberRow[] = [
-      { name: 'Jane Doe', memberCode: 'JD01', daySeconds: [3600, 3600, 3600, 3600, 3600, 0, 0], periodSeconds: 18000, hourlyRateUsd: null },
+      { id: 1, name: 'Jane Doe', memberCode: 'JD01', daySeconds: [3600, 3600, 3600, 3600, 3600, 0, 0], periodSeconds: 18000, hourlyRateUsd: null },
     ];
     const csv = buildTimesheetCsv(weekRows, weekMeta);
     expect(csv).toContain(',,,Mon,Tue,Wed,Thu,Fri,Sat,Sun');
@@ -126,8 +126,8 @@ describe('buildTimesheetCsv (arbitrary-length ranges)', () => {
 
 describe('buildCustomRangeExport', () => {
   const users: CustomRangeApiUser[] = [
-    { id: 1, name: 'Jane', team: 'Engineering', role: 'ic', memberCode: 'JD01', hourlyRateUsd: 10 },
-    { id: 2, name: 'Bob', team: 'Engineering', role: 'ic', memberCode: null, hourlyRateUsd: null },
+    { id: 1, name: 'Jane', team: 'Engineering', memberCode: 'JD01', hourlyRateUsd: 10 },
+    { id: 2, name: 'Bob', team: 'Engineering', memberCode: null, hourlyRateUsd: null },
   ];
   const timesheetsByDay = {
     '1:2026-07-01': 3600,
@@ -145,14 +145,14 @@ describe('buildCustomRangeExport', () => {
     expect(result.timesheet.meta.dayDateLabels).toEqual(['Jul 1', 'Jul 2', 'Jul 3']);
     expect(result.timesheet.meta.dayOfWeekLabels).toEqual(['Wed', 'Thu', 'Fri']);
     expect(result.timesheet.rows).toEqual([
-      { name: 'Jane', memberCode: 'JD01', daySeconds: [3600, 3600, 0], periodSeconds: 7200, hourlyRateUsd: 10 },
-      { name: 'Bob', memberCode: '', daySeconds: [1800, 0, 0], periodSeconds: 1800, hourlyRateUsd: null },
+      { id: 1, name: 'Jane', memberCode: 'JD01', daySeconds: [3600, 3600, 0], periodSeconds: 7200, hourlyRateUsd: 10 },
+      { id: 2, name: 'Bob', memberCode: '', daySeconds: [1800, 0, 0], periodSeconds: 1800, hourlyRateUsd: null },
     ]);
   });
 
-  it('computes Wise USD gross per member for the period, null when unrated', () => {
+  it('computes Wise USD gross per user id for the period, null when unrated', () => {
     const result = buildCustomRangeExport('2026-07-01', '2026-07-03', users, timesheetsByDay);
-    expect(result.wiseAmounts).toEqual({ Jane: 20, Bob: null });
+    expect(result.wiseAmounts).toEqual({ 1: 20, 2: null });
   });
 
   it('builds simplified period-total rows for the standard/markdown/json formats', () => {
@@ -169,15 +169,15 @@ describe('buildCustomRangeExport', () => {
     expect(result.wisePaymentReference).toBe('Payroll Period 1 Jul 2026 - 3 Jul 2026');
   });
 
-  it('builds per-day "time in - time out" in 24h Manila time, blank out while open', () => {
+  it('builds per-day "time in - time out" in 24h Manila time, "Still clocked in" while open', () => {
     const result = buildCustomRangeExport('2026-07-01', '2026-07-02', users, timesheetsByDay, [
       { userId: 1, date: '2026-07-01', clockedInAt: '2026-07-01T01:05:00Z', clockedOutAt: '2026-07-01T02:05:00Z' },
       { userId: 1, date: '2026-07-01', clockedInAt: '2026-07-01T05:00:00Z', clockedOutAt: '2026-07-01T09:30:00Z' },
       { userId: 2, date: '2026-07-02', clockedInAt: '2026-07-02T00:00:00Z', clockedOutAt: null },
     ]);
     expect(result.dayLogs).toEqual({
-      Jane: { '2026-07-01': '09:05 - 17:30' },
-      Bob:  { '2026-07-02': '08:00 -' },
+      1: { '2026-07-01': '09:05 - 17:30' },
+      2: { '2026-07-02': '08:00 - Still clocked in' },
     });
   });
 });

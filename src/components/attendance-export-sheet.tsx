@@ -23,6 +23,15 @@ import {
   isValidDateRange,
   rangeReplyError,
   datesBetween,
+  EXPORT_DEFAULTS,
+  exportDateSuffix,
+  isExcludedColumn,
+  memberLabels,
+  openSessionsNote,
+  resolveCsvTemplate,
+  wiseBlockReason,
+  type CsvTemplateName,
+  type ExportMember,
   type ExportRow,
   type TimesheetMemberRow,
   type TimesheetMeta,
@@ -33,26 +42,33 @@ import {
 
 type ExportFormat = 'csv' | 'md' | 'json';
 type DurationFormat = 'human' | 'decimal' | 'hms';
-type CsvTemplate = 'standard' | 'timesheet' | 'wise';
+type CsvTemplate = CsvTemplateName;
+
+/** One exportable person: their id, how to tell them apart if names clash, and their row. */
+export interface PanelRow {
+  userId: number;
+  memberCode?: string | null;
+  row: ExportRow;
+}
 
 interface Props {
   mode: 'weekly' | 'monthly';
   baseName: string;
-  rows: ExportRow[];
+  rows: PanelRow[];
   /** Metadata only (no row-array fields). Will be merged with filtered rows in the JSON payload. */
   jsonMeta?: Record<string, unknown>;
   rangeLabel: string;
-  /** Weekly only — inclusive ISO dates of the week, used to fetch time in/out for the day cells. */
+  /** Inclusive ISO dates shown on the page, used to fetch time in/out and who is still clocked in. */
   pageRange?: { start: string; end: string };
   /** Weekly only — structured per-day hours for the Romega timesheet template. */
   timesheet?: { rows: TimesheetMemberRow[]; meta: TimesheetMeta };
   /** Payment reference written into the Wise payout template. */
   wisePaymentReference?: string;
-  /** Member name → computed USD gross for the period (null = no rate set). */
-  wiseAmounts?: Record<string, number | null>;
+  /** User id → computed USD gross for the period (null = no rate set). */
+  wiseAmounts?: Record<number, number | null>;
   /** Live USD→PHP snapshot applied to the timesheet template. */
   fx?: { rate: number; label: string };
-  /** Offer the Wise payout template. Admin-only: it is a pay file. */
+  /** Offer the Wise payout template. Admin-only: it is a pay file. Off unless the caller passes exactly `true`. */
   allowPayout?: boolean;
 }
 
@@ -75,7 +91,7 @@ const WEEK_DAY_KEYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', '
 
 // Stable reference so the `?? EMPTY_ROWS` fallback below doesn't create a new
 // array every render (which would defeat the useMemo hooks that depend on it).
-const EMPTY_ROWS: ExportRow[] = [];
+const EMPTY_ROWS: PanelRow[] = [];
 
 function reformatDurationCell(value: string, target: DurationFormat): string {
   if (target === 'human') return value;
@@ -91,19 +107,19 @@ function reformatDurationCell(value: string, target: DurationFormat): string {
   return `${hh}:${mm}:00`;
 }
 
-export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLabel, pageRange, timesheet, wisePaymentReference, wiseAmounts, fx, allowPayout = true }: Props) {
+export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLabel, pageRange, timesheet, wisePaymentReference, wiseAmounts, fx, allowPayout = false }: Props) {
   const [open, setOpen] = useState(false);
   const [exporting, setExporting]                 = useState(false);
   const [format, setFormat]                       = useState<ExportFormat>('csv');
   const [csvTemplate, setCsvTemplate]             = useState<CsvTemplate>('standard');
-  const [includeNotes, setIncludeNotes]           = useState(true);
+  const [includeNotes, setIncludeNotes]           = useState<boolean>(EXPORT_DEFAULTS.includeNotes);
   const [includeWeekendHours, setIncludeWeekendHours] = useState(true);
   const [includeTotals, setIncludeTotals]         = useState(true);
   const [durationFormat, setDurationFormat]       = useState<DurationFormat>('human');
   const [memberPickerOpen, setMemberPickerOpen]   = useState(false);
   // `null` ⇒ "all members selected" (the default, tracks upstream list automatically).
-  // Set<string> ⇒ user has made a custom selection.
-  const [customSelection, setCustomSelection]     = useState<Set<string> | null>(null);
+  // Set<number> (user ids) ⇒ user has made a custom selection.
+  const [customSelection, setCustomSelection]     = useState<Set<number> | null>(null);
 
   // Custom Start–End range — independent of whatever week/month the page
   // behind this sheet is currently showing. `page` (default) uses the props
@@ -115,14 +131,16 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
   const [rangeData, setRangeData]   = useState<CustomRangeExport | null>(null);
 
   // Templates only apply to CSV; Markdown/JSON always use the standard shape.
-  const activeTemplate: CsvTemplate = format !== 'csv' || (csvTemplate === 'wise' && !allowPayout) ? 'standard' : csvTemplate;
+  // The Wise payout file is granted only when allowPayout is exactly true.
+  const activeTemplate: CsvTemplate = resolveCsvTemplate(format, csvTemplate, { allowPayout, canTimesheet: true });
 
   // What to fetch: the picked custom range, or — since the page's props carry
-  // no per-session times — the shown week, to fill the day cells with time in/out.
-  // Only while the panel is open, so a plain page load doesn't fetch it.
+  // no per-session times — the range shown on the page, to fill the day cells
+  // with time in/out and to know who is still clocked in. Only while the panel
+  // is open, so a plain page load doesn't fetch it.
   const [fetchStart, fetchEnd] =
     rangeMode === 'custom' ? [rangeStart, rangeEnd]
-    : open && activeTemplate === 'standard' && pageRange ? [pageRange.start, pageRange.end]
+    : open && pageRange ? [pageRange.start, pageRange.end]
     : ['', ''];
   const fetchKey = isValidDateRange(fetchStart, fetchEnd) ? `${fetchStart}:${fetchEnd}` : null;
 
@@ -153,23 +171,46 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
   // loaded for the picked dates, the exportable set is genuinely empty rather
   // than silently reusing whatever week/month the page behind the sheet is on.
   const customData                    = rangeMode === 'custom' ? readyData : null;
-  const effectiveRows                 = rangeMode === 'custom' ? (customData?.rows ?? EMPTY_ROWS) : rows;
+  const customRows: PanelRow[] = useMemo(
+    () => (customData ? customData.rows.map((row, i) => ({
+      userId: customData.rowUserIds[i],
+      memberCode: customData.timesheet.rows[i]?.memberCode,
+      row,
+    })) : EMPTY_ROWS),
+    [customData],
+  );
+  const effectiveRows                 = rangeMode === 'custom' ? customRows : rows;
   const effectiveTimesheet            = rangeMode === 'custom' ? customData?.timesheet     : timesheet;
   const effectiveWiseAmounts          = rangeMode === 'custom' ? (customData?.wiseAmounts ?? {}) : wiseAmounts;
   const effectiveRangeLabel           = rangeMode === 'custom' ? (customData?.rangeLabel ?? 'Pick a custom range') : rangeLabel;
   const effectiveJsonMeta             = rangeMode === 'custom' ? customData?.jsonMeta      : jsonMeta;
   const effectiveWisePaymentReference = rangeMode === 'custom' ? customData?.wisePaymentReference : wisePaymentReference;
 
-  const allMembers = useMemo(
-    () => Array.from(new Set(effectiveRows.map(r => String(r.member ?? '')).filter(Boolean))).sort(),
+  // People are keyed by user id. A name two people share is shown with their
+  // member code (or #id) so they can be told apart.
+  const members: ExportMember[] = useMemo(
+    () => effectiveRows.map(r => ({ userId: r.userId, name: String(r.row.member ?? ''), memberCode: r.memberCode })),
     [effectiveRows],
+  );
+  const labels = useMemo(() => memberLabels(members), [members]);
+  const allMemberIds = useMemo(
+    () => members
+      .filter(m => m.name)
+      .sort((a, b) => (labels.get(a.userId) ?? '').localeCompare(labels.get(b.userId) ?? '') || a.userId - b.userId)
+      .map(m => m.userId),
+    [members, labels],
   );
 
   const selectedMembers = useMemo(
-    () => customSelection ?? new Set(allMembers),
-    [customSelection, allMembers],
+    () => customSelection ?? new Set(allMemberIds),
+    [customSelection, allMemberIds],
   );
-  const allSelected = customSelection === null || (customSelection.size === allMembers.length && allMembers.every(m => customSelection.has(m)));
+  const allSelected = customSelection === null || (customSelection.size === allMemberIds.length && allMemberIds.every(m => customSelection.has(m)));
+
+  // Who is still clocked in comes from the range fetch (null until it has loaded).
+  const openUserIds = readyData ? readyData.openUserIds : null;
+  const selectedOpenCount = openUserIds ? allMemberIds.filter(id => selectedMembers.has(id) && openUserIds.includes(id)).length : 0;
+  const openNote = openSessionsNote(selectedOpenCount);
 
   const triggerLabel = mode === 'weekly' ? 'Export Week' : 'Export Month';
   const sheetTitle   = mode === 'weekly' ? 'Export Weekly Attendance Data' : 'Export Monthly Attendance Data';
@@ -178,17 +219,11 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
     rangeMode === 'custom' ? DURATION_KEYS_CUSTOM : mode === 'weekly' ? DURATION_KEYS_WEEKLY : DURATION_KEYS_MONTHLY;
 
   const filteredRows = useMemo(() => {
-    let out = effectiveRows.filter(r => selectedMembers.has(String(r.member ?? '')));
-
-    out = out.map(r => {
+    const out: ExportRow[] = effectiveRows.filter(r => selectedMembers.has(r.userId)).map(({ userId, row: r }) => {
       const next: ExportRow = {};
       for (const [key, val] of Object.entries(r)) {
-        // Drop notes when excluded — only meaningful in weekly mode.
-        if (mode === 'weekly' && !includeNotes && key === 'notes') continue;
-        // Drop weekend-hours columns when excluded (weekly only).
-        if (mode === 'weekly' && !includeWeekendHours && (key === 'saturday_hours' || key === 'sunday_hours')) continue;
-        // Drop totals when excluded.
-        if (!includeTotals && (key === 'week_total_hours' || key === 'total_hours')) continue;
+        // Drop notes, weekend-hours columns and totals when excluded.
+        if (isExcludedColumn(key, { mode, includeNotes, includeWeekendHours, includeTotals })) continue;
 
         // Reformat duration cells.
         if (durationKeys.includes(key) && typeof val === 'string' && val.trim() !== '') {
@@ -200,52 +235,63 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
       // Weekly: replace each day's status with its time in / time out, keeping
       // the status (e.g. leave/absent) on days without any session.
       if (mode === 'weekly' && rangeMode === 'page' && readyData) {
-        const days = readyData.dayLogs[String(r.member ?? '')] ?? {};
+        const days = readyData.dayLogs[userId] ?? {};
         datesBetween(readyData.start, readyData.end).forEach((date, i) => {
           if (days[date] && WEEK_DAY_KEYS[i] in next) next[WEEK_DAY_KEYS[i]] = days[date];
         });
       }
+      if ('member' in next) next.member = labels.get(userId) ?? next.member;
       return next;
     });
 
     return out;
-  }, [effectiveRows, mode, rangeMode, includeNotes, includeWeekendHours, includeTotals, readyData, durationFormat, selectedMembers, durationKeys]);
+  }, [effectiveRows, labels, mode, rangeMode, includeNotes, includeWeekendHours, includeTotals, readyData, durationFormat, selectedMembers, durationKeys]);
 
   const canTimesheet = !!effectiveTimesheet;
 
   const selectedTimesheetRows = useMemo(
-    () => (effectiveTimesheet ? effectiveTimesheet.rows.filter(r => selectedMembers.has(r.name)) : []),
-    [effectiveTimesheet, selectedMembers],
+    () => (effectiveTimesheet
+      ? effectiveTimesheet.rows.filter(r => selectedMembers.has(r.id)).map(r => ({ ...r, name: labels.get(r.id) ?? r.name }))
+      : []),
+    [effectiveTimesheet, selectedMembers, labels],
   );
-  const selectedMemberNames = useMemo(
-    () => allMembers.filter(m => selectedMembers.has(m)),
-    [allMembers, selectedMembers],
+  const selectedMemberList = useMemo(
+    () => members.filter(m => m.name && selectedMembers.has(m.userId)),
+    [members, selectedMembers],
   );
+
+  // The Wise file is blocked while a selected person is still clocked in or two
+  // selected people share a name; also until we know who is clocked in.
+  const wiseBlock = activeTemplate === 'wise' ? wiseBlockReason(selectedMemberList, openUserIds) : null;
 
   const rowCount =
     activeTemplate === 'timesheet' ? selectedTimesheetRows.length
-    : activeTemplate === 'wise'    ? selectedMemberNames.length
+    : activeTemplate === 'wise'    ? selectedMemberList.length
     : filteredRows.length;
-  const disabled = rowCount === 0;
+  const disabled = rowCount === 0 || wiseBlock !== null;
 
   // Builds the file synchronously. Kept separate so handleExport can yield a
   // frame first — that lets the button paint its busy state before a large
   // dataset is serialized, avoiding a frozen-looking UI on big exports.
   function buildAndDownload() {
-    const dateSuffix = new Date().toISOString().slice(0, 10);
+    // File names carry today's date in Manila, not UTC.
+    const dateSuffix = exportDateSuffix();
 
     if (format === 'csv' && activeTemplate === 'timesheet' && effectiveTimesheet) {
       downloadTextFile(
-        buildTimesheetCsv(selectedTimesheetRows, effectiveTimesheet.meta, fx),
+        buildTimesheetCsv(selectedTimesheetRows, effectiveTimesheet.meta, fx, openNote ?? undefined),
         `${baseName}_timesheet_${dateSuffix}.csv`,
         'text/csv',
       );
       return;
     }
     if (format === 'csv' && activeTemplate === 'wise') {
-      const recipients = selectedMemberNames.map(name => ({
-        name,
-        amountUsd: effectiveWiseAmounts?.[name] ?? null,
+      // Enforced here as well as by the disabled button.
+      const blocked = wiseBlockReason(selectedMemberList, openUserIds);
+      if (blocked) throw new Error(blocked);
+      const recipients = selectedMemberList.map(m => ({
+        name: m.name,
+        amountUsd: effectiveWiseAmounts?.[m.userId] ?? null,
       }));
       downloadTextFile(
         buildWiseCsv(recipients, { paymentReference: effectiveWisePaymentReference ?? effectiveRangeLabel }),
@@ -257,11 +303,13 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
 
     const filename = `${baseName}_${dateSuffix}.${format}`;
     if (format === 'csv') {
-      downloadTextFile(rowsToCsv(filteredRows), filename, 'text/csv');
+      const csv = rowsToCsv(filteredRows);
+      downloadTextFile(openNote ? `${csv}\n\nNote,"${openNote}"` : csv, filename, 'text/csv');
     } else if (format === 'md') {
-      downloadTextFile(rowsToMarkdown(filteredRows), filename, 'text/markdown');
+      const md = rowsToMarkdown(filteredRows);
+      downloadTextFile(openNote ? `${md}\n\n_Note: ${openNote}_` : md, filename, 'text/markdown');
     } else {
-      const payload = { ...(effectiveJsonMeta ?? {}), rows: filteredRows };
+      const payload = { ...(effectiveJsonMeta ?? {}), ...(openNote ? { note: openNote } : {}), rows: filteredRows };
       downloadTextFile(JSON.stringify(payload, null, 2), filename, 'application/json');
     }
   }
@@ -282,12 +330,12 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
     }
   }
 
-  function toggleMember(name: string) {
+  function toggleMember(userId: number) {
     setCustomSelection(prev => {
-      const base = prev ?? new Set(allMembers);
+      const base = prev ?? new Set(allMemberIds);
       const next = new Set(base);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
       return next;
     });
   }
@@ -513,7 +561,7 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
                   <Users className="w-3.5 h-3.5 text-(--rs-neutral-grey-400)" />
                   Members
                   <span className="ml-1 inline-flex items-center justify-center rounded-full bg-(--rs-primary-50) px-1.5 text-[10px] font-semibold text-(--rs-primary-700)">
-                    {allSelected ? 'All' : `${selectedMembers.size}/${allMembers.length}`}
+                    {allSelected ? 'All' : `${selectedMembers.size}/${allMemberIds.length}`}
                   </span>
                 </span>
                 <ChevronDown
@@ -529,16 +577,16 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
                   >
                     {allSelected ? 'Clear all' : 'Select all'}
                   </button>
-                  {allMembers.length === 0 ? (
+                  {allMemberIds.length === 0 ? (
                     <p className="px-3 py-2 text-xs italic text-(--rs-neutral-grey-400)">No members available.</p>
                   ) : (
-                    allMembers.map(name => {
-                      const checked = selectedMembers.has(name);
+                    allMemberIds.map(userId => {
+                      const checked = selectedMembers.has(userId);
                       return (
                         <button
-                          key={name}
+                          key={userId}
                           type="button"
-                          onClick={() => toggleMember(name)}
+                          onClick={() => toggleMember(userId)}
                           className="flex w-full items-center gap-2.5 px-3 py-2 text-sm hover:bg-(--rs-neutral-grey-50) text-left"
                         >
                           <span
@@ -550,7 +598,7 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
                           >
                             {checked && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />}
                           </span>
-                          <span className="truncate text-(--rs-neutral-grey-800)">{name}</span>
+                          <span className="truncate text-(--rs-neutral-grey-800)">{labels.get(userId)}</span>
                         </button>
                       );
                     })
@@ -577,6 +625,16 @@ export function AttendanceExportSheet({ mode, baseName, rows, jsonMeta, rangeLab
               <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-(--rs-neutral-grey-400)" />
             </div>
           </section>
+          )}
+
+          {rangeMode === 'page' && rangeErrorMsg && (
+            <p className="text-[11px] text-red-600">{rangeErrorMsg}</p>
+          )}
+          {openNote && activeTemplate !== 'wise' && (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">{openNote}</p>
+          )}
+          {wiseBlock && (
+            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700">{wiseBlock}</p>
           )}
 
           <div className="text-[11px] text-(--rs-neutral-grey-400) pt-2 border-t border-(--rs-neutral-grey-100)">

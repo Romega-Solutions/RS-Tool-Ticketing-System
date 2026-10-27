@@ -109,8 +109,8 @@ describe('GET /api/attendance?start=&end= (custom range)', () => {
     expect(data.end).toBe('2026-07-02');
     // The double ignores filters, so both rows come back; the rate is still stripped.
     expect(data.users).toEqual([
-      { id: 11, name: 'Ken', team: 'Engineering', role: 'lead', memberCode: null, hourlyRateUsd: null },
-      { id: 1, name: 'Jane', team: 'Engineering', role: 'ic', memberCode: 'JD01', hourlyRateUsd: null },
+      { id: 11, name: 'Ken', team: 'Engineering', memberCode: null, hourlyRateUsd: null },
+      { id: 1, name: 'Jane', team: 'Engineering', memberCode: 'JD01', hourlyRateUsd: null },
     ]);
     expect(data.timesheetsByDay).toEqual({
       '1:2026-07-01': 3600,
