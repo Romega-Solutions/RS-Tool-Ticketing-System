@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   DEFAULT_NOTIFICATION_PREFS,
   mergeNotificationPrefs,
@@ -8,6 +8,7 @@ import {
   type NotificationPrefs,
 } from '@/lib/notifications';
 import { renderNotificationEmail } from '@/lib/email-templates';
+import { timeEditEmailsReplaceDecided } from '@/lib/time-edit-email-mode';
 
 const allOn: NotificationPrefs = { ...DEFAULT_NOTIFICATION_PREFS };
 
@@ -70,6 +71,54 @@ describe('shouldEmailNotification — prefs gating', () => {
     expect(shouldEmailNotification('time_edit_reminder', allOn)).toBe(false);
     // The requester's final-decision email is unchanged.
     expect(shouldEmailNotification('time_edit_decided', allOn)).toBe(true);
+  });
+});
+
+describe('shouldEmailNotification — plain decided email vs the designed emails', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const newPath = (mode: string, vercelEnv = 'production', url = 'https://n8n.test/html') => {
+    vi.stubEnv('N8N_HTML_EMAIL_URL', url);
+    vi.stubEnv('TIME_EDIT_EMAILS_MODE', mode);
+    vi.stubEnv('VERCEL_ENV', vercelEnv);
+  };
+
+  it('keeps the plain decided email when the HTML webhook is unset', () => {
+    vi.stubEnv('N8N_HTML_EMAIL_URL', '');
+    vi.stubEnv('TIME_EDIT_EMAILS_MODE', 'send');
+    vi.stubEnv('VERCEL_ENV', 'production');
+    expect(shouldEmailNotification('time_edit_decided', allOn)).toBe(true);
+  });
+
+  it('keeps the plain decided email while the new emails only log or are off', () => {
+    newPath('log');
+    expect(shouldEmailNotification('time_edit_decided', allOn)).toBe(true);
+    newPath('off');
+    expect(shouldEmailNotification('time_edit_decided', allOn)).toBe(true);
+    newPath('send', 'preview');
+    expect(shouldEmailNotification('time_edit_decided', allOn)).toBe(true);
+  });
+
+  it('drops the plain decided email only when the new emails really send', () => {
+    newPath('send');
+    expect(shouldEmailNotification('time_edit_decided', allOn)).toBe(false);
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    vi.stubEnv('TIME_EDIT_EMAILS_TEST_TO', 'qa@example.test');
+    expect(shouldEmailNotification('time_edit_decided', allOn)).toBe(false);
+  });
+
+  it('keeps the plain decided email in production when a test address is set', () => {
+    newPath('send');
+    vi.stubEnv('TIME_EDIT_EMAILS_TEST_TO', 'qa@example.test');
+    expect(shouldEmailNotification('time_edit_decided', allOn)).toBe(true);
+    expect(timeEditEmailsReplaceDecided()).toBe(false);
+  });
+
+  it('never changes any other type', () => {
+    newPath('send');
+    expect(shouldEmailNotification('mentioned', allOn)).toBe(true);
+    expect(shouldEmailNotification('task_assigned', allOn)).toBe(true);
+    expect(shouldEmailNotification('project_added', allOn)).toBe(true);
+    expect(shouldEmailNotification('time_edit_received', allOn)).toBe(false);
   });
 });
 

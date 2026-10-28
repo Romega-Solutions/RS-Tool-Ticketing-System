@@ -480,6 +480,40 @@ export async function sendEmailAwaited(msg: EmailMessage, timeoutMs = 15_000): P
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HTML email — the designed time-correction emails go through their own
+// HTML-capable n8n sender, N8N_HTML_EMAIL_URL (Gmail node set to HTML with CC
+// mapped). There is NO fallback to the plain-text sender: when it is unset the
+// call reports "not configured" and sends nothing, so the plain-text path above
+// stays exactly as it was. Same payload contract as sendEmail. Never throws.
+// ─────────────────────────────────────────────────────────────────────────────
+export function htmlEmailUrl(): string {
+  return process.env.N8N_HTML_EMAIL_URL?.trim() || '';
+}
+
+export async function sendHtmlEmailAwaited(msg: EmailMessage, timeoutMs = 8_000): Promise<EmailSendResult> {
+  const url = htmlEmailUrl();
+  if (!url) return { ok: false, error: 'html email webhook not configured' };
+  if (!msg.to?.trim()) return { ok: false, error: 'no recipient' };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(buildEmailPayload(msg)),
+      signal:  controller.signal,
+    });
+    if (!res.ok) return { ok: false, error: `n8n responded ${res.status}` };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function parseResumeWithN8n(
   file: File,
   candidateId?: string | number,
