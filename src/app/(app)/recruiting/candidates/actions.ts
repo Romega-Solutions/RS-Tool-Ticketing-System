@@ -97,7 +97,8 @@ async function writeHistory(
   if (entries.length === 0) return;
   const rows = entries.map(entry => ({
     candidate_id: candidateId,
-    user_id:      session.id,
+    // The synthetic public-application session has id 0, which is not a user.
+    user_id:      session.id > 0 ? session.id : null,
     user_name:    session.name,
     field:        entry.field,
     old_value:    entry.oldValue,
