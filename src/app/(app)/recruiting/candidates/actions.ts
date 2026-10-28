@@ -16,6 +16,7 @@ import {
   type CommunicationEvent,
   type CommunicationResult,
 } from '@/lib/n8n';
+import { deliverApplicantAck, getApplicationNotifyTo } from '@/lib/application-emails';
 import { hasToolAccess } from '@/lib/rbac';
 import { toProperName, formatPhoneNumber } from '@/lib/format';
 import { uploadCandidatePreEmploymentDocument, uploadResumeToStorage } from '@/lib/storage';
@@ -746,38 +747,6 @@ export async function markCandidateSowSigned(candidateId: number): Promise<void>
   // status automation, and idempotent onboarder creation.
   await updateCandidateStatus(candidateId, 'hired');
   revalidatePath(`/recruiting/candidates/${candidateId}`);
-}
-
-// Teams whose active members are emailed every new public application. Read
-// live from `users`, so future HR/recruiting hires are included automatically.
-// Mirrors the recruiting-access teams in lib/rbac.ts (core HR + recruiting).
-const APPLICATION_NOTIFY_TEAMS = new Set([
-  'human resources', 'hr', 'people', 'people operations', 'talent acquisition', 'recruiting',
-]);
-
-/**
- * Who n8n should email a new CV to: every active member of an HR/recruiting
- * team, plus the position's assigned recruiter, deduped and lowercased.
- */
-async function getApplicationNotifyRecipients(
-  supabase: AdminClient,
-  recruiterEmail: string | null,
-): Promise<string[]> {
-  const emails = new Set<string>();
-  if (recruiterEmail?.trim()) emails.add(recruiterEmail.trim().toLowerCase());
-  try {
-    const { data } = await supabase.from('users').select('email, team, is_active');
-    for (const u of (data ?? []) as Array<{ email: string | null; team: string | null; is_active: number | boolean | null }>) {
-      const active = u.is_active === 1 || u.is_active === true;
-      const team = String(u.team ?? '').trim().toLowerCase();
-      if (active && u.email && APPLICATION_NOTIFY_TEAMS.has(team)) {
-        emails.add(u.email.trim().toLowerCase());
-      }
-    }
-  } catch (err) {
-    console.warn('[ats] getApplicationNotifyRecipients failed:', err instanceof Error ? err.message : err);
-  }
-  return [...emails];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1795,33 +1764,61 @@ export async function createPublicApplication(args: {
     console.error('[createPublicApplication] tryUploadResume threw:', err);
   }
 
+  // Acknowledge the applicant. By default this is the existing plain-text
+  // acknowledgement from the communication workflow. When APPLICANT_ACK_MODE=hr
+  // the designed confirmation goes from the HR address through Resend instead;
+  // exactly one of the two is sent for each application.
+  const candidateId = inserted.id;
   try {
-    await fireAutoCommunication(
-      supabase, systemSession, inserted.id,
-      { kind: 'created', candidateId: inserted.id },
-      'acknowledgment',
-    );
+    await deliverApplicantAck({
+      input: {
+        to:              emailNorm,
+        fullName:        cleanedName || args.fullName,
+        role:            position.job_title,
+        applicationCode,
+        idempotencyKey:  `applicant-ack-${candidateId}`,
+      },
+      sendPlain: async () => {
+        await fireAutoCommunication(
+          supabase, systemSession, candidateId,
+          { kind: 'created', candidateId },
+          'acknowledgment',
+        );
+      },
+      recordSent: async () => {
+        const sentAt = new Date().toISOString();
+        await writeHistory(supabase, candidateId, systemSession, [{
+          field:    'email_sent',
+          oldValue: null,
+          newValue: 'acknowledgment',
+          summary:  'Email sent (acknowledgment from the HR address)',
+        }]);
+        const { error: markError } = await supabase
+          .from('candidates')
+          .update({ last_email_template: 'acknowledgment', last_email_sent_at: sentAt })
+          .eq('id', candidateId);
+        if (markError) {
+          console.warn('[ats] could not record the acknowledgment time:', markError.message);
+        }
+      },
+      recordFailed: async (error, fellBackToPlain) => {
+        await writeHistory(supabase, candidateId, systemSession, [{
+          field:    'email_failed',
+          oldValue: 'acknowledgment',
+          newValue: null,
+          summary:  fellBackToPlain
+            ? `Email FAILED for acknowledgment from the HR address: ${error}. The plain acknowledgement was used instead`
+            : `Email FAILED for acknowledgment from the HR address: ${error}`,
+        }]);
+      },
+    });
   } catch (err) {
-    console.error('[createPublicApplication] fireAutoCommunication threw:', err);
+    console.error('[createPublicApplication] applicant acknowledgement threw:', err);
   }
 
-  // Ping the assigned recruiter so they know an application landed.
-  // Non-fatal — the candidate row is the source of truth either way.
-  let recruiterEmail: string | null = null;
-  let recruiterName:  string | null = null;
-  if (position.created_by) {
-    const { data: recruiter } = await supabase
-      .from('users')
-      .select('email, name')
-      .eq('id', position.created_by)
-      .maybeSingle();
-    recruiterEmail = recruiter?.email ?? null;
-    recruiterName  = recruiter?.name  ?? null;
-  }
-  // Email recipients = the assigned recruiter + every active HR/recruiting
-  // team member (Christine, Erich, and any future HR hire), deduped.
-  const recipients = await getApplicationNotifyRecipients(supabase, recruiterEmail);
-
+  // Tell HR about the new application: one fixed address (APPLICATION_NOTIFY_TO,
+  // default hr@romega-solutions.com), sent from the info mailbox by the notify
+  // workflow. Non-fatal: the candidate row is the source of truth either way.
   const notifyResult = await notifyRecruiterOfApplication({
     candidateId:     inserted.id,
     candidateName:   cleanedName || args.fullName,
@@ -1831,9 +1828,9 @@ export async function createPublicApplication(args: {
     positionId:      position.id,
     positionTitle:   position.job_title,
     recruiterUserId: position.created_by ?? null,
-    recruiterEmail,
-    recruiterName,
-    recipients,
+    recruiterEmail:  null,
+    recruiterName:   null,
+    recipients:      [getApplicationNotifyTo()],
     resumeUrl,
   });
   if (!notifyResult.ok) {
