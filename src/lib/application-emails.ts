@@ -250,3 +250,60 @@ export async function sendApplicantAck(
     };
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Routing: which acknowledgement an applicant gets
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Bookkeeping (history rows) must never change what the applicant receives.
+async function safely(fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    console.warn('[application-emails] bookkeeping failed:', err instanceof Error ? err.message : err);
+  }
+}
+
+export type ApplicantAckRoute = 'plain' | 'hr' | 'plain_after_hr_refused' | 'failed';
+
+/**
+ * Decides how a public applicant is acknowledged, so there is always exactly one
+ * email and never two or none:
+ *  - mode off (default): only the existing plain acknowledgement is sent.
+ *  - mode "hr": only the Resend confirmation is sent. If Resend certainly sent
+ *    nothing (no key, refused request), the plain acknowledgement is used
+ *    instead. If the outcome is unknown (timeout, network, 5xx) nothing else is
+ *    sent, to avoid a duplicate; the failure is recorded for HR instead.
+ */
+export async function deliverApplicantAck(
+  args: {
+    input:        SendApplicantAckInput;
+    sendPlain:    () => Promise<void>;
+    recordSent:   (providerId: string | null) => Promise<void>;
+    recordFailed: (error: string, fellBackToPlain: boolean) => Promise<void>;
+  },
+  deps: { env?: NodeJS.ProcessEnv; fetchImpl?: FetchLike } = {},
+): Promise<ApplicantAckRoute> {
+  const env = deps.env ?? process.env;
+  if (getApplicantAckMode(env) !== 'hr') {
+    await args.sendPlain();
+    return 'plain';
+  }
+
+  const result = await sendApplicantAck(args.input, deps);
+  if (result.ok) {
+    await safely(() => args.recordSent(result.id));
+    return 'hr';
+  }
+  if (result.notSent) {
+    // Send the fallback first: a failed history write must never stop it.
+    try {
+      await args.sendPlain();
+    } finally {
+      await safely(() => args.recordFailed(result.error, true));
+    }
+    return 'plain_after_hr_refused';
+  }
+  await safely(() => args.recordFailed(result.error, false));
+  return 'failed';
+}

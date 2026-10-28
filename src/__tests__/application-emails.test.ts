@@ -5,6 +5,7 @@ import {
   DEFAULT_APPLICATION_NOTIFY_TO,
   EMAIL_FONT_STACK,
   buildApplicantAckEmail,
+  deliverApplicantAck,
   getApplicantAckMode,
   getApplicationNotifyTo,
   sendApplicantAck,
@@ -230,5 +231,104 @@ describe('sendApplicantAck', () => {
     const fetchImpl = vi.fn(async () => new Response('', { status: 200 }));
     const r = await sendApplicantAck({ ...sample, to: 'a@example.com' }, { env, fetchImpl });
     expect(r).toEqual({ ok: true, id: null });
+  });
+});
+
+describe('deliverApplicantAck (exactly one email per application)', () => {
+  const input = { ...sample, to: 'jamie@example.com', idempotencyKey: 'applicant-ack-9' };
+
+  function makeHooks() {
+    return {
+      sendPlain:    vi.fn(async () => {}),
+      recordSent:   vi.fn<(id: string | null) => Promise<void>>(async () => {}),
+      recordFailed: vi.fn<(error: string, fellBack: boolean) => Promise<void>>(async () => {}),
+    };
+  }
+
+  it('is off by default: only the plain acknowledgement, and Resend is never called', async () => {
+    const hooks = makeHooks();
+    const fetchImpl = stubFetch();
+    const route = await deliverApplicantAck({ input, ...hooks }, { env: { RESEND_API_KEY: STUB_KEY } as unknown as NodeJS.ProcessEnv, fetchImpl });
+    expect(route).toBe('plain');
+    expect(hooks.sendPlain).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(hooks.recordSent).not.toHaveBeenCalled();
+    expect(hooks.recordFailed).not.toHaveBeenCalled();
+  });
+
+  it('stays off for any value other than "hr"', async () => {
+    const hooks = makeHooks();
+    const fetchImpl = stubFetch();
+    const env = { APPLICANT_ACK_MODE: 'on', RESEND_API_KEY: STUB_KEY } as unknown as NodeJS.ProcessEnv;
+    expect(await deliverApplicantAck({ input, ...hooks }, { env, fetchImpl })).toBe('plain');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('mode hr and a good send: only the HR confirmation, plain is not sent', async () => {
+    const hooks = makeHooks();
+    const fetchImpl = stubFetch();
+    const env = { APPLICANT_ACK_MODE: 'hr', RESEND_API_KEY: STUB_KEY } as unknown as NodeJS.ProcessEnv;
+    expect(await deliverApplicantAck({ input, ...hooks }, { env, fetchImpl })).toBe('hr');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(hooks.recordSent).toHaveBeenCalledWith('email_stub_1');
+    expect(hooks.sendPlain).not.toHaveBeenCalled();
+    expect(hooks.recordFailed).not.toHaveBeenCalled();
+  });
+
+  it('mode hr but no key: falls back to the plain acknowledgement and records the failure', async () => {
+    const hooks = makeHooks();
+    const fetchImpl = stubFetch();
+    const env = { APPLICANT_ACK_MODE: 'hr' } as unknown as NodeJS.ProcessEnv;
+    expect(await deliverApplicantAck({ input, ...hooks }, { env, fetchImpl })).toBe('plain_after_hr_refused');
+    expect(hooks.sendPlain).toHaveBeenCalledTimes(1);
+    expect(hooks.recordFailed).toHaveBeenCalledWith('RESEND_API_KEY is not configured', true);
+    expect(hooks.recordSent).not.toHaveBeenCalled();
+  });
+
+  it('mode hr and Resend refuses (4xx): falls back to plain, once', async () => {
+    const hooks = makeHooks();
+    const env = { APPLICANT_ACK_MODE: 'hr', RESEND_API_KEY: STUB_KEY } as unknown as NodeJS.ProcessEnv;
+    expect(await deliverApplicantAck({ input, ...hooks }, { env, fetchImpl: stubFetch(422, {}) })).toBe('plain_after_hr_refused');
+    expect(hooks.sendPlain).toHaveBeenCalledTimes(1);
+    expect(hooks.recordFailed).toHaveBeenCalledWith('Resend responded 422', true);
+  });
+
+  it('mode hr and an unknown outcome (5xx or network error): no second email, failure recorded', async () => {
+    const env = { APPLICANT_ACK_MODE: 'hr', RESEND_API_KEY: STUB_KEY } as unknown as NodeJS.ProcessEnv;
+    const h1 = makeHooks();
+    expect(await deliverApplicantAck({ input, ...h1 }, { env, fetchImpl: stubFetch(503, {}) })).toBe('failed');
+    expect(h1.sendPlain).not.toHaveBeenCalled();
+    expect(h1.recordFailed).toHaveBeenCalledWith('Resend responded 503', false);
+
+    const h2 = makeHooks();
+    const boom = vi.fn(async () => { throw new Error('timeout'); });
+    expect(await deliverApplicantAck({ input, ...h2 }, { env, fetchImpl: boom })).toBe('failed');
+    expect(h2.sendPlain).not.toHaveBeenCalled();
+  });
+
+  it('a failing history write never stops the plain fallback or turns a good send into an error', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const env = { APPLICANT_ACK_MODE: 'hr', RESEND_API_KEY: STUB_KEY } as unknown as NodeJS.ProcessEnv;
+
+    const h1 = makeHooks();
+    h1.recordFailed.mockRejectedValue(new Error('history table unavailable'));
+    expect(await deliverApplicantAck({ input, ...h1 }, { env, fetchImpl: stubFetch(422, {}) })).toBe('plain_after_hr_refused');
+    expect(h1.sendPlain).toHaveBeenCalledTimes(1);
+
+    const h2 = makeHooks();
+    h2.recordFailed.mockRejectedValue(new Error('history table unavailable'));
+    expect(await deliverApplicantAck({ input, ...h2 }, { env: { APPLICANT_ACK_MODE: 'hr' } as unknown as NodeJS.ProcessEnv, fetchImpl: stubFetch() })).toBe('plain_after_hr_refused');
+    expect(h2.sendPlain).toHaveBeenCalledTimes(1);
+
+    const h3 = makeHooks();
+    h3.recordSent.mockRejectedValue(new Error('history table unavailable'));
+    expect(await deliverApplicantAck({ input, ...h3 }, { env, fetchImpl: stubFetch() })).toBe('hr');
+    expect(h3.sendPlain).not.toHaveBeenCalled();
+
+    const h4 = makeHooks();
+    h4.recordFailed.mockRejectedValue(new Error('history table unavailable'));
+    expect(await deliverApplicantAck({ input, ...h4 }, { env, fetchImpl: stubFetch(503, {}) })).toBe('failed');
+    expect(h4.sendPlain).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
   });
 });
