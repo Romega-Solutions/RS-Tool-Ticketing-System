@@ -4,6 +4,7 @@ import { route, requireSession } from '@/lib/api';
 import { computeOvertime } from '@/lib/utils';
 import { weeklySecondsForUser, baseWeeklySecondsForUser } from '@/lib/overtime-server';
 import { notifyTimeEditDecided, notifyTimeEditForwarded, notifyTimeEditRequested } from '@/lib/notifications';
+import { emailRequestFromRow, sendTimeEditEmailAfterResponse } from '@/lib/time-edit-emails';
 import { phtDateOf } from '@/lib/pht';
 import { checkDecisionRights, decisionUpdate, validateDecisionNote } from '@/lib/time-approvals';
 import { activeAdminIds, fmtDateLabel, loadDirectory } from '@/lib/time-approvals-server';
@@ -94,11 +95,27 @@ export const POST = route(async (req: Request) => {
           dateLabel,
         }),
       ]);
+      sendTimeEditEmailAfterResponse({
+        kind:        'supervisor_approved',
+        request:     emailRequestFromRow(reqRow),
+        deciderName: session.name,
+        note:        comment,
+        admin,
+      });
       return NextResponse.json({ ok: true, status: 'pending', stage: 'admin' });
     }
 
     // A rejection at either step is final.
-    await notifyTimeEditDecided({ recipientId: reqRow.user_id, actorId: session.id, approved: false, dateLabel, comment });
+    await Promise.all([
+      notifyTimeEditDecided({ recipientId: reqRow.user_id, actorId: session.id, approved: false, dateLabel, comment }),
+    ]);
+    sendTimeEditEmailAfterResponse({
+      kind:        rights.step === 'supervisor' ? 'declined_supervisor' : 'declined_admin',
+      request:     emailRequestFromRow(reqRow),
+      deciderName: session.name,
+      note:        comment,
+      admin,
+    });
     return NextResponse.json({ ok: true, status: 'denied' });
   }
 
@@ -167,6 +184,16 @@ export const POST = route(async (req: Request) => {
     return NextResponse.json({ error: `Could not apply edit: ${upErr.message}` }, { status: 500 });
   }
 
-  await notifyTimeEditDecided({ recipientId: reqRow.user_id, actorId: session.id, approved: true, dateLabel });
+  // Only after the timesheet update succeeded (a failed update returned above).
+  await Promise.all([
+    notifyTimeEditDecided({ recipientId: reqRow.user_id, actorId: session.id, approved: true, dateLabel }),
+  ]);
+  sendTimeEditEmailAfterResponse({
+    kind:        'approved',
+    request:     emailRequestFromRow(reqRow),
+    deciderName: session.name,
+    note:        comment,
+    admin,
+  });
   return NextResponse.json({ ok: true, status: 'approved' });
 });

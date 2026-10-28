@@ -3,6 +3,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { route, requireSession } from '@/lib/api';
 import { isAllowedTimesheetEditDoc, uploadTimesheetEditDocument } from '@/lib/storage';
 import { notifyTimeEditReceived, notifyTimeEditRequested } from '@/lib/notifications';
+import { sendTimeEditEmailAfterResponse } from '@/lib/time-edit-emails';
 import { initialStage } from '@/lib/time-approvals';
 import { activeAdminIds, fmtDateLabel, loadDirectory, resolveSupervisor } from '@/lib/time-approvals-server';
 
@@ -120,7 +121,7 @@ export const POST = route(async (req: Request) => {
       stage,
       supervisor_id:       supervisorId,
     })
-    .select('id')
+    .select('id, requested_at')
     .single();
   if (error || !inserted) {
     return NextResponse.json({ error: `Could not file request: ${error?.message ?? 'unknown'}` }, { status: 500 });
@@ -141,6 +142,27 @@ export const POST = route(async (req: Request) => {
       step:         stage,
     }),
   ]);
+
+  // The designed email to the requester (supervisor copied), sent after the
+  // response. Best-effort, and off unless the HTML sender is configured and on.
+  sendTimeEditEmailAfterResponse({
+    kind:       'received',
+    waitingFor: stage,
+    admin,
+    request: {
+      id:                inserted.id,
+      userId:            session.id,
+      date:              ts.date,
+      currentClockIn:    ts.clocked_in_at,
+      currentClockOut:   ts.clocked_out_at,
+      requestedClockIn:  requestedIn,
+      requestedClockOut: requestedOut,
+      reason,
+      documentName,
+      requestedAt:       inserted.requested_at ?? new Date().toISOString(),
+      supervisorId,
+    },
+  });
 
   return NextResponse.json({ ok: true, id: inserted.id, stage });
 });

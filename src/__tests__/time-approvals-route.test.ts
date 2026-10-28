@@ -39,6 +39,11 @@ async function post(session: SessionUser, body: unknown) {
   vi.doMock('@/lib/notifications', () => ({
     notifyTimeEditDecided: vi.fn(), notifyTimeEditForwarded: vi.fn(), notifyTimeEditRequested: vi.fn(),
   }));
+  vi.doMock('@/lib/time-edit-emails', async () => ({
+    ...(await vi.importActual<typeof import('@/lib/time-edit-emails')>('@/lib/time-edit-emails')),
+    sendTimeEditEmail: vi.fn(),
+    sendTimeEditEmailAfterResponse: vi.fn(),
+  }));
   const { POST } = await import('@/app/api/attendance/edit-requests/route');
   return POST(jsonReq(body));
 }
