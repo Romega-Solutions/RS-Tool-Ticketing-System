@@ -2,6 +2,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { sendEmail } from '@/lib/n8n';
 import { projectPathById } from '@/lib/project-slug-server';
 import { renderNotificationEmail, type NotificationTaskMeta } from '@/lib/email-templates';
+import { timeEditEmailsReplaceDecided } from '@/lib/time-edit-email-mode';
 
 // In-app notification helpers. Backed by the `notifications` table (see
 // src/db/schema.ts). All writes are best-effort: if the table hasn't been
@@ -63,11 +64,20 @@ const EMAIL_PREF_KEY: Partial<Record<NotificationType, keyof NotificationPrefs>>
 // Types whose email enriches with task fields (Title/Description/Priority/Due).
 const TASK_TYPES = new Set<NotificationType>(['mentioned', 'task_due', 'task_assigned']);
 
+// The toggle that gates a type's email. `time_edit_decided` is unmapped (never
+// emails) exactly when the designed time-correction emails really send, so the
+// requester gets one decision email: the designed one, never the plain one on
+// top of it. In every other case the plain email is unchanged.
+function emailPrefKeyFor(type: NotificationType): keyof NotificationPrefs | undefined {
+  if (type === 'time_edit_decided' && timeEditEmailsReplaceDecided()) return undefined;
+  return EMAIL_PREF_KEY[type];
+}
+
 // Pure gating decision: should this notification type email, given the
 // recipient's prefs? Requires a mapped toggle AND the master switch AND the
 // per-event switch. Unmapped types (e.g. time_edit_requested) never email.
 export function shouldEmailNotification(type: NotificationType, prefs: NotificationPrefs): boolean {
-  const key = EMAIL_PREF_KEY[type];
+  const key = emailPrefKeyFor(type);
   return key != null && prefs.email && prefs[key];
 }
 
@@ -140,7 +150,7 @@ export async function createNotification(input: {
   // ── Email delivery (additive; best-effort; never blocks/breaks the action) ──
   // The in-app bell above is unconditional. Email is opt-out via per-user
   // prefs and only for types mapped in EMAIL_PREF_KEY.
-  const prefKey = EMAIL_PREF_KEY[input.type];
+  const prefKey = emailPrefKeyFor(input.type);
   if (prefKey) {
     try {
       const { email, prefs } = await getRecipientEmailPrefs(sb, input.userId);
