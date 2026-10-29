@@ -39,7 +39,11 @@ export function CandidateForm({ positions }: { positions: PositionOption[] }) {
     setErrorMsg(null);
     start(async () => {
       try {
-        await createCandidate(formData);
+        const result = await createCandidate(formData);
+        if (!result.ok) {
+          setErrorMsg(result.error);
+          return;
+        }
         setOpen(false);
       } catch (err) {
         setErrorMsg(err instanceof Error ? err.message : 'Failed to create candidate');

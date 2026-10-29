@@ -18,6 +18,15 @@ import {
 } from '@/lib/n8n';
 import { deliverApplicantAck, getApplicationNotifyTo } from '@/lib/application-emails';
 import { hasToolAccess } from '@/lib/rbac';
+import {
+  ALREADY_APPLIED_MESSAGE,
+  CANDIDATE_ALREADY_EXISTS_MESSAGE,
+  closedStatusesFilterList,
+  escapeLikePattern,
+  findActiveDuplicate,
+  isActiveApplicationConflict,
+  type ExistingApplicationRow,
+} from '@/lib/duplicate-application';
 import { toProperName, formatPhoneNumber } from '@/lib/format';
 import { uploadCandidatePreEmploymentDocument, uploadResumeToStorage } from '@/lib/storage';
 import { createOnboarderFromCandidate } from '@/lib/onboarders';
@@ -754,7 +763,11 @@ export async function markCandidateSowSigned(candidateId: number): Promise<void>
 // Create
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function createCandidate(formData: FormData) {
+export type CreateCandidateResult =
+  | { ok: true }
+  | { ok: false; code: 'ALREADY_EXISTS'; error: string };
+
+export async function createCandidate(formData: FormData): Promise<CreateCandidateResult> {
   const session = await requireSession();
 
   const fullNameRaw = String(formData.get('fullName')    ?? '').trim();
@@ -823,6 +836,9 @@ export async function createCandidate(formData: FormData) {
     error = retry.error;
   }
 
+  if (error && isActiveApplicationConflict(error)) {
+    return { ok: false, code: 'ALREADY_EXISTS', error: CANDIDATE_ALREADY_EXISTS_MESSAGE };
+  }
   if (error || !inserted) throw new Error(`Failed to create candidate: ${error?.message ?? 'unknown'}`);
 
   await writeHistory(supabase, inserted.id, session, [{
@@ -845,6 +861,7 @@ export async function createCandidate(formData: FormData) {
   revalidatePath('/recruiting/candidates');
   revalidatePath('/recruiting/positions');
   if (positionId) revalidatePath(`/recruiting/positions/${positionId}/applicants`);
+  return { ok: true };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1591,6 +1608,55 @@ export async function createCandidateFromResume(formData: FormData): Promise<Par
   return { ok: true, parsed, candidateId: inserted.id };
 }
 
+// Duplicate-application lookup. Matches the email case-insensitively with
+// ILIKE (wildcards escaped, so the address is matched literally and never
+// spliced into a raw filter string), skips closed rows, then applies the exact
+// lower(trim()) email + position comparison in code. A second, wrapped pattern
+// catches stored emails with stray spaces. Never uses .maybeSingle(): more
+// than one earlier row must not throw. A lookup error fails open; the unique
+// index still blocks the insert.
+async function findOpenApplication(
+  supabase: AdminClient,
+  emailNorm: string,
+  positionTitle: string,
+): Promise<ExistingApplicationRow | null> {
+  const escaped = escapeLikePattern(emailNorm);
+  for (const pattern of [escaped, `%${escaped}%`]) {
+    const { data, error } = await supabase
+      .from('candidates')
+      .select('id, email, position, status')
+      .ilike('email', pattern)
+      .not('status', 'in', closedStatusesFilterList())
+      .order('id', { ascending: true })
+      .limit(50);
+    if (error) {
+      console.warn('[ats] duplicate-application lookup failed:', error.message);
+      return null;
+    }
+    const match = findActiveDuplicate((data ?? []) as ExistingApplicationRow[], emailNorm, positionTitle);
+    if (match) return match;
+  }
+  return null;
+}
+
+async function recordBlockedDuplicate(
+  supabase: AdminClient,
+  candidateId: number,
+  session: SessionUser,
+  positionTitle: string,
+) {
+  try {
+    await writeHistory(supabase, candidateId, session, [{
+      field:    'duplicate_blocked',
+      oldValue: null,
+      newValue: positionTitle,
+      summary:  'Duplicate application attempt blocked',
+    }]);
+  } catch (err) {
+    console.error('[createPublicApplication] duplicate history write failed:', err);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Public application intake — used by /apply/[positionId]. Server-only:
 // the public form server action calls this with anon caller (no session).
@@ -1647,18 +1713,28 @@ export async function createPublicApplication(args: {
     return { ok: false, code: 'POSITION_CLOSED', error: 'This position is no longer accepting applications' };
   }
 
-  // Dedup within 24h on (position, email).
+  // Synthetic "system" session for history rows on public applications.
+  // Role is 'ic' (least privilege) — this session is only used for audit
+  // attribution, never for authorization.
+  const systemSession: SessionUser = {
+    id: 0,
+    email:    'system@romega',
+    name:     'Public Application',
+    username: 'system',
+    role:     'ic',
+    team:     null,
+    jobTitle: null,
+    isOnboarding: false,
+    toolAccess: [],
+  };
+
+  // One open application per (email, position). Checked before the CV is
+  // parsed or stored; a blocked attempt sends no emails and keeps no file.
   const emailNorm = args.email.trim().toLowerCase();
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data: existing } = await supabase
-    .from('candidates')
-    .select('id, application_code')
-    .eq('email', emailNorm)
-    .eq('position', position.job_title)
-    .gte('created_at', since)
-    .maybeSingle();
-  if (existing) {
-    return { ok: true, candidateId: existing.id, applicationCode: existing.application_code ?? null };
+  const openApplication = await findOpenApplication(supabase, emailNorm, position.job_title);
+  if (openApplication) {
+    await recordBlockedDuplicate(supabase, openApplication.id, systemSession, position.job_title);
+    return { ok: false, code: 'ALREADY_APPLIED', error: ALREADY_APPLIED_MESSAGE };
   }
 
   const cleanedName = toProperName(args.fullName);
@@ -1720,24 +1796,13 @@ export async function createPublicApplication(args: {
     error = retry.error;
   }
 
+  if (error && isActiveApplicationConflict(error)) {
+    // Lost a race with a concurrent submission: the index caught it.
+    return { ok: false, code: 'ALREADY_APPLIED', error: ALREADY_APPLIED_MESSAGE };
+  }
   if (error || !inserted) {
     return { ok: false, code: 'DB_ERROR', error: error?.message ?? 'Insert failed' };
   }
-
-  // Synthetic "system" session for history rows on public applications.
-  // Role is 'ic' (least privilege) — this session is only used for audit
-  // attribution, never for authorization.
-  const systemSession: SessionUser = {
-    id: 0,
-    email:    'system@romega',
-    name:     'Public Application',
-    username: 'system',
-    role:     'ic',
-    team:     null,
-    jobTitle: null,
-    isOnboarding: false,
-    toolAccess: [],
-  };
 
   try {
     await writeHistory(supabase, inserted.id, systemSession, [{

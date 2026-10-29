@@ -4,12 +4,13 @@
 // (romega-solutions.com) and forwards the multipart FormData here,
 // authenticated with a shared bearer token.
 //
-// All resume validation, dedup, n8n parsing, candidate insert, storage
+// All resume validation, duplicate-application blocking, n8n parsing, candidate insert, storage
 // upload and email notifications stay in `createPublicApplication` so
 // they don't drift between repos.
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { submitPublicApplication } from '@/app/apply/[positionId]/actions';
+import { ALREADY_APPLIED_MESSAGE } from '@/lib/duplicate-application';
 import { checkRateLimit, keyByIp, clientIp } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
@@ -68,6 +69,13 @@ export async function POST(
 
   try {
     const result = await submitPublicApplication(positionId, formData);
+    if (!result.ok && result.code === 'ALREADY_APPLIED') {
+      // Only the code and a fixed message: no application code, status or name.
+      return NextResponse.json(
+        { ok: false, code: 'ALREADY_APPLIED', error: ALREADY_APPLIED_MESSAGE },
+        { status: 409 },
+      );
+    }
     return NextResponse.json(result, { status: result.ok ? 200 : 400 });
   } catch (err) {
     console.error('[public applications] submission failed:', err);

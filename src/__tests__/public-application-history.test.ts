@@ -59,6 +59,8 @@ vi.mock('@/lib/supabase/admin', () => ({
         select: () => builder,
         eq: () => builder,
         gte: () => builder,
+        ilike: () => builder,
+        not: () => builder,
         order: () => builder,
         limit: () => builder,
         insert: (p: unknown) => { op = 'insert'; payload = p; return builder; },
