@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { Upload, CheckCircle2, AlertCircle, Send, Loader2 } from 'lucide-react';
 import { submitPublicApplication, type PublicApplicationResult } from './actions';
+import { ALREADY_APPLIED_MESSAGE } from '@/lib/duplicate-application';
 
 type Status = 'idle' | 'submitting' | 'success' | 'error';
 
@@ -36,7 +37,7 @@ export function ApplyForm({ positionId, jobTitle }: { positionId: number; jobTit
         setAppCode(result.applicationCode);
         setStatus('success');
       } else {
-        setErrorMsg(result.error);
+        setErrorMsg(result.code === 'ALREADY_APPLIED' ? ALREADY_APPLIED_MESSAGE : result.error);
         setStatus('error');
       }
     });

@@ -4,6 +4,7 @@ import { createPublicApplication } from '@/app/(app)/recruiting/candidates/actio
 
 export type PublicApplicationResult =
   | { ok: true;  candidateId: number; applicationCode: string | null }
+  | { ok: false; code: 'ALREADY_APPLIED'; error: string }
   | { ok: false; error: string; code: string };
 
 export async function submitPublicApplication(
