@@ -100,6 +100,8 @@ export type DirectUploadReceipt = {
   fileName: string;
   size:     number;
   type:     string;
+  /** Signed check value from prepare; ties this receipt to the issued link. */
+  check:    string;
 };
 
 /** What a prepare step returns: where to upload and the one-time token. */
@@ -107,6 +109,8 @@ export type DirectUploadTicket = {
   bucket: string;
   path:   string;
   token:  string;
+  /** Signed check value; must be passed back to the record step. */
+  check:  string;
 };
 
 /**

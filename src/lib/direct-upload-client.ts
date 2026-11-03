@@ -50,9 +50,9 @@ export async function directUpload(args: {
   const client = args.client ?? (createClient() as unknown as StorageUploader);
   const { error } = await client.storage
     .from(ticket.bucket)
-    .uploadToSignedUrl(ticket.path, ticket.token, body, { contentType: check.contentType });
+    .uploadToSignedUrl(ticket.path, ticket.token, body, { contentType: check.contentType, upsert: false });
   if (error) throw new Error(`Upload failed: ${error.message}`);
 
-  const recorded = await args.record({ path: ticket.path, fileName: file.name, size: file.size, type: check.contentType });
+  const recorded = await args.record({ path: ticket.path, fileName: file.name, size: file.size, type: check.contentType, check: ticket.check });
   if (!recorded.ok) throw new Error(recorded.error);
 }

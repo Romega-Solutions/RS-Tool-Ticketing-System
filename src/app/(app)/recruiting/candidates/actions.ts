@@ -29,11 +29,13 @@ import {
 } from '@/lib/duplicate-application';
 import { toProperName, formatPhoneNumber } from '@/lib/format';
 import {
+  assertPathNotRecorded,
   createPreEmploymentUploadUrl,
   isIssuedPreEmploymentPath,
   signPreEmploymentDocument,
   uploadResumeToStorage,
   verifyDirectUpload,
+  verifyUploadCheck,
   type PreEmploymentDocumentKind,
 } from '@/lib/storage';
 import {
@@ -707,13 +709,13 @@ export async function preparePreEmploymentUpload(
   input: { name: string; size: number; type: string },
 ): Promise<UploadActionResult<DirectUploadTicket>> {
   try {
-    await requireSession();
+    const session = await requireSession();
     if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
     const kind = checkPreEmploymentKind(kindRaw);
     const check = checkUploadFile({ name: input?.name, size: input?.size, type: input?.type }, 'pre_employment_document');
     if (!check.ok) throw new Error(check.error);
     await requireOfferedCandidate(createAdminClient(), candidateId);
-    const ticket = await createPreEmploymentUploadUrl({ candidateId, kind, fileName: input.name, extension: check.extension });
+    const ticket = await createPreEmploymentUploadUrl({ candidateId, kind, fileName: input.name, extension: check.extension, userId: session.id });
     return { ok: true, data: ticket };
   } catch (err) {
     return { ok: false, error: uploadErrorMessage(err, 'Could not start the upload') };
@@ -733,6 +735,8 @@ export async function recordPreEmploymentUpload(
     if (!isIssuedPreEmploymentPath(String(receipt?.path ?? ''), candidateId, kind)) {
       throw new Error('This upload does not belong to this candidate');
     }
+    verifyUploadCheck(receipt.check, { path: receipt.path, recordId: candidateId, kind, userId: session.id });
+    await assertPathNotRecorded('candidate_pre_employment_documents', receipt.path);
     const supabase = createAdminClient();
     await requireOfferedCandidate(supabase, candidateId);
     const upload = await verifyDirectUpload('pre_employment_document', receipt);

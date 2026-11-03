@@ -2,6 +2,7 @@
 // the onboarder documents bucket. All callers use the admin client
 // (server-side only) — public URLs are always signed, never exposed directly.
 
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isAllowedTaskImageUpload, taskImageExtension } from '@/lib/task-image-uploads';
 import { RESEARCH_COVERS_BUCKET, MAX_COVER_BYTES, coverImageExtension } from '@/lib/research-posts';
@@ -164,6 +165,13 @@ export type PreEmploymentDocumentKind = 'sow' | 'job_description' | 'ai_policy' 
 
 const DATE_STAMP = String.raw`\d{4}-\d{2}-\d{2}`;
 const SLUG = '[a-z0-9]+(?:-[a-z0-9]+)*';
+// Every upload gets its own name (time + random suffix), so an upload can
+// never replace a file behind an earlier document row.
+const UNIQUE = String.raw`\d{13}-[a-f0-9]{8}`;
+
+function uniqueSuffix(now: number): string {
+  return `${now}-${randomBytes(4).toString('hex')}`;
+}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -178,14 +186,15 @@ export function onboarderDocumentPath(args: {
   extension:   string;
   now?:        Date;
 }): string {
+  const now = args.now ?? new Date();
   const slug = slugify(args.label?.trim() || args.fileName.replace(/\.[^.]+$/, '') || args.kind);
-  const stamp = (args.now ?? new Date()).toISOString().slice(0, 10);
-  return `onboarders/${args.onboarderId}/${args.kind}/${slug}-${stamp}.${args.extension}`;
+  const stamp = now.toISOString().slice(0, 10);
+  return `onboarders/${args.onboarderId}/${args.kind}/${slug}-${stamp}-${uniqueSuffix(now.getTime())}.${args.extension}`;
 }
 
 /** True only for a path shaped like one issued for this onboarder and kind. */
 export function isIssuedOnboarderPath(path: string, onboarderId: number, kind: OnboarderDocumentKind): boolean {
-  const re = new RegExp(`^onboarders/${onboarderId}/${escapeRegExp(kind)}/${SLUG}-${DATE_STAMP}\\.[a-z0-9]+$`);
+  const re = new RegExp(`^onboarders/${onboarderId}/${escapeRegExp(kind)}/${SLUG}-${DATE_STAMP}-${UNIQUE}\\.[a-z0-9]+$`);
   return re.test(path);
 }
 
@@ -196,12 +205,51 @@ export function preEmploymentDocumentPath(args: {
   extension:   string;
   now?:        number;
 }): string {
-  return `candidates/${args.candidateId}/pre-employment/${args.kind}/${args.now ?? Date.now()}-${slugify(args.fileName.replace(/\.[^.]+$/, ''))}.${args.extension}`;
+  return `candidates/${args.candidateId}/pre-employment/${args.kind}/${uniqueSuffix(args.now ?? Date.now())}-${slugify(args.fileName.replace(/\.[^.]+$/, ''))}.${args.extension}`;
 }
 
 export function isIssuedPreEmploymentPath(path: string, candidateId: number, kind: PreEmploymentDocumentKind): boolean {
-  const re = new RegExp(`^candidates/${candidateId}/pre-employment/${escapeRegExp(kind)}/\\d+-${SLUG}\\.[a-z0-9]+$`);
+  const re = new RegExp(`^candidates/${candidateId}/pre-employment/${escapeRegExp(kind)}/${UNIQUE}-${SLUG}\\.[a-z0-9]+$`);
   return re.test(path);
+}
+
+// ── Upload check value ─────────────────────────────────────────────────────
+// prepare signs (path, record id, doc type, user id, expiry) with HMAC-SHA256;
+// record only accepts a path whose check value verifies. The key is derived
+// from SUPABASE_SECRET_KEY, a server-only secret every environment already has
+// (the admin client cannot run without it), so no new env var is needed. The
+// derivation label keeps this key separate from the secret's other uses.
+
+export const UPLOAD_CHECK_TTL_MS = 2 * 60 * 60 * 1000; // same as the signed upload URL
+
+type UploadCheckFields = { path: string; recordId: number; kind: string; userId: number };
+
+function uploadCheckKey(): Buffer {
+  const secret = process.env.SUPABASE_SECRET_KEY?.trim();
+  if (!secret || secret === 'your-secret-key-here') throw new Error('Uploads are not configured on this server.');
+  return createHmac('sha256', secret).update('rs-portal:direct-upload-check:v1').digest();
+}
+
+function uploadCheckMac(fields: UploadCheckFields, expiresAt: number): Buffer {
+  const payload = [fields.path, fields.recordId, fields.kind, fields.userId, expiresAt].join('|');
+  return createHmac('sha256', uploadCheckKey()).update(payload).digest();
+}
+
+export function signUploadCheck(fields: UploadCheckFields, now = Date.now()): string {
+  const expiresAt = now + UPLOAD_CHECK_TTL_MS;
+  return `${expiresAt}.${uploadCheckMac(fields, expiresAt).toString('base64url')}`;
+}
+
+/** Throws unless the check value was issued for exactly these fields and hasn't expired. */
+export function verifyUploadCheck(check: unknown, fields: UploadCheckFields, now = Date.now()): void {
+  const match = /^(\d{13})\.([A-Za-z0-9_-]{43})$/.exec(String(check ?? ''));
+  const invalid = 'This upload could not be verified. Please upload the file again.';
+  if (!match) throw new Error(invalid);
+  const expiresAt = Number(match[1]);
+  const given = Buffer.from(match[2], 'base64url');
+  const expected = uploadCheckMac(fields, expiresAt);
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) throw new Error(invalid);
+  if (now > expiresAt) throw new Error('This upload has expired. Please upload the file again.');
 }
 
 const DIRECT_UPLOAD_BUCKETS: Record<UploadPolicy, string> = {
@@ -220,13 +268,14 @@ export async function createOnboarderUploadUrl(args: {
   fileName:    string;
   label?:      string | null;
   extension:   string;
+  userId:      number;
 }): Promise<DirectUploadTicket> {
   const path = onboarderDocumentPath(args);
   const admin = createAdminClient();
-  // upsert keeps the old behaviour: a same-day re-upload replaces the file.
-  const { data, error } = await admin.storage.from(ONBOARDER_BUCKET).createSignedUploadUrl(path, { upsert: true });
+  const { data, error } = await admin.storage.from(ONBOARDER_BUCKET).createSignedUploadUrl(path, { upsert: false });
   if (error || !data) throw new Error(`Could not start the upload: ${error?.message ?? 'unknown'}`);
-  return { bucket: ONBOARDER_BUCKET, path, token: data.token };
+  const check = signUploadCheck({ path, recordId: args.onboarderId, kind: args.kind, userId: args.userId });
+  return { bucket: ONBOARDER_BUCKET, path, token: data.token, check };
 }
 
 export async function createPreEmploymentUploadUrl(args: {
@@ -234,12 +283,24 @@ export async function createPreEmploymentUploadUrl(args: {
   kind:        PreEmploymentDocumentKind;
   fileName:    string;
   extension:   string;
+  userId:      number;
 }): Promise<DirectUploadTicket> {
   const path = preEmploymentDocumentPath(args);
   const admin = createAdminClient();
-  const { data, error } = await admin.storage.from(CANDIDATE_PREEMPLOYMENT_BUCKET).createSignedUploadUrl(path);
+  const { data, error } = await admin.storage.from(CANDIDATE_PREEMPLOYMENT_BUCKET).createSignedUploadUrl(path, { upsert: false });
   if (error || !data) throw new Error(`Could not start the upload: ${error?.message ?? 'unknown'}`);
-  return { bucket: CANDIDATE_PREEMPLOYMENT_BUCKET, path, token: data.token };
+  const check = signUploadCheck({ path, recordId: args.candidateId, kind: args.kind, userId: args.userId });
+  return { bucket: CANDIDATE_PREEMPLOYMENT_BUCKET, path, token: data.token, check };
+}
+
+/** Refuse a path that is already recorded in the given documents table. */
+export async function assertPathNotRecorded(
+  table: 'onboarder_documents' | 'candidate_pre_employment_documents',
+  path: string,
+): Promise<void> {
+  const { data, error } = await createAdminClient().from(table).select('id').eq('storage_path', path).maybeSingle();
+  if (error) throw new Error(`Could not check the upload: ${error.message}`);
+  if (data) throw new Error('This file has already been recorded.');
 }
 
 export type VerifiedUpload = { path: string; mimeType: string; sizeBytes: number };

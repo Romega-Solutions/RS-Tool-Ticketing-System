@@ -38,6 +38,7 @@ export function ContractorIntakeForm({ children, className }: { children: ReactN
             formData.set('w8Name', receipt.fileName);
             formData.set('w8Size', String(receipt.size));
             formData.set('w8Type', receipt.type);
+            formData.set('w8Check', receipt.check);
             // On success the action redirects to My Tasks.
             return (await submitContractorIntake(formData)) ?? { ok: true };
           },

@@ -11,11 +11,13 @@ type StoredObject = { size: number; mimetype: string };
 const MB = 1024 * 1024;
 
 const state = vi.hoisted(() => ({
+  _env: (process.env.SUPABASE_SECRET_KEY = 'test-only-secret'),
   session: null as null | Record<string, unknown>,
   tables: {} as Record<string, Row[]>,
   buckets: {} as Record<string, Map<string, { size: number; mimetype: string }>>,
   tokens: new Map<string, string>(),
   removed: [] as string[],
+  upsertFlags: [] as unknown[],
 }));
 
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
@@ -40,13 +42,16 @@ function bucket(name: string) {
 function storageFor(name: string, asBrowser: boolean) {
   const objects = bucket(name);
   return {
-    async createSignedUploadUrl(path: string) {
+    async createSignedUploadUrl(path: string, opts?: { upsert?: boolean }) {
+      state.upsertFlags.push(opts?.upsert);
       if (asBrowser) throw new Error('browser client cannot sign uploads');
       const token = `tok-${name}-${path}-${Math.random()}`;
       state.tokens.set(token, `${name}/${path}`);
       return { data: { path, token, signedUrl: `https://storage.test/${name}/${path}?token=${token}` }, error: null };
     },
-    async uploadToSignedUrl(path: string, token: string, file: Blob) {
+    async uploadToSignedUrl(path: string, token: string, file: Blob, opts?: { upsert?: boolean }) {
+      if (opts && opts.upsert !== false) return { data: null, error: { message: 'expected upsert:false' } };
+      if (objects.has(path)) return { data: null, error: { message: 'The resource already exists' } };
       if (state.tokens.get(token) !== `${name}/${path}`) return { data: null, error: { message: 'invalid token' } };
       state.tokens.delete(token); // one-time
       objects.set(path, { size: file.size, mimetype: file.type });
@@ -114,6 +119,10 @@ import { prepareIntakeW8Upload, submitContractorIntake } from '@/app/(app)/my-ta
 import { preparePreEmploymentUpload, recordPreEmploymentUpload } from '@/app/(app)/recruiting/candidates/actions';
 import { directUpload } from '@/lib/direct-upload-client';
 import { checkUploadFile, MAX_DIRECT_UPLOAD_BYTES } from '@/lib/direct-upload';
+import { signUploadCheck, UPLOAD_CHECK_TTL_MS } from '@/lib/storage';
+
+const STAMP = '2026-11-03-1762180000000-0a1b2c3d';
+const issued = (path: string, recordId: number, kind: string, userId = 7) => ({ path, check: signUploadCheck({ path, recordId, kind, userId }) });
 
 const PDF = 'application/pdf';
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -136,6 +145,7 @@ beforeEach(() => {
   state.buckets = {};
   state.tokens.clear();
   state.removed = [];
+  state.upsertFlags = [];
 });
 
 describe('shared file checks', () => {
@@ -179,20 +189,21 @@ describe('onboarder documents: prepare', () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.data.bucket).toBe('onboarder-docs');
-    expect(res.data.path).toMatch(/^onboarders\/25\/w8\/w-8-form-alyssa-\d{4}-\d{2}-\d{2}\.pdf$/);
+    expect(res.data.path).toMatch(/^onboarders\/25\/w8\/w-8-form-alyssa-\d{4}-\d{2}-\d{2}-\d{13}-[a-f0-9]{8}\.pdf$/);
+    expect(res.data.check).toMatch(/^\d{13}\.[A-Za-z0-9_-]{43}$/);
     expect(res.data.token).toBeTruthy();
   });
 });
 
 describe('onboarder documents: record', () => {
   it('rejects a missing object', async () => {
-    const res = await recordDocumentUpload(25, { kind: 'nbi', path: 'onboarders/25/nbi/nbi-2026-11-03.pdf', fileName: 'nbi.pdf', size: MB, type: PDF });
+    const res = await recordDocumentUpload(25, { kind: 'nbi', ...issued(`onboarders/25/nbi/nbi-${STAMP}.pdf`, 25, 'nbi'), fileName: 'nbi.pdf', size: MB, type: PDF });
     expect(res).toMatchObject({ ok: false, error: expect.stringMatching(/not found/) });
     expect(table('onboarder_documents')).toHaveLength(0);
   });
   it('rejects a path not issued for this onboarder and kind', async () => {
-    for (const path of ['onboarders/26/nbi/nbi-2026-11-03.pdf', 'onboarders/25/w8/nbi-2026-11-03.pdf', 'onboarders/25/nbi/../../26/x-2026-11-03.pdf', 'candidates/1/cv.pdf']) {
-      const res = await recordDocumentUpload(25, { kind: 'nbi', path, fileName: 'x.pdf', size: MB, type: PDF });
+    for (const path of [`onboarders/26/nbi/nbi-${STAMP}.pdf`, `onboarders/25/w8/nbi-${STAMP}.pdf`, `onboarders/25/nbi/../../26/x-${STAMP}.pdf`, 'onboarders/25/nbi/nbi-2026-11-03.pdf', 'candidates/1/cv.pdf']) {
+      const res = await recordDocumentUpload(25, { kind: 'nbi', ...issued(path, 25, 'nbi'), fileName: 'x.pdf', size: MB, type: PDF });
       expect(res).toMatchObject({ ok: false, error: expect.stringMatching(/does not belong/) });
     }
   });
@@ -200,7 +211,7 @@ describe('onboarder documents: record', () => {
     const prepared = await prepareDocumentUpload(25, { kind: 'nbi', name: 'nbi.pdf', size: MB, type: PDF });
     if (!prepared.ok) throw new Error(prepared.error);
     await rogueUpload(prepared.data, 26 * MB);
-    const res = await recordDocumentUpload(25, { kind: 'nbi', path: prepared.data.path, fileName: 'nbi.pdf', size: MB, type: PDF });
+    const res = await recordDocumentUpload(25, { kind: 'nbi', path: prepared.data.path, check: prepared.data.check, fileName: 'nbi.pdf', size: MB, type: PDF });
     expect(res).toMatchObject({ ok: false, error: expect.stringMatching(/26\.0 MB\. The limit is 25 MB/) });
     expect(state.removed).toEqual([prepared.data.path]);
     expect(bucket('onboarder-docs').has(prepared.data.path)).toBe(false);
@@ -210,10 +221,10 @@ describe('onboarder documents: record', () => {
     const prepared = await prepareDocumentUpload(25, { kind: 'nbi', name: 'nbi.pdf', size: MB, type: PDF });
     if (!prepared.ok) throw new Error(prepared.error);
     await rogueUpload(prepared.data, 2 * MB);
-    expect(await recordDocumentUpload(25, { kind: 'nbi', path: prepared.data.path, fileName: 'nbi.pdf', size: MB, type: PDF }))
+    expect(await recordDocumentUpload(25, { kind: 'nbi', path: prepared.data.path, check: prepared.data.check, fileName: 'nbi.pdf', size: MB, type: PDF }))
       .toMatchObject({ ok: false, error: expect.stringMatching(/does not match/) });
     bucket('onboarder-docs').set(prepared.data.path, { size: MB, mimetype: 'text/html' });
-    expect(await recordDocumentUpload(25, { kind: 'nbi', path: prepared.data.path, fileName: 'nbi.pdf', size: MB, type: PDF }))
+    expect(await recordDocumentUpload(25, { kind: 'nbi', path: prepared.data.path, check: prepared.data.check, fileName: 'nbi.pdf', size: MB, type: PDF }))
       .toMatchObject({ ok: false, error: expect.stringMatching(/type does not match/) });
   });
   it('happy path: inserts the row, stamps the W-8 date and writes history', async () => {
@@ -224,7 +235,7 @@ describe('onboarder documents: record', () => {
     });
     expect(table('onboarder_documents')).toEqual([expect.objectContaining({
       onboarder_id: 25, kind: 'w8', label: 'Signed W-8', mime_type: PDF, size_bytes: 2 * MB, uploaded_by: 7,
-      storage_path: expect.stringMatching(/^onboarders\/25\/w8\/signed-w-8-\d{4}-\d{2}-\d{2}\.pdf$/),
+      storage_path: expect.stringMatching(/^onboarders\/25\/w8\/signed-w-8-\d{4}-\d{2}-\d{2}-\d{13}-[a-f0-9]{8}\.pdf$/),
     })]);
     expect(table('onboarders')[0].w8_uploaded_at).toEqual(expect.any(String));
     expect(table('onboarder_history')).toEqual([expect.objectContaining({
@@ -258,7 +269,7 @@ async function intakeUpload(file: File) {
     prepare: meta => prepareIntakeW8Upload({ legalName: 'Alyssa Nicole Yorro', ...meta }),
     record: async receipt => {
       fd.set('w8Path', receipt.path); fd.set('w8Name', receipt.fileName);
-      fd.set('w8Size', String(receipt.size)); fd.set('w8Type', receipt.type);
+      fd.set('w8Size', String(receipt.size)); fd.set('w8Type', receipt.type); fd.set('w8Check', receipt.check);
       return (await submitContractorIntake(fd)) ?? { ok: true };
     },
   });
@@ -274,9 +285,10 @@ describe('contractor intake W-8', () => {
   });
   it('submit rejects a missing object and an unissued path', async () => {
     const fd = intakeForm();
-    fd.set('w8Path', 'onboarders/25/w8/alyssa-nicole-yorro-w-8-2026-11-03.pdf'); fd.set('w8Size', String(MB)); fd.set('w8Type', PDF);
+    const ok = issued(`onboarders/25/w8/alyssa-nicole-yorro-w-8-${STAMP}.pdf`, 25, 'w8');
+    fd.set('w8Path', ok.path); fd.set('w8Check', ok.check); fd.set('w8Size', String(MB)); fd.set('w8Type', PDF);
     expect(await submitContractorIntake(fd)).toMatchObject({ ok: false, error: expect.stringMatching(/not found/) });
-    fd.set('w8Path', 'onboarders/99/w8/x-2026-11-03.pdf');
+    fd.set('w8Path', `onboarders/99/w8/x-${STAMP}.pdf`);
     expect(await submitContractorIntake(fd)).toMatchObject({ ok: false, error: expect.stringMatching(/does not belong/) });
     expect(table('onboarder_documents')).toHaveLength(0);
     expect(table('onboarders')[0].onboarding_form_submitted_at).toBeNull();
@@ -286,7 +298,7 @@ describe('contractor intake W-8', () => {
     if (!prepared.ok) throw new Error(prepared.error);
     await rogueUpload(prepared.data, 26 * MB);
     const fd = intakeForm();
-    fd.set('w8Path', prepared.data.path); fd.set('w8Size', String(MB)); fd.set('w8Type', PDF);
+    fd.set('w8Path', prepared.data.path); fd.set('w8Check', prepared.data.check); fd.set('w8Size', String(MB)); fd.set('w8Type', PDF);
     expect(await submitContractorIntake(fd)).toMatchObject({ ok: false, error: expect.stringMatching(/limit is 25 MB/) });
     expect(state.removed).toEqual([prepared.data.path]);
     expect(table('onboarder_documents')).toHaveLength(0);
@@ -295,7 +307,7 @@ describe('contractor intake W-8', () => {
     await expect(intakeUpload(fileOf(3 * MB, 'my w8.pdf'))).rejects.toMatchObject({ digest: 'NEXT_REDIRECT;/my-tasks?intake=submitted' });
     expect(table('onboarder_documents')).toEqual([expect.objectContaining({
       onboarder_id: 25, kind: 'w8', label: 'W-8 — Alyssa Nicole Yorro', size_bytes: 3 * MB, mime_type: PDF,
-      storage_path: expect.stringMatching(/^onboarders\/25\/w8\/alyssa-nicole-yorro-w-8-\d{4}-\d{2}-\d{2}\.pdf$/),
+      storage_path: expect.stringMatching(/^onboarders\/25\/w8\/alyssa-nicole-yorro-w-8-\d{4}-\d{2}-\d{2}-\d{13}-[a-f0-9]{8}\.pdf$/),
     })]);
     const onb = table('onboarders')[0];
     expect(onb.w8_uploaded_at).toEqual(onb.onboarding_form_submitted_at);
@@ -323,9 +335,9 @@ describe('pre-employment documents', () => {
     expect(state.tokens.size).toBe(0);
   });
   it('record rejects a missing object and an unissued path', async () => {
-    expect(await recordPreEmploymentUpload(55, 'sow', { path: 'candidates/55/pre-employment/sow/1730000000000-sow.pdf', fileName: 'sow.pdf', size: MB, type: PDF }))
+    expect(await recordPreEmploymentUpload(55, 'sow', { ...issued('candidates/55/pre-employment/sow/1762180000000-0a1b2c3d-sow.pdf', 55, 'sow'), fileName: 'sow.pdf', size: MB, type: PDF }))
       .toMatchObject({ ok: false, error: expect.stringMatching(/not found/) });
-    expect(await recordPreEmploymentUpload(55, 'sow', { path: 'candidates/55/pre-employment/nda/1730000000000-sow.pdf', fileName: 'sow.pdf', size: MB, type: PDF }))
+    expect(await recordPreEmploymentUpload(55, 'sow', { ...issued('candidates/55/pre-employment/nda/1762180000000-0a1b2c3d-sow.pdf', 55, 'sow'), fileName: 'sow.pdf', size: MB, type: PDF }))
       .toMatchObject({ ok: false, error: expect.stringMatching(/does not belong/) });
     expect(table('candidate_pre_employment_documents')).toHaveLength(0);
   });
@@ -334,7 +346,7 @@ describe('pre-employment documents', () => {
     if (!prepared.ok) throw new Error(prepared.error);
     expect(prepared.data.bucket).toBe('candidate-pre-employment-docs');
     await rogueUpload(prepared.data, 26 * MB);
-    expect(await recordPreEmploymentUpload(55, 'nda', { path: prepared.data.path, fileName: 'nda.pdf', size: MB, type: PDF }))
+    expect(await recordPreEmploymentUpload(55, 'nda', { path: prepared.data.path, check: prepared.data.check, fileName: 'nda.pdf', size: MB, type: PDF }))
       .toMatchObject({ ok: false, error: expect.stringMatching(/limit is 25 MB/) });
     expect(state.removed).toEqual([prepared.data.path]);
     expect(table('candidate_pre_employment_documents')).toHaveLength(0);
@@ -377,5 +389,88 @@ describe.each([
     expect(state.tokens.size).toBe(0);
     expect(Object.values(state.buckets).every(b => b.size === 0)).toBe(true);
     expect(recorded()).toBe(0);
+  });
+});
+
+// The signed check value ties record to the link prepare issued.
+describe.each([
+  ['onboarder document', 'onboarder_documents',
+    () => prepareDocumentUpload(25, { kind: 'nbi', name: 'nbi.pdf', size: MB, type: PDF }),
+    (r: { path: string; check: string }) => recordDocumentUpload(25, { kind: 'nbi', ...r, fileName: 'nbi.pdf', size: MB, type: PDF })],
+  ['intake W-8', 'onboarder_documents',
+    () => prepareIntakeW8Upload({ legalName: 'Alyssa', name: 'w8.pdf', size: MB, type: PDF }),
+    async (r: { path: string; check: string }) => {
+      const fd = intakeForm();
+      fd.set('w8Path', r.path); fd.set('w8Check', r.check); fd.set('w8Size', String(MB)); fd.set('w8Type', PDF);
+      try { return await submitContractorIntake(fd); } catch (err) {
+        if (String((err as { digest?: string }).digest ?? '').startsWith('NEXT_REDIRECT')) return { ok: true as const };
+        throw err;
+      }
+    }],
+  ['pre-employment document', 'candidate_pre_employment_documents',
+    () => preparePreEmploymentUpload(55, 'sow', { name: 'sow.pdf', size: MB, type: PDF }),
+    (r: { path: string; check: string }) => recordPreEmploymentUpload(55, 'sow', { ...r, fileName: 'sow.pdf', size: MB, type: PDF })],
+] as const)('upload check value: %s', (_label, docTable, prepare, record) => {
+  async function preparedAndUploaded() {
+    const prepared = await prepare();
+    if (!prepared.ok) throw new Error(prepared.error);
+    await rogueUpload(prepared.data, MB);
+    return prepared.data;
+  }
+  it('accepts the untouched value', async () => {
+    const t = await preparedAndUploaded();
+    expect(await record({ path: t.path, check: t.check })).toEqual({ ok: true });
+    expect(table(docTable)).toHaveLength(1);
+  });
+  it('rejects a tampered value', async () => {
+    const t = await preparedAndUploaded();
+    const [exp, mac] = t.check.split('.');
+    const flipped = (mac[0] === 'A' ? 'B' : 'A') + mac.slice(1);
+    for (const check of [`${exp}.${flipped}`, `${Number(exp) + 1000}.${mac}`, '', 'garbage']) {
+      expect(await record({ path: t.path, check })).toMatchObject({ ok: false, error: expect.stringMatching(/could not be verified/) });
+    }
+    expect(table(docTable)).toHaveLength(0);
+  });
+  it('rejects an expired value', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const t = await preparedAndUploaded();
+      vi.setSystemTime(Date.now() + UPLOAD_CHECK_TTL_MS + 1000);
+      expect(await record({ path: t.path, check: t.check })).toMatchObject({ ok: false, error: expect.stringMatching(/expired/) });
+    } finally { vi.useRealTimers(); }
+    expect(table(docTable)).toHaveLength(0);
+  });
+  it('rejects a different session user', async () => {
+    const t = await preparedAndUploaded();
+    state.session = { ...state.session, id: 8 };
+    if (docTable === 'onboarder_documents' && _label === 'intake W-8') table('onboarders')[0].user_id = 8;
+    expect(await record({ path: t.path, check: t.check })).toMatchObject({ ok: false, error: expect.stringMatching(/could not be verified/) });
+    expect(table(docTable)).toHaveLength(0);
+  });
+  it('rejects a value issued for a different path', async () => {
+    const a = await preparedAndUploaded();
+    const b = await preparedAndUploaded();
+    expect(a.path).not.toBe(b.path);
+    expect(await record({ path: b.path, check: a.check })).toMatchObject({ ok: false, error: expect.stringMatching(/could not be verified/) });
+    expect(table(docTable)).toHaveLength(0);
+  });
+  it('rejects a path that already has a document row', async () => {
+    const t = await preparedAndUploaded();
+    table(docTable).push({ id: 1, storage_path: t.path });
+    expect(await record({ path: t.path, check: t.check })).toMatchObject({ ok: false, error: expect.stringMatching(/already been recorded/) });
+    expect(table(docTable)).toHaveLength(1);
+  });
+});
+
+describe('no overwrites', () => {
+  it('gives every upload of the same file on the same day its own name, with upsert off', async () => {
+    const paths = new Set<string>();
+    for (let i = 0; i < 5; i++) {
+      const res = await prepareDocumentUpload(25, { kind: 'w8', label: 'Same', name: 'same.pdf', size: MB, type: PDF });
+      if (!res.ok) throw new Error(res.error);
+      paths.add(res.data.path);
+    }
+    expect(paths.size).toBe(5);
+    expect(state.upsertFlags.every(flag => flag === false)).toBe(true);
   });
 });

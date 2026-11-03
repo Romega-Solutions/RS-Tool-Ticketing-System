@@ -4,7 +4,13 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
-import { createOnboarderUploadUrl, isIssuedOnboarderPath, verifyDirectUpload } from '@/lib/storage';
+import {
+  assertPathNotRecorded,
+  createOnboarderUploadUrl,
+  isIssuedOnboarderPath,
+  verifyDirectUpload,
+  verifyUploadCheck,
+} from '@/lib/storage';
 import {
   checkUploadFile,
   uploadErrorMessage,
@@ -77,6 +83,7 @@ export async function prepareIntakeW8Upload(input: {
     if (!check.ok) throw new Error(check.error);
     const ticket = await createOnboarderUploadUrl({
       onboarderId: onb.id, kind: 'w8', fileName: input.name, label: `${legalName} W-8`, extension: check.extension,
+      userId: session.id,
     });
     return { ok: true, data: ticket };
   } catch (err) {
@@ -125,15 +132,18 @@ async function saveContractorIntake(formData: FormData): Promise<void> {
   const w8Name          = String(formData.get('w8Name')          ?? '').trim();
   const w8Size          = Number(formData.get('w8Size')          ?? 0);
   const w8Type          = String(formData.get('w8Type')          ?? '').trim();
+  const w8Check         = String(formData.get('w8Check')         ?? '').trim();
 
   if (!legalName)        throw new Error('Legal name is required');
   if (!consent)          throw new Error('You must accept the Independent Contractor Agreement');
   if (!w8Path)           throw new Error('W-8 form (PDF) is required');
   if (!isIssuedOnboarderPath(w8Path, onb.id, 'w8')) throw new Error('This W-8 upload does not belong to your onboarding record');
+  verifyUploadCheck(w8Check, { path: w8Path, recordId: onb.id, kind: 'w8', userId: session.id });
+  await assertPathNotRecorded('onboarder_documents', w8Path);
 
   // 1. Check the uploaded W-8 (deleted if it is over the size cap).
   const upload = await verifyDirectUpload('onboarder_document', {
-    path: w8Path, fileName: w8Name, size: w8Size, type: w8Type,
+    path: w8Path, fileName: w8Name, size: w8Size, type: w8Type, check: w8Check,
   });
 
   // 2. Insert document row.

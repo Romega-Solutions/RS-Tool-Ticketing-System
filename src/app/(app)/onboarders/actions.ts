@@ -8,9 +8,11 @@ import { hasToolAccess } from '@/lib/rbac';
 import { toProperName, formatPhoneNumber } from '@/lib/format';
 import { DEPARTMENTS } from '@/lib/departments';
 import {
+  assertPathNotRecorded,
   createOnboarderUploadUrl,
   isIssuedOnboarderPath,
   verifyDirectUpload,
+  verifyUploadCheck,
   type OnboarderDocumentKind,
 } from '@/lib/storage';
 import {
@@ -1087,7 +1089,7 @@ export async function prepareDocumentUpload(
   input: { kind: string; label?: string | null; name: string; size: number; type: string },
 ): Promise<UploadActionResult<DirectUploadTicket>> {
   try {
-    await requireSession();
+    const session = await requireSession();
     checkOnboarderId(onboarderId);
     const kind = String(input?.kind ?? '').trim();
     if (!isDocKind(kind)) throw new Error('Invalid document kind');
@@ -1100,6 +1102,7 @@ export async function prepareDocumentUpload(
 
     const ticket = await createOnboarderUploadUrl({
       onboarderId, kind, fileName: input.name, label: cleanLabel(input.label), extension: check.extension,
+      userId: session.id,
     });
     return { ok: true, data: ticket };
   } catch (err) {
@@ -1124,6 +1127,8 @@ export async function recordDocumentUpload(
     if (!isIssuedOnboarderPath(String(input.path ?? ''), onboarderId, kind)) {
       throw new Error('This upload does not belong to this onboarder');
     }
+    verifyUploadCheck(input.check, { path: input.path, recordId: onboarderId, kind, userId: session.id });
+    await assertPathNotRecorded('onboarder_documents', input.path);
     const label = cleanLabel(input.label);
     const upload = await verifyDirectUpload('onboarder_document', input);
 
