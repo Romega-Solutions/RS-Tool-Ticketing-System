@@ -107,22 +107,6 @@ function extensionFor(name: string, mime: string): string {
   return 'bin';
 }
 
-export async function uploadCandidatePreEmploymentDocument(args: {
-  candidateId: number; kind: 'sow' | 'job_description' | 'ai_policy' | 'nda'; file: File;
-}): Promise<{ path: string; signedUrl: string; mimeType: string; sizeBytes: number }> {
-  const allowedTypes = new Set(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
-  if (!allowedTypes.has(args.file.type)) throw new Error('Only PDF or DOCX documents are supported');
-  if (args.file.size <= 0 || args.file.size > 10_000_000) throw new Error('Document must be between 1 byte and 10 MB');
-  const ext = extensionFor(args.file.name, args.file.type);
-  const path = `candidates/${args.candidateId}/pre-employment/${args.kind}/${Date.now()}-${slugify(args.file.name.replace(/\.[^.]+$/, ''))}.${ext}`;
-  const admin = createAdminClient();
-  const { error: uploadError } = await admin.storage.from(CANDIDATE_PREEMPLOYMENT_BUCKET).upload(path, new Uint8Array(await args.file.arrayBuffer()), { contentType: args.file.type, upsert: false });
-  if (uploadError) throw new Error(`Document upload failed: ${uploadError.message}`);
-  const { data, error } = await admin.storage.from(CANDIDATE_PREEMPLOYMENT_BUCKET).createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
-  if (error || !data) throw new Error(`Document signing failed: ${error?.message ?? 'unknown'}`);
-  return { path, signedUrl: data.signedUrl, mimeType: args.file.type, sizeBytes: args.file.size };
-}
-
 export type OnboarderUpload = {
   path:      string;
   signedUrl: string;
