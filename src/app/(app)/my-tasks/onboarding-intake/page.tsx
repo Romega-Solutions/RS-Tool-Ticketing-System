@@ -4,7 +4,8 @@ import { ArrowLeft, FileText, ShieldCheck, Wallet, Phone } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { getSession } from '@/lib/session';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { submitContractorIntake } from './actions';
+import { ContractorIntakeForm } from './contractor-intake-form';
+import { acceptAttribute, MAX_DIRECT_UPLOAD_LABEL } from '@/lib/direct-upload';
 
 export default async function ContractorOnboardingIntakePage() {
   const session = await getSession();
@@ -50,7 +51,7 @@ export default async function ContractorOnboardingIntakePage() {
           </CardContent>
         </Card>
       ) : (
-        <form action={submitContractorIntake} className="space-y-6">
+        <ContractorIntakeForm className="space-y-6">
           {/* Personal */}
           <Section title="Personal" icon={<FileText className="w-4 h-4" />}>
             <Row>
@@ -72,17 +73,17 @@ export default async function ContractorOnboardingIntakePage() {
             </Row>
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-(--rs-neutral-grey-600) mb-1.5">
-                W-8 form (PDF) *
+                W-8 form *
               </label>
               <input
                 type="file"
                 name="w8File"
-                accept="application/pdf"
+                accept={acceptAttribute('onboarder_document')}
                 required
                 className="block w-full text-sm text-(--rs-neutral-grey-800) file:mr-3 file:rounded-lg file:border-0 file:bg-(--rs-primary-50) file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-(--rs-primary-800) hover:file:bg-(--rs-primary-100) cursor-pointer"
               />
               <p className="mt-1 text-[11px] text-(--rs-neutral-grey-500)">
-                Upload your completed W-8. Use the blank form your Onboarding Lead shared on Teams; a sample is attached for reference.
+                Upload your completed W-8 (max {MAX_DIRECT_UPLOAD_LABEL}; PDF preferred, a clear photo or scan also works). Use the blank form your Onboarding Lead shared on Teams; a sample is attached for reference.
               </p>
             </div>
           </Section>
@@ -130,7 +131,7 @@ export default async function ContractorOnboardingIntakePage() {
               Submit onboarding form
             </button>
           </div>
-        </form>
+        </ContractorIntakeForm>
       )}
     </div>
   );

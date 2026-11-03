@@ -2,7 +2,9 @@
 
 import { useRef, useState, useTransition } from 'react';
 import { Bell, CheckCircle2, Send, Upload } from 'lucide-react';
-import { sendCandidateFormReminder, markCandidateSowSigned, sendCandidateDocumentPackage, uploadPreEmploymentDocument } from './actions';
+import { sendCandidateFormReminder, markCandidateSowSigned, sendCandidateDocumentPackage, preparePreEmploymentUpload, recordPreEmploymentUpload } from './actions';
+import { directUpload } from '@/lib/direct-upload-client';
+import { acceptAttribute, checkUploadFile, MAX_DIRECT_UPLOAD_LABEL } from '@/lib/direct-upload';
 
 export function PreEmploymentDocumentUpload({ candidateId, kind, canUpload }: { candidateId: number; kind: 'sow' | 'job_description' | 'ai_policy' | 'nda'; canUpload: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -10,18 +12,26 @@ export function PreEmploymentDocumentUpload({ candidateId, kind, canUpload }: { 
   const [error, setError] = useState('');
   if (!canUpload) return null;
   return <div className="flex flex-col items-end gap-1">
-    <input ref={inputRef} type="file" accept="application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="hidden" onChange={event => {
+    <input ref={inputRef} type="file" accept={acceptAttribute('pre_employment_document')} className="hidden" onChange={event => {
       const file = event.target.files?.[0];
       if (!file) return;
       setError('');
+      const check = checkUploadFile(file, 'pre_employment_document');
+      if (!check.ok) { setError(check.error); event.target.value = ''; return; }
       start(async () => {
-        const formData = new FormData(); formData.set('file', file);
-        try { await uploadPreEmploymentDocument(candidateId, kind, formData); }
+        try {
+          await directUpload({
+            file,
+            policy:  'pre_employment_document',
+            prepare: meta => preparePreEmploymentUpload(candidateId, kind, meta),
+            record:  receipt => recordPreEmploymentUpload(candidateId, kind, receipt),
+          });
+        }
         catch (err) { setError(err instanceof Error ? err.message : 'Upload failed'); }
         finally { if (inputRef.current) inputRef.current.value = ''; }
       });
     }} />
-    <button type="button" disabled={pending} onClick={() => inputRef.current?.click()} className="inline-flex items-center gap-1 rounded-lg border border-(--rs-neutral-grey-200) bg-white px-2.5 py-1 text-[11px] font-semibold text-(--rs-neutral-grey-700) hover:bg-(--rs-neutral-grey-50) disabled:opacity-50">
+    <button type="button" disabled={pending} title={`PDF or DOCX, max ${MAX_DIRECT_UPLOAD_LABEL}`} onClick={() => inputRef.current?.click()} className="inline-flex items-center gap-1 rounded-lg border border-(--rs-neutral-grey-200) bg-white px-2.5 py-1 text-[11px] font-semibold text-(--rs-neutral-grey-700) hover:bg-(--rs-neutral-grey-50) disabled:opacity-50">
       <Upload className="h-3.5 w-3.5" /> {pending ? 'Uploading…' : 'Upload PDF / DOCX'}
     </button>
     {error && <p className="max-w-48 text-right text-[10px] text-red-600">{error}</p>}

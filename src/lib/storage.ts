@@ -2,9 +2,19 @@
 // the onboarder documents bucket. All callers use the admin client
 // (server-side only) — public URLs are always signed, never exposed directly.
 
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isAllowedTaskImageUpload, taskImageExtension } from '@/lib/task-image-uploads';
 import { RESEARCH_COVERS_BUCKET, MAX_COVER_BYTES, coverImageExtension } from '@/lib/research-posts';
+import {
+  MAX_DIRECT_UPLOAD_BYTES,
+  MAX_DIRECT_UPLOAD_LABEL,
+  checkUploadFile,
+  formatMegabytes,
+  type DirectUploadReceipt,
+  type DirectUploadTicket,
+  type UploadPolicy,
+} from '@/lib/direct-upload';
 
 const BUCKET           = process.env.SUPABASE_RESUMES_BUCKET   ?? 'candidate-resumes';
 const CANDIDATE_PREEMPLOYMENT_BUCKET = process.env.SUPABASE_CANDIDATE_PREEMPLOYMENT_BUCKET ?? 'candidate-pre-employment-docs';
@@ -88,13 +98,6 @@ export type OnboarderDocumentKind =
   | 'sow' | 'w8' | 'nda' | 'contract' | 'gov_id' | 'nbi'
   | 'reference_response' | 'employment_verification' | 'other';
 
-export type OnboarderUpload = {
-  path:      string;
-  signedUrl: string;
-  mimeType:  string;
-  sizeBytes: number;
-};
-
 function extensionFor(name: string, mime: string): string {
   const dot = name.lastIndexOf('.');
   if (dot > -1 && dot < name.length - 1) {
@@ -105,25 +108,17 @@ function extensionFor(name: string, mime: string): string {
   return 'bin';
 }
 
-export async function uploadCandidatePreEmploymentDocument(args: {
-  candidateId: number; kind: 'sow' | 'job_description' | 'ai_policy' | 'nda'; file: File;
-}): Promise<{ path: string; signedUrl: string; mimeType: string; sizeBytes: number }> {
-  const allowedTypes = new Set(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
-  if (!allowedTypes.has(args.file.type)) throw new Error('Only PDF or DOCX documents are supported');
-  if (args.file.size <= 0 || args.file.size > 10_000_000) throw new Error('Document must be between 1 byte and 10 MB');
-  const ext = extensionFor(args.file.name, args.file.type);
-  const path = `candidates/${args.candidateId}/pre-employment/${args.kind}/${Date.now()}-${slugify(args.file.name.replace(/\.[^.]+$/, ''))}.${ext}`;
-  const admin = createAdminClient();
-  const { error: uploadError } = await admin.storage.from(CANDIDATE_PREEMPLOYMENT_BUCKET).upload(path, new Uint8Array(await args.file.arrayBuffer()), { contentType: args.file.type, upsert: false });
-  if (uploadError) throw new Error(`Document upload failed: ${uploadError.message}`);
-  const { data, error } = await admin.storage.from(CANDIDATE_PREEMPLOYMENT_BUCKET).createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
-  if (error || !data) throw new Error(`Document signing failed: ${error?.message ?? 'unknown'}`);
-  return { path, signedUrl: data.signedUrl, mimeType: args.file.type, sizeBytes: args.file.size };
-}
+export type OnboarderUpload = {
+  path:      string;
+  signedUrl: string;
+  mimeType:  string;
+  sizeBytes: number;
+};
 
 /**
- * Upload an onboarder document and return a long-lived signed URL. Caller is
- * responsible for inserting the matching onboarder_documents row.
+ * Server-side upload of an onboarder document, used only by the automation
+ * submissions API route (files arriving from n8n). Browser uploads use the
+ * direct signed-URL flow below instead. Caller inserts the onboarder_documents row.
  */
 export async function uploadOnboarderDocument(args: {
   onboarderId: number;
@@ -160,6 +155,198 @@ export async function uploadOnboarderDocument(args: {
     mimeType:  args.file.type || 'application/octet-stream',
     sizeBytes: args.file.size,
   };
+}
+
+// ── Direct (browser -> storage) uploads ────────────────────────────────────
+// The server only issues a one-time signed upload URL and later checks the
+// stored object; file bytes never go through a server action or function.
+
+export type PreEmploymentDocumentKind = 'sow' | 'job_description' | 'ai_policy' | 'nda';
+
+const DATE_STAMP = String.raw`\d{4}-\d{2}-\d{2}`;
+const SLUG = '[a-z0-9]+(?:-[a-z0-9]+)*';
+// Every upload gets its own name (time + random suffix), so an upload can
+// never replace a file behind an earlier document row.
+const UNIQUE = String.raw`\d{13}-[a-f0-9]{8}`;
+
+function uniqueSuffix(now: number): string {
+  return `${now}-${randomBytes(4).toString('hex')}`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Same path scheme the old server-side upload used (same-day re-upload overwrites). */
+export function onboarderDocumentPath(args: {
+  onboarderId: number;
+  kind:        OnboarderDocumentKind;
+  fileName:    string;
+  label?:      string | null;
+  extension:   string;
+  now?:        Date;
+}): string {
+  const now = args.now ?? new Date();
+  const slug = slugify(args.label?.trim() || args.fileName.replace(/\.[^.]+$/, '') || args.kind);
+  const stamp = now.toISOString().slice(0, 10);
+  return `onboarders/${args.onboarderId}/${args.kind}/${slug}-${stamp}-${uniqueSuffix(now.getTime())}.${args.extension}`;
+}
+
+/** True only for a path shaped like one issued for this onboarder and kind. */
+export function isIssuedOnboarderPath(path: string, onboarderId: number, kind: OnboarderDocumentKind): boolean {
+  const re = new RegExp(`^onboarders/${onboarderId}/${escapeRegExp(kind)}/${SLUG}-${DATE_STAMP}-${UNIQUE}\\.[a-z0-9]+$`);
+  return re.test(path);
+}
+
+export function preEmploymentDocumentPath(args: {
+  candidateId: number;
+  kind:        PreEmploymentDocumentKind;
+  fileName:    string;
+  extension:   string;
+  now?:        number;
+}): string {
+  return `candidates/${args.candidateId}/pre-employment/${args.kind}/${uniqueSuffix(args.now ?? Date.now())}-${slugify(args.fileName.replace(/\.[^.]+$/, ''))}.${args.extension}`;
+}
+
+export function isIssuedPreEmploymentPath(path: string, candidateId: number, kind: PreEmploymentDocumentKind): boolean {
+  const re = new RegExp(`^candidates/${candidateId}/pre-employment/${escapeRegExp(kind)}/${UNIQUE}-${SLUG}\\.[a-z0-9]+$`);
+  return re.test(path);
+}
+
+// ── Upload check value ─────────────────────────────────────────────────────
+// prepare signs (path, record id, doc type, user id, expiry) with HMAC-SHA256;
+// record only accepts a path whose check value verifies. The key is derived
+// from SUPABASE_SECRET_KEY, a server-only secret every environment already has
+// (the admin client cannot run without it), so no new env var is needed. The
+// derivation label keeps this key separate from the secret's other uses.
+
+export const UPLOAD_CHECK_TTL_MS = 2 * 60 * 60 * 1000; // same as the signed upload URL
+
+type UploadCheckFields = { path: string; recordId: number; kind: string; userId: number };
+
+function uploadCheckKey(): Buffer {
+  const secret = process.env.SUPABASE_SECRET_KEY?.trim();
+  if (!secret || secret === 'your-secret-key-here') throw new Error('Uploads are not configured on this server.');
+  return createHmac('sha256', secret).update('rs-portal:direct-upload-check:v1').digest();
+}
+
+function uploadCheckMac(fields: UploadCheckFields, expiresAt: number): Buffer {
+  const payload = [fields.path, fields.recordId, fields.kind, fields.userId, expiresAt].join('|');
+  return createHmac('sha256', uploadCheckKey()).update(payload).digest();
+}
+
+export function signUploadCheck(fields: UploadCheckFields, now = Date.now()): string {
+  const expiresAt = now + UPLOAD_CHECK_TTL_MS;
+  return `${expiresAt}.${uploadCheckMac(fields, expiresAt).toString('base64url')}`;
+}
+
+/** Throws unless the check value was issued for exactly these fields and hasn't expired. */
+export function verifyUploadCheck(check: unknown, fields: UploadCheckFields, now = Date.now()): void {
+  const match = /^(\d{13})\.([A-Za-z0-9_-]{43})$/.exec(String(check ?? ''));
+  const invalid = 'This upload could not be verified. Please upload the file again.';
+  if (!match) throw new Error(invalid);
+  const expiresAt = Number(match[1]);
+  const given = Buffer.from(match[2], 'base64url');
+  const expected = uploadCheckMac(fields, expiresAt);
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) throw new Error(invalid);
+  if (now > expiresAt) throw new Error('This upload has expired. Please upload the file again.');
+}
+
+const DIRECT_UPLOAD_BUCKETS: Record<UploadPolicy, string> = {
+  onboarder_document:      ONBOARDER_BUCKET,
+  pre_employment_document: CANDIDATE_PREEMPLOYMENT_BUCKET,
+};
+
+/**
+ * Issue a one-time signed upload URL for an onboarder document. Returns the
+ * bucket, the storage path and the token the browser passes to
+ * supabase-js `uploadToSignedUrl`.
+ */
+export async function createOnboarderUploadUrl(args: {
+  onboarderId: number;
+  kind:        OnboarderDocumentKind;
+  fileName:    string;
+  label?:      string | null;
+  extension:   string;
+  userId:      number;
+}): Promise<DirectUploadTicket> {
+  const path = onboarderDocumentPath(args);
+  const admin = createAdminClient();
+  const { data, error } = await admin.storage.from(ONBOARDER_BUCKET).createSignedUploadUrl(path, { upsert: false });
+  if (error || !data) throw new Error(`Could not start the upload: ${error?.message ?? 'unknown'}`);
+  const check = signUploadCheck({ path, recordId: args.onboarderId, kind: args.kind, userId: args.userId });
+  return { bucket: ONBOARDER_BUCKET, path, token: data.token, check };
+}
+
+export async function createPreEmploymentUploadUrl(args: {
+  candidateId: number;
+  kind:        PreEmploymentDocumentKind;
+  fileName:    string;
+  extension:   string;
+  userId:      number;
+}): Promise<DirectUploadTicket> {
+  const path = preEmploymentDocumentPath(args);
+  const admin = createAdminClient();
+  const { data, error } = await admin.storage.from(CANDIDATE_PREEMPLOYMENT_BUCKET).createSignedUploadUrl(path, { upsert: false });
+  if (error || !data) throw new Error(`Could not start the upload: ${error?.message ?? 'unknown'}`);
+  const check = signUploadCheck({ path, recordId: args.candidateId, kind: args.kind, userId: args.userId });
+  return { bucket: CANDIDATE_PREEMPLOYMENT_BUCKET, path, token: data.token, check };
+}
+
+/** Refuse a path that is already recorded in the given documents table. */
+export async function assertPathNotRecorded(
+  table: 'onboarder_documents' | 'candidate_pre_employment_documents',
+  path: string,
+): Promise<void> {
+  const { data, error } = await createAdminClient().from(table).select('id').eq('storage_path', path).maybeSingle();
+  if (error) throw new Error(`Could not check the upload: ${error.message}`);
+  if (data) throw new Error('This file has already been recorded.');
+}
+
+export type VerifiedUpload = { path: string; mimeType: string; sizeBytes: number };
+
+/**
+ * Check a browser-uploaded object before recording it: it must exist, be no
+ * bigger than the cap (an oversize object is deleted), and match the size and
+ * type the browser reported. The caller checks the path was issued first.
+ */
+export async function verifyDirectUpload(policy: UploadPolicy, receipt: DirectUploadReceipt): Promise<VerifiedUpload> {
+  const bucket = DIRECT_UPLOAD_BUCKETS[policy];
+  // The path's extension decides the type the object must have been stored as.
+  const expected = checkUploadFile({ name: receipt.path, size: 1, type: receipt.type }, policy);
+  if (!expected.ok) throw new Error(expected.error);
+
+  const slash = receipt.path.lastIndexOf('/');
+  const folder = receipt.path.slice(0, slash);
+  const name = receipt.path.slice(slash + 1);
+  const admin = createAdminClient();
+  const { data, error } = await admin.storage.from(bucket).list(folder, { search: name, limit: 100 });
+  if (error) throw new Error(`Could not check the uploaded file: ${error.message}`);
+  const object = (data ?? []).find(item => item.name === name);
+  if (!object) throw new Error('The uploaded file was not found in storage. Please upload it again.');
+
+  const metadata = (object.metadata ?? {}) as { size?: number; mimetype?: string };
+  const size = Number(metadata.size);
+  const mimeType = String(metadata.mimetype ?? '');
+  if (!Number.isFinite(size) || size > MAX_DIRECT_UPLOAD_BYTES) {
+    const { error: removeError } = await admin.storage.from(bucket).remove([receipt.path]);
+    if (removeError) console.error('[storage] oversize upload cleanup failed:', receipt.path, removeError.message);
+    throw new Error(`File is ${Number.isFinite(size) ? formatMegabytes(size) : 'too large'}. The limit is ${MAX_DIRECT_UPLOAD_LABEL}.`);
+  }
+  if (size <= 0) throw new Error('The uploaded file is empty. Please upload it again.');
+  if (size !== Number(receipt.size)) throw new Error('The uploaded file does not match the selected file. Please upload it again.');
+  if (mimeType !== expected.contentType) {
+    throw new Error('The uploaded file type does not match the selected file. Please upload it again.');
+  }
+  return { path: receipt.path, mimeType, sizeBytes: size };
+}
+
+/** Long-lived signed URL for a pre-employment document (sent to candidates). */
+export async function signPreEmploymentDocument(path: string): Promise<string> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.storage.from(CANDIDATE_PREEMPLOYMENT_BUCKET).createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+  if (error || !data) throw new Error(`Document signing failed: ${error?.message ?? 'unknown'}`);
+  return data.signedUrl;
 }
 
 /** Re-sign an onboarder document — used when an old signed URL has expired. */

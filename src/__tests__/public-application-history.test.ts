@@ -14,7 +14,6 @@ vi.mock('@/lib/session', () => ({ getSession: vi.fn(async () => null) }));
 vi.mock('@/lib/rbac', () => ({ hasToolAccess: vi.fn(() => true) }));
 vi.mock('@/lib/storage', () => ({
   uploadResumeToStorage: vi.fn(async () => ({ signedUrl: 'https://files.example.test/cv.pdf' })),
-  uploadCandidatePreEmploymentDocument: vi.fn(),
 }));
 vi.mock('@/lib/onboarders', () => ({ createOnboarderFromCandidate: vi.fn() }));
 vi.mock('@/lib/onboarding-lead', () => ({ getRequiredGlobalOnboardingLead: vi.fn() }));

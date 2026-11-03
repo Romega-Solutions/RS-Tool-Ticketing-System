@@ -28,7 +28,23 @@ import {
   type ExistingApplicationRow,
 } from '@/lib/duplicate-application';
 import { toProperName, formatPhoneNumber } from '@/lib/format';
-import { uploadCandidatePreEmploymentDocument, uploadResumeToStorage } from '@/lib/storage';
+import {
+  assertPathNotRecorded,
+  createPreEmploymentUploadUrl,
+  isIssuedPreEmploymentPath,
+  signPreEmploymentDocument,
+  uploadResumeToStorage,
+  verifyDirectUpload,
+  verifyUploadCheck,
+  type PreEmploymentDocumentKind,
+} from '@/lib/storage';
+import {
+  checkUploadFile,
+  uploadErrorMessage,
+  type DirectUploadReceipt,
+  type DirectUploadTicket,
+  type UploadActionResult,
+} from '@/lib/direct-upload';
 import { createOnboarderFromCandidate } from '@/lib/onboarders';
 import { getRequiredGlobalOnboardingLead } from '@/lib/onboarding-lead';
 import {
@@ -673,23 +689,70 @@ export async function sendCandidateFormReminder(candidateId: number, kind: Recru
   revalidatePath(`/recruiting/candidates/${candidateId}`);
 }
 
-export async function uploadPreEmploymentDocument(candidateId: number, kind: 'sow' | 'job_description' | 'ai_policy' | 'nda', formData: FormData): Promise<void> {
-  const session = await requireSession();
-  if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
-  const file = formData.get('file');
-  if (!(file instanceof File)) throw new Error('Choose a PDF document');
-  const supabase = createAdminClient();
+const PRE_EMPLOYMENT_DOC_KINDS: readonly PreEmploymentDocumentKind[] = ['sow', 'job_description', 'ai_policy', 'nda'];
+
+function checkPreEmploymentKind(kind: string): PreEmploymentDocumentKind {
+  if (!(PRE_EMPLOYMENT_DOC_KINDS as readonly string[]).includes(kind)) throw new Error('Invalid document kind');
+  return kind as PreEmploymentDocumentKind;
+}
+
+async function requireOfferedCandidate(supabase: ReturnType<typeof createAdminClient>, candidateId: number) {
   const { data: candidate } = await supabase.from('candidates').select('status').eq('id', candidateId).maybeSingle();
   if (!candidate) throw new Error('Candidate not found');
   if (candidate.status !== 'offered') throw new Error('Documents can only be uploaded while a candidate is offered');
-  const upload = await uploadCandidatePreEmploymentDocument({ candidateId, kind, file });
-  const { error } = await supabase.from('candidate_pre_employment_documents').upsert({
-    candidate_id: candidateId, kind, file_name: file.name, storage_path: upload.path, signed_url: upload.signedUrl,
-    mime_type: upload.mimeType, size_bytes: upload.sizeBytes, uploaded_by: session.id, uploaded_at: new Date().toISOString(),
-  }, { onConflict: 'candidate_id,kind' });
-  if (error) throw new Error(`Failed to save document: ${error.message}`);
-  await writeHistory(supabase, candidateId, session, [{ field: 'pre_employment_document_uploaded', oldValue: null, newValue: kind, summary: `Uploaded pre-employment ${kind.replace(/_/g, ' ')}` }]);
-  revalidatePath(`/recruiting/candidates/${candidateId}`);
+}
+
+/** Step 1: check the request and file, then issue a one-time signed upload URL. */
+export async function preparePreEmploymentUpload(
+  candidateId: number,
+  kindRaw: string,
+  input: { name: string; size: number; type: string },
+): Promise<UploadActionResult<DirectUploadTicket>> {
+  try {
+    const session = await requireSession();
+    if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
+    const kind = checkPreEmploymentKind(kindRaw);
+    const check = checkUploadFile({ name: input?.name, size: input?.size, type: input?.type }, 'pre_employment_document');
+    if (!check.ok) throw new Error(check.error);
+    await requireOfferedCandidate(createAdminClient(), candidateId);
+    const ticket = await createPreEmploymentUploadUrl({ candidateId, kind, fileName: input.name, extension: check.extension, userId: session.id });
+    return { ok: true, data: ticket };
+  } catch (err) {
+    return { ok: false, error: uploadErrorMessage(err, 'Could not start the upload') };
+  }
+}
+
+/** Step 2: after the browser upload, check the stored file and record it. */
+export async function recordPreEmploymentUpload(
+  candidateId: number,
+  kindRaw: string,
+  receipt: DirectUploadReceipt,
+): Promise<UploadActionResult> {
+  try {
+    const session = await requireSession();
+    if (!Number.isInteger(candidateId) || candidateId <= 0) throw new Error('Invalid candidate id');
+    const kind = checkPreEmploymentKind(kindRaw);
+    if (!isIssuedPreEmploymentPath(String(receipt?.path ?? ''), candidateId, kind)) {
+      throw new Error('This upload does not belong to this candidate');
+    }
+    verifyUploadCheck(receipt.check, { path: receipt.path, recordId: candidateId, kind, userId: session.id });
+    await assertPathNotRecorded('candidate_pre_employment_documents', receipt.path);
+    const supabase = createAdminClient();
+    await requireOfferedCandidate(supabase, candidateId);
+    const upload = await verifyDirectUpload('pre_employment_document', receipt);
+    const signedUrl = await signPreEmploymentDocument(upload.path);
+    const fileName = String(receipt.fileName ?? '').slice(0, 255) || upload.path.split('/').pop() || 'document';
+    const { error } = await supabase.from('candidate_pre_employment_documents').upsert({
+      candidate_id: candidateId, kind, file_name: fileName, storage_path: upload.path, signed_url: signedUrl,
+      mime_type: upload.mimeType, size_bytes: upload.sizeBytes, uploaded_by: session.id, uploaded_at: new Date().toISOString(),
+    }, { onConflict: 'candidate_id,kind' });
+    if (error) throw new Error(`Failed to save document: ${error.message}`);
+    await writeHistory(supabase, candidateId, session, [{ field: 'pre_employment_document_uploaded', oldValue: null, newValue: kind, summary: `Uploaded pre-employment ${kind.replace(/_/g, ' ')}` }]);
+    revalidatePath(`/recruiting/candidates/${candidateId}`);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: uploadErrorMessage(err, 'Could not save the upload') };
+  }
 }
 
 export async function sendCandidateDocumentPackage(candidateId: number): Promise<void> {

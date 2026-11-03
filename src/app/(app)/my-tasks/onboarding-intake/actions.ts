@@ -4,7 +4,19 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getSession } from '@/lib/session';
-import { uploadOnboarderDocument } from '@/lib/storage';
+import {
+  assertPathNotRecorded,
+  createOnboarderUploadUrl,
+  isIssuedOnboarderPath,
+  verifyDirectUpload,
+  verifyUploadCheck,
+} from '@/lib/storage';
+import {
+  checkUploadFile,
+  uploadErrorMessage,
+  type DirectUploadTicket,
+  type UploadActionResult,
+} from '@/lib/direct-upload';
 
 // Server actions powering the two in-app intake forms that replace the SOP's
 // Google Forms. Onboarder-facing (the new hire themselves submits) — NOT
@@ -52,10 +64,48 @@ async function logHistory(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// W-8 upload — the browser uploads the file straight to storage with a
+// one-time signed URL from this step; submitContractorIntake then records it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function prepareIntakeW8Upload(input: {
+  legalName: string; name: string; size: number; type: string;
+}): Promise<UploadActionResult<DirectUploadTicket>> {
+  try {
+    const session  = await requireOnboardingUser();
+    const supabase = createAdminClient();
+    const onb      = await findOnboarderRow(supabase, session.id);
+    if (!onb)                             throw new Error('No onboarder record found for your account. Tell HR.');
+    if (onb.onboarding_form_submitted_at) throw new Error('Already submitted — contact HR if you need to re-upload.');
+    const legalName = String(input?.legalName ?? '').trim();
+    if (!legalName) throw new Error('Legal name is required');
+    const check = checkUploadFile({ name: input.name, size: input.size, type: input.type }, 'onboarder_document');
+    if (!check.ok) throw new Error(check.error);
+    const ticket = await createOnboarderUploadUrl({
+      onboarderId: onb.id, kind: 'w8', fileName: input.name, label: `${legalName} W-8`, extension: check.extension,
+      userId: session.id,
+    });
+    return { ok: true, data: ticket };
+  } catch (err) {
+    return { ok: false, error: uploadErrorMessage(err, 'Could not start the W-8 upload') };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Contractor intake — SOP §5/7a (full form, requires W-8 PDF for non-US)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function submitContractorIntake(formData: FormData): Promise<void> {
+export async function submitContractorIntake(formData: FormData): Promise<UploadActionResult> {
+  try {
+    await saveContractorIntake(formData);
+  } catch (err) {
+    return { ok: false, error: uploadErrorMessage(err, 'Could not submit the form') };
+  }
+  revalidatePath('/my-tasks');
+  redirect('/my-tasks?intake=submitted');
+}
+
+async function saveContractorIntake(formData: FormData): Promise<void> {
   const session  = await requireOnboardingUser();
   const supabase = createAdminClient();
   const onb      = await findOnboarderRow(supabase, session.id);
@@ -76,23 +126,28 @@ export async function submitContractorIntake(formData: FormData): Promise<void> 
   const emergencyRel    = String(formData.get('emergencyRel')    ?? '').trim() || null;
   const emergencyPhone  = String(formData.get('emergencyPhone')  ?? '').trim() || null;
   const consent         = String(formData.get('consent')         ?? '') === 'on';
-  const w8File          = formData.get('w8File');
+  // The W-8 itself was uploaded straight to storage by the browser; only its
+  // path, name, size and type come through here.
+  const w8Path          = String(formData.get('w8Path')          ?? '').trim();
+  const w8Name          = String(formData.get('w8Name')          ?? '').trim();
+  const w8Size          = Number(formData.get('w8Size')          ?? 0);
+  const w8Type          = String(formData.get('w8Type')          ?? '').trim();
+  const w8Check         = String(formData.get('w8Check')         ?? '').trim();
 
   if (!legalName)        throw new Error('Legal name is required');
   if (!consent)          throw new Error('You must accept the Independent Contractor Agreement');
-  if (!(w8File instanceof File) || w8File.size === 0) throw new Error('W-8 form (PDF) is required');
-  if (w8File.size > 25 * 1024 * 1024) throw new Error('W-8 file must be under 25 MB');
+  if (!w8Path)           throw new Error('W-8 form is required');
+  if (!isIssuedOnboarderPath(w8Path, onb.id, 'w8')) throw new Error('This W-8 upload does not belong to your onboarding record');
+  verifyUploadCheck(w8Check, { path: w8Path, recordId: onb.id, kind: 'w8', userId: session.id });
+  await assertPathNotRecorded('onboarder_documents', w8Path);
 
-  // 1. Upload W-8.
-  const upload = await uploadOnboarderDocument({
-    onboarderId: onb.id,
-    kind:        'w8',
-    file:        w8File,
-    label:       `${legalName} W-8`,
+  // 1. Check the uploaded W-8 (deleted if it is over the size cap).
+  const upload = await verifyDirectUpload('onboarder_document', {
+    path: w8Path, fileName: w8Name, size: w8Size, type: w8Type, check: w8Check,
   });
 
   // 2. Insert document row.
-  await supabase.from('onboarder_documents').insert({
+  const { error: docError } = await supabase.from('onboarder_documents').insert({
     onboarder_id: onb.id,
     kind:         'w8',
     label:        `W-8 — ${legalName}`,
@@ -101,6 +156,7 @@ export async function submitContractorIntake(formData: FormData): Promise<void> 
     size_bytes:   upload.sizeBytes,
     uploaded_by:  session.id,
   });
+  if (docError) throw new Error(`Failed to record the W-8: ${docError.message}`);
 
   // 3. Stamp the onboarder row with form / banking / W-8 timestamps + capture
   //    the submitted details in `notes` (until we add dedicated columns).
@@ -137,9 +193,6 @@ export async function submitContractorIntake(formData: FormData): Promise<void> 
     'onboarding_form_submitted',
     `Contractor intake form submitted (W-8 uploaded, ${wiseHolderName ? 'Wise details captured' : 'no Wise details'})`,
   );
-
-  revalidatePath('/my-tasks');
-  redirect('/my-tasks?intake=submitted');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
