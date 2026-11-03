@@ -22,7 +22,7 @@ export function ContractorIntakeForm({ children, className }: { children: ReactN
     const formData = new FormData(event.currentTarget);
     const file = formData.get('w8File');
     const legalName = String(formData.get('legalName') ?? '').trim();
-    if (!(file instanceof File) || file.size === 0) { setError('W-8 form (PDF) is required'); return; }
+    if (!(file instanceof File) || file.size === 0) { setError('W-8 form is required'); return; }
     const check = checkUploadFile(file, 'onboarder_document');
     if (!check.ok) { setError(check.error); return; }
     formData.delete('w8File');

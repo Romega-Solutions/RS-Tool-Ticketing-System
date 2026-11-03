@@ -136,7 +136,7 @@ async function saveContractorIntake(formData: FormData): Promise<void> {
 
   if (!legalName)        throw new Error('Legal name is required');
   if (!consent)          throw new Error('You must accept the Independent Contractor Agreement');
-  if (!w8Path)           throw new Error('W-8 form (PDF) is required');
+  if (!w8Path)           throw new Error('W-8 form is required');
   if (!isIssuedOnboarderPath(w8Path, onb.id, 'w8')) throw new Error('This W-8 upload does not belong to your onboarding record');
   verifyUploadCheck(w8Check, { path: w8Path, recordId: onb.id, kind: 'w8', userId: session.id });
   await assertPathNotRecorded('onboarder_documents', w8Path);

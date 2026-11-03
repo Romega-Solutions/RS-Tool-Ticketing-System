@@ -73,7 +73,7 @@ export default async function ContractorOnboardingIntakePage() {
             </Row>
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-(--rs-neutral-grey-600) mb-1.5">
-                W-8 form (PDF) *
+                W-8 form *
               </label>
               <input
                 type="file"
