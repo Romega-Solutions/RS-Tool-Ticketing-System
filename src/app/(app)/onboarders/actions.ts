@@ -8,9 +8,18 @@ import { hasToolAccess } from '@/lib/rbac';
 import { toProperName, formatPhoneNumber } from '@/lib/format';
 import { DEPARTMENTS } from '@/lib/departments';
 import {
-  uploadOnboarderDocument,
+  createOnboarderUploadUrl,
+  isIssuedOnboarderPath,
+  verifyDirectUpload,
   type OnboarderDocumentKind,
 } from '@/lib/storage';
+import {
+  checkUploadFile,
+  uploadErrorMessage,
+  type DirectUploadReceipt,
+  type DirectUploadTicket,
+  type UploadActionResult,
+} from '@/lib/direct-upload';
 import {
   notifyOnboardingWebhook,
   notifyFormReminder,
@@ -1060,60 +1069,97 @@ export async function sendGroupChatAnnouncement(onboarderId: number): Promise<vo
 // Document upload
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function uploadDocument(
-  onboarderId: number,
-  formData:    FormData,
-): Promise<void> {
-  const session = await requireSession();
+function checkOnboarderId(onboarderId: number) {
   if (!Number.isInteger(onboarderId) || onboarderId <= 0) throw new Error('Invalid id');
+}
 
-  const kindRaw = String(formData.get('kind') ?? '').trim();
-  const label   = String(formData.get('label') ?? '').trim() || null;
-  const file    = formData.get('file');
+function cleanLabel(label: string | null | undefined): string | null {
+  return String(label ?? '').trim().slice(0, 200) || null;
+}
 
-  if (!isDocKind(kindRaw)) throw new Error('Invalid document kind');
-  if (!(file instanceof File) || file.size === 0) {
-    throw new Error('Choose a file to upload');
+/**
+ * Step 1 of a document upload. Checks the session, permissions, document type
+ * and the file's size and type, then issues a one-time signed upload URL. The
+ * browser uploads the file straight to storage with it.
+ */
+export async function prepareDocumentUpload(
+  onboarderId: number,
+  input: { kind: string; label?: string | null; name: string; size: number; type: string },
+): Promise<UploadActionResult<DirectUploadTicket>> {
+  try {
+    await requireSession();
+    checkOnboarderId(onboarderId);
+    const kind = String(input?.kind ?? '').trim();
+    if (!isDocKind(kind)) throw new Error('Invalid document kind');
+    const check = checkUploadFile({ name: input.name, size: input.size, type: input.type }, 'onboarder_document');
+    if (!check.ok) throw new Error(check.error);
+
+    const supabase = createAdminClient();
+    const { data: onboarder } = await supabase.from('onboarders').select('id').eq('id', onboarderId).maybeSingle();
+    if (!onboarder) throw new Error('Onboarder not found');
+
+    const ticket = await createOnboarderUploadUrl({
+      onboarderId, kind, fileName: input.name, label: cleanLabel(input.label), extension: check.extension,
+    });
+    return { ok: true, data: ticket };
+  } catch (err) {
+    return { ok: false, error: uploadErrorMessage(err, 'Could not start the upload') };
   }
-  if (file.size > 25 * 1024 * 1024) {
-    throw new Error('File must be under 25 MB');
+}
+
+/**
+ * Step 2 of a document upload, after the browser has uploaded the file.
+ * Checks the path is one issued for this onboarder and kind, checks the
+ * stored object (deleting it if it is over the size cap), then records it.
+ */
+export async function recordDocumentUpload(
+  onboarderId: number,
+  input: { kind: string; label?: string | null } & DirectUploadReceipt,
+): Promise<UploadActionResult> {
+  try {
+    const session = await requireSession();
+    checkOnboarderId(onboarderId);
+    const kind = String(input?.kind ?? '').trim();
+    if (!isDocKind(kind)) throw new Error('Invalid document kind');
+    if (!isIssuedOnboarderPath(String(input.path ?? ''), onboarderId, kind)) {
+      throw new Error('This upload does not belong to this onboarder');
+    }
+    const label = cleanLabel(input.label);
+    const upload = await verifyDirectUpload('onboarder_document', input);
+
+    const supabase = createAdminClient();
+    const { error } = await supabase.from('onboarder_documents').insert({
+      onboarder_id:  onboarderId,
+      kind,
+      label,
+      storage_path:  upload.path,
+      mime_type:     upload.mimeType,
+      size_bytes:    upload.sizeBytes,
+      uploaded_by:   session.id,
+    });
+    if (error) throw new Error(`Failed to record document: ${error.message}`);
+
+    // Convenience: if a W-8 was uploaded, stamp w8_uploaded_at on the onboarder.
+    if (kind === 'w8') {
+      await supabase
+        .from('onboarders')
+        .update({ w8_uploaded_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', onboarderId);
+    }
+
+    const fileName = String(input.fileName ?? '').slice(0, 255) || upload.path.split('/').pop();
+    await writeHistory(supabase, onboarderId, session, [{
+      field:    'document_uploaded',
+      oldValue: null,
+      newValue: kind,
+      summary:  `Uploaded ${kind}${label ? ` — ${label}` : ''} (${fileName})`,
+    }]);
+
+    revalidatePath(`/onboarders/${onboarderId}`);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: uploadErrorMessage(err, 'Could not save the upload') };
   }
-
-  const upload = await uploadOnboarderDocument({
-    onboarderId,
-    kind:  kindRaw,
-    file,
-    label,
-  });
-
-  const supabase = createAdminClient();
-  const { error } = await supabase.from('onboarder_documents').insert({
-    onboarder_id:  onboarderId,
-    kind:          kindRaw,
-    label,
-    storage_path:  upload.path,
-    mime_type:     upload.mimeType,
-    size_bytes:    upload.sizeBytes,
-    uploaded_by:   session.id,
-  });
-  if (error) throw new Error(`Failed to record document: ${error.message}`);
-
-  // Convenience: if a W-8 was uploaded, stamp w8_uploaded_at on the onboarder.
-  if (kindRaw === 'w8') {
-    await supabase
-      .from('onboarders')
-      .update({ w8_uploaded_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq('id', onboarderId);
-  }
-
-  await writeHistory(supabase, onboarderId, session, [{
-    field:    'document_uploaded',
-    oldValue: null,
-    newValue: kindRaw,
-    summary:  `Uploaded ${kindRaw}${label ? ` — ${label}` : ''} (${file.name})`,
-  }]);
-
-  revalidatePath(`/onboarders/${onboarderId}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

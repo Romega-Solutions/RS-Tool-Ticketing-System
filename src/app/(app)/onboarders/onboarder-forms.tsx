@@ -34,9 +34,12 @@ import {
   createOnboarder,
   addReference,
   addEmploymentVerification,
-  uploadDocument,
+  prepareDocumentUpload,
+  recordDocumentUpload,
 } from './actions';
 import type { OnboardingLeadOption } from '@/lib/onboarding-lead';
+import { directUpload } from '@/lib/direct-upload-client';
+import { acceptAttribute, checkUploadFile, MAX_DIRECT_UPLOAD_LABEL } from '@/lib/direct-upload';
 
 const DOC_KINDS = [
   { value: 'sow',                     label: 'SOW (Statement of Work)' },
@@ -361,9 +364,24 @@ export function UploadDocumentForm({ onboarderId }: { onboarderId: number }) {
 
   async function onSubmit(formData: FormData) {
     setError(null);
+    const kind  = String(formData.get('kind') ?? '').trim();
+    const label = String(formData.get('label') ?? '').trim() || null;
+    const file  = formData.get('file');
+    if (!kind) { setError('Choose a document type'); return; }
+    if (!(file instanceof File) || file.size === 0) { setError('Choose a file to upload'); return; }
+    // Size and type are checked here first, so a too-big file fails fast
+    // instead of after a long upload.
+    const check = checkUploadFile(file, 'onboarder_document');
+    if (!check.ok) { setError(check.error); return; }
+
     start(async () => {
       try {
-        await uploadDocument(onboarderId, formData);
+        await directUpload({
+          file,
+          policy:  'onboarder_document',
+          prepare: meta => prepareDocumentUpload(onboarderId, { kind, label, ...meta }),
+          record:  receipt => recordDocumentUpload(onboarderId, { kind, label, ...receipt }),
+        });
         setOpen(false);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Upload failed');
@@ -418,9 +436,10 @@ export function UploadDocumentForm({ onboarderId }: { onboarderId: number }) {
                 name="file"
                 type="file"
                 required
+                accept={acceptAttribute('onboarder_document')}
                 className="flex w-full rounded-xl border border-dashed border-(--rs-neutral-grey-300) bg-(--rs-neutral-grey-50) px-4 py-3 text-sm text-(--rs-neutral-grey-700) file:mr-3 file:rounded-md file:border-0 file:bg-(--rs-primary-600) file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-white hover:file:bg-(--rs-primary-700)"
               />
-              <p className="text-xs text-(--rs-neutral-grey-500)">Max 25 MB. PDFs and images recommended.</p>
+              <p className="text-xs text-(--rs-neutral-grey-500)">Max {MAX_DIRECT_UPLOAD_LABEL}. PDF, images or DOCX.</p>
             </div>
           </div>
 
