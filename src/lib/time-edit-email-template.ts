@@ -13,7 +13,7 @@ import { parseDbTimestamp } from '@/lib/time-approvals';
 /** The one font stack used by every style in these emails. */
 export const EMAIL_FONT_STACK = "'Poppins', Arial, Helvetica, sans-serif";
 const FONT_HREF = 'https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&display=swap';
-const LOGO_PATH = '/images/rs-logo.png';
+const LOGO_PATH = '/images/romega-email-logo.png';
 
 const YELLOW = '#febd18';
 const ACTION = '#1c5fa5';
@@ -405,8 +405,8 @@ export function renderTimeEditEmail(data: TimeEditEmailData): RenderedTimeEditEm
     `<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;` +
     `border:1px solid ${LINE};border-radius:14px;border-collapse:separate;overflow:hidden;${F}">` +
     `<tr><td style="padding:22px 32px 16px;border-bottom:4px solid ${YELLOW}">` +
-    `<a href="${SITE}"><img src="${esc(logoUrl)}" width="190" height="53" alt="Romega Solutions" ` +
-    `style="display:block;border:0;width:190px;height:auto"></a></td></tr>` +
+    `<a href="${SITE}"><img src="${esc(logoUrl)}" width="180" height="74" alt="Romega Solutions" ` +
+    `style="display:block;border:0;width:180px;height:auto"></a></td></tr>` +
     `<tr><td class="px" style="padding:30px 32px 28px;${F};color:${TEXT}">` +
     `<div style="text-align:center;${F};font-size:26px;line-height:1.3;font-weight:700;color:${NAVY};margin:0 0 14px">${esc(spec.headline)}</div>` +
     `<div style="text-align:center;margin:0 0 22px">${chipHtml(spec.chip)}</div>` +
