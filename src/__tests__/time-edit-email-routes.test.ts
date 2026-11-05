@@ -28,7 +28,7 @@ const requestRow = (over: Record<string, unknown> = {}) => ({
   reason: 'Late clock out.', document_name: null, requested_at: '2026-10-10 01:41:00+00', ...over,
 });
 
-function makeDb(opts: { row?: Record<string, unknown>; timesheetUpdateFails?: boolean } = {}) {
+function makeDb(opts: { row?: Record<string, unknown>; timesheetUpdateFails?: boolean; noSupervisor?: boolean } = {}) {
   const calls: Q[] = [];
   const handler = (q: Q): Result => {
     const eq = (c: string) => q.filters.find(f => f[1] === c)?.[2];
@@ -57,6 +57,7 @@ function makeDb(opts: { row?: Record<string, unknown>; timesheetUpdateFails?: bo
       return { data: { id: 11, user_id: 1, clocked_in_at: '2026-10-09T15:00:00.000Z', clocked_out_at: '2026-10-09T18:00:00.000Z', date: '2026-10-09' }, error: null };
     }
     if (q.table === 'user_reporting') {
+      if (opts.noSupervisor) return { data: null, error: null };
       return { data: { user_id: 1, reports_to_user_id: 2, is_hidden: false }, error: null };
     }
     if (q.table === 'notifications') return { data: null, error: null };
@@ -139,8 +140,8 @@ afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(
 
 describe('decision emails: exactly one per decision in both modes', () => {
   const cases: { name: string; actor: typeof REQUESTER; row?: Record<string, unknown>; body: Record<string, unknown>; subject: string; plainBody: RegExp }[] = [
-    { name: 'supervisor declines', actor: SUPERVISOR, body: { id: 7, action: 'deny', comment: 'Not on that call.' }, subject: 'Your time correction was declined by your supervisor', plainBody: /declined/ },
-    { name: 'admin declines', actor: ADMIN, row: { stage: 'admin', supervisor_id: null }, body: { id: 7, action: 'deny', comment: 'No record.' }, subject: 'Your time correction was declined by an admin', plainBody: /declined/ },
+    { name: 'supervisor declines', actor: SUPERVISOR, body: { id: 7, action: 'deny', comment: 'Not on that call.' }, subject: 'Your time correction was declined', plainBody: /declined/ },
+    { name: 'admin declines', actor: ADMIN, row: { stage: 'admin', supervisor_id: null }, body: { id: 7, action: 'deny', comment: 'No record.' }, subject: 'Your time correction was declined', plainBody: /declined/ },
     { name: 'admin approves', actor: ADMIN, row: { stage: 'admin' }, body: { id: 7, action: 'approve', comment: 'Matches.' }, subject: 'Your time correction was approved', plainBody: /applied to your timesheet/ },
   ];
 
@@ -185,15 +186,25 @@ describe('decision emails: exactly one per decision in both modes', () => {
     });
   }
 
-  it('copies the recorded supervisor on the designed email and not on an admin-step request without one', async () => {
+  it('CCs the recorded supervisor only on admin decline; approved and supervisor decline have no CC', async () => {
     env(NEW_ON);
     await setup(makeDb({ row: requestRow({ stage: 'admin' }) }), ADMIN);
-    await decide({ id: 7, action: 'approve', comment: 'ok' });
+    await decide({ id: 7, action: 'deny', comment: 'No record.' });
     expect(decisionEmails(sent)[0].cc).toBe(SUPERVISOR.email);
 
     vi.resetModules(); sent = [];
     await setup(makeDb({ row: requestRow({ stage: 'admin', supervisor_id: null }) }), ADMIN);
+    await decide({ id: 7, action: 'deny', comment: 'No record.' });
+    expect(decisionEmails(sent)[0].cc).toBeUndefined();
+
+    vi.resetModules(); sent = [];
+    await setup(makeDb({ row: requestRow({ stage: 'admin' }) }), ADMIN);
     await decide({ id: 7, action: 'approve', comment: 'ok' });
+    expect(decisionEmails(sent)[0].cc).toBeUndefined();
+
+    vi.resetModules(); sent = [];
+    await setup(makeDb({ row: requestRow() }), SUPERVISOR);
+    await decide({ id: 7, action: 'deny', comment: 'No.' });
     expect(decisionEmails(sent)[0].cc).toBeUndefined();
   });
 
@@ -226,7 +237,7 @@ describe('decision emails: exactly one per decision in both modes', () => {
 });
 
 describe('supervisor approval', () => {
-  it('is in-app only today and sends the designed email when the new path sends', async () => {
+  it('is in-app only: no HTML email on mid-step approve, with or without the new path', async () => {
     env({});
     await setup(makeDb(), SUPERVISOR);
     expect((await decide({ id: 7, action: 'approve', comment: 'Confirmed.' })).status).toBe(200);
@@ -236,11 +247,7 @@ describe('supervisor approval', () => {
     env(NEW_ON);
     await setup(makeDb(), SUPERVISOR);
     expect((await decide({ id: 7, action: 'approve', comment: 'Confirmed.' })).status).toBe(200);
-    expect(sent).toHaveLength(1);
-    expect(sent[0].url).toBe(HTML);
-    expect(sent[0].to).toBe(REQUESTER.email);
-    expect(sent[0].subject).toBe('Your supervisor approved your request');
-    expect(sent[0].body).toContain('Supervisor note: "Confirmed."');
+    expect(sent).toHaveLength(0);
   });
 });
 
@@ -256,7 +263,7 @@ describe('filing a request', () => {
     return res;
   };
 
-  it('sends no email today, and the received email when the new path sends', async () => {
+  it('sends no email today; when the new path sends, received to requester and action-needed to supervisor', async () => {
     env({});
     await setup(makeDb(), REQUESTER);
     expect((await file()).status).toBe(200);
@@ -266,12 +273,27 @@ describe('filing a request', () => {
     env(NEW_ON);
     await setup(makeDb(), REQUESTER);
     expect((await file()).status).toBe(200);
+    expect(sent).toHaveLength(2);
+    expect(sent.every(s => s.url === HTML)).toBe(true);
+    const received = sent.find(s => s.subject === 'Your time correction was received');
+    const action = sent.find(s => s.subject === 'Time correction waiting on your review');
+    expect(received?.to).toBe(REQUESTER.email);
+    expect(received?.cc).toBeUndefined();
+    expect(received?.html).toContain('Waiting for supervisor approval');
+    expect(action?.to).toBe(SUPERVISOR.email);
+    expect(action?.cc).toBeUndefined();
+    expect(action?.html).toContain('Open Time Approvals');
+  });
+
+  it('does not send the supervisor action-needed email when the request starts at admin', async () => {
+    env(NEW_ON);
+    await setup(makeDb({ noSupervisor: true }), REQUESTER);
+    expect((await file()).status).toBe(200);
     expect(sent).toHaveLength(1);
-    expect(sent[0].url).toBe(HTML);
     expect(sent[0].to).toBe(REQUESTER.email);
-    expect(sent[0].cc).toBe(SUPERVISOR.email);
-    expect(sent[0].subject).toBe('We received your time correction request');
-    expect(sent[0].html).toContain('Waiting for supervisor approval');
+    expect(sent[0].subject).toBe('Your time correction was received');
+    expect(sent[0].html).toContain('Waiting for admin approval');
+    expect(sent.some(s => s.subject === 'Time correction waiting on your review')).toBe(false);
   });
 
   it('sends nothing in log mode', async () => {
