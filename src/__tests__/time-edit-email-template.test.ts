@@ -78,7 +78,7 @@ describe('subjects and headings', () => {
 describe('layout and links', () => {
   it('uses the hosted portal logo and no embedded image data', () => {
     for (const r of all()) {
-      expect(r.html).toContain('src="https://portal.example.test/images/rs-logo.png"');
+      expect(r.html).toContain('src="https://portal.example.test/images/romega-email-logo.png"');
       expect(r.html).toContain('alt="Romega Solutions"');
       expect(r.html).not.toContain('data:image');
     }
