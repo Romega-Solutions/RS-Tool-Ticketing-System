@@ -143,26 +143,37 @@ export const POST = route(async (req: Request) => {
     }),
   ]);
 
-  // The designed email to the requester (supervisor copied), sent after the
-  // response. Best-effort, and off unless the HTML sender is configured and on.
+  // Designed emails after the response. Best-effort; off unless the HTML
+  // sender is configured and on. Always confirm to the requester. When the
+  // request waits on a supervisor, also email that supervisor only (never the
+  // admin queue).
+  const emailRequest = {
+    id:                inserted.id,
+    userId:            session.id,
+    date:              ts.date,
+    currentClockIn:    ts.clocked_in_at,
+    currentClockOut:   ts.clocked_out_at,
+    requestedClockIn:  requestedIn,
+    requestedClockOut: requestedOut,
+    reason,
+    documentName,
+    requestedAt:       inserted.requested_at ?? new Date().toISOString(),
+    supervisorId,
+  };
   sendTimeEditEmailAfterResponse({
     kind:       'received',
     waitingFor: stage,
     admin,
-    request: {
-      id:                inserted.id,
-      userId:            session.id,
-      date:              ts.date,
-      currentClockIn:    ts.clocked_in_at,
-      currentClockOut:   ts.clocked_out_at,
-      requestedClockIn:  requestedIn,
-      requestedClockOut: requestedOut,
-      reason,
-      documentName,
-      requestedAt:       inserted.requested_at ?? new Date().toISOString(),
-      supervisorId,
-    },
+    request:    emailRequest,
   });
+  if (stage === 'supervisor') {
+    sendTimeEditEmailAfterResponse({
+      kind:       'supervisor_action_needed',
+      waitingFor: 'supervisor',
+      admin,
+      request:    emailRequest,
+    });
+  }
 
   return NextResponse.json({ ok: true, id: inserted.id, stage });
 });

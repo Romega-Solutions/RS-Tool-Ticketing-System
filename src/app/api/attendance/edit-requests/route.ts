@@ -76,7 +76,8 @@ export const POST = route(async (req: Request) => {
     if (failed) return NextResponse.json({ error: failed.error }, { status: failed.status });
 
     if (rights.step === 'supervisor' && action === 'approve') {
-      // Hand over to the admins and let the requester know where it stands.
+      // Hand over to the admins. In-app bells only — no HTML email on this
+      // mid-step (the requester hears from email only after final approval).
       const directory = await loadDirectory(admin);
       const requesterName = directory.get(reqRow.user_id)?.name ?? 'A teammate';
       await Promise.all([
@@ -95,13 +96,6 @@ export const POST = route(async (req: Request) => {
           dateLabel,
         }),
       ]);
-      sendTimeEditEmailAfterResponse({
-        kind:        'supervisor_approved',
-        request:     emailRequestFromRow(reqRow),
-        deciderName: session.name,
-        note:        comment,
-        admin,
-      });
       return NextResponse.json({ ok: true, status: 'pending', stage: 'admin' });
     }
 

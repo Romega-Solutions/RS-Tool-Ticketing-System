@@ -2,11 +2,15 @@
 // and never throws. sendTimeEditEmail waits for the send to finish; routes use
 // sendTimeEditEmailAfterResponse so the request never waits for email.
 //
-// Who gets what: the email goes To the requester, with the requester's
-// recorded supervisor in CC when there is one, they are active, have an
-// address, and are not the requester. These emails always go out whatever the
-// requester's "approvals" email preference is (they concern a pay record); the
-// in-app bell is unchanged.
+// Who gets what is per kind:
+//   received                  → To requester, no CC
+//   supervisor_action_needed  → To supervisor only, no CC
+//   approved                  → To requester only, no CC
+//   declined_supervisor       → To requester, no CC
+//   declined_admin            → To requester; CC immediate supervisor when
+//                               active, valid email, and not the requester
+// These emails always go out whatever the recipient's "approvals" email
+// preference is (they concern a pay record); the in-app bell is unchanged.
 //
 // Whether anything is sent at all is decided by resolveTimeEditEmailPlan
 // (src/lib/time-edit-email-mode.ts).
@@ -55,17 +59,38 @@ export function emailRequestFromRow(row: Record<string, unknown>): TimeEditEmail
   };
 }
 
-/** To the requester; CC the supervisor only when they are a real, active, different person with an address. */
+/** Per-kind To/CC. Returns to=null when the primary recipient has no usable address. */
 export function resolveRecipients(
+  kind: TimeEditEmailKind,
   requester: Pick<UserLite, 'id' | 'email'>,
   supervisor: UserLite | null,
 ): { to: string | null; cc: string[] } {
-  const to = requester.email?.trim() || null;
-  if (!to || !isValidEmailAddress(to)) return { to: null, cc: [] };
-  const ccAddr = supervisor?.email?.trim() || '';
-  const ok = supervisor && supervisor.isActive && supervisor.id !== requester.id && isValidEmailAddress(ccAddr)
-    && ccAddr.toLowerCase() !== to.toLowerCase();
-  return { to, cc: ok ? [ccAddr] : [] };
+  const requesterTo = (): string | null => {
+    const to = requester.email?.trim() || null;
+    if (!to || !isValidEmailAddress(to)) return null;
+    return to;
+  };
+
+  if (kind === 'supervisor_action_needed') {
+    const addr = supervisor?.email?.trim() || '';
+    if (!supervisor || !supervisor.isActive || !isValidEmailAddress(addr)) {
+      return { to: null, cc: [] };
+    }
+    return { to: addr, cc: [] };
+  }
+
+  const to = requesterTo();
+  if (!to) return { to: null, cc: [] };
+
+  if (kind === 'declined_admin') {
+    const ccAddr = supervisor?.email?.trim() || '';
+    const ok = !!supervisor && supervisor.isActive && supervisor.id !== requester.id
+      && isValidEmailAddress(ccAddr) && ccAddr.toLowerCase() !== to.toLowerCase();
+    return { to, cc: ok ? [ccAddr] : [] };
+  }
+
+  // received | approved | declined_supervisor
+  return { to, cc: [] };
 }
 
 async function loadUsers(admin: Admin, ids: number[]): Promise<Map<number, UserLite>> {
@@ -101,9 +126,9 @@ export async function sendTimeEditEmail(opts: {
       return;
     }
     const supervisor = request.supervisorId != null ? users.get(request.supervisorId) ?? null : null;
-    const { to, cc } = resolveRecipients(requester, supervisor);
+    const { to, cc } = resolveRecipients(kind, requester, supervisor);
     if (!to) {
-      console.error(`[time-edit-emails] requester has no usable email address (request ${request.id})`);
+      console.error(`[time-edit-emails] no usable To address for ${kind} (request ${request.id})`);
       return;
     }
 

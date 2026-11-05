@@ -10,7 +10,7 @@ import {
 } from '@/lib/time-edit-email-template';
 
 const KINDS: TimeEditEmailKind[] = [
-  'received', 'supervisor_approved', 'approved', 'declined_admin', 'declined_supervisor',
+  'received', 'supervisor_action_needed', 'approved', 'declined_admin', 'declined_supervisor',
 ];
 
 // Fri Oct 9, 2026 11:00 PM to Sat Oct 10, 2026 2:00 AM Manila, corrected to 2:30 AM.
@@ -64,13 +64,13 @@ describe('fonts', () => {
 });
 
 describe('subjects and headings', () => {
-  it('has the five subjects', () => {
+  it('has the four Duane subjects (declines share one)', () => {
     expect(all().map(r => r.subject)).toEqual([
-      'We received your time correction request',
-      'Your supervisor approved your request',
+      'Your time correction was received',
+      'Time correction waiting on your review',
       'Your time correction was approved',
-      'Your time correction was declined by an admin',
-      'Your time correction was declined by your supervisor',
+      'Your time correction was declined',
+      'Your time correction was declined',
     ]);
   });
 });
@@ -84,12 +84,19 @@ describe('layout and links', () => {
     }
   });
 
-  it('links the button to the requester page, not a request deep link', () => {
-    for (const r of all()) {
-      expect(r.html).toContain('href="https://portal.example.test/my-time"');
+  it('links requester emails to my-time and the supervisor email to Time Approvals', () => {
+    for (const kind of KINDS) {
+      const r = renderTimeEditEmail(base({ kind }));
       expect(r.html).not.toContain('?request=');
       expect(r.html).not.toContain('&file=');
-      expect(r.text).toContain('https://portal.example.test/my-time');
+      if (kind === 'supervisor_action_needed') {
+        expect(r.html).toContain('href="https://portal.example.test/attendance/requests"');
+        expect(r.text).toContain('https://portal.example.test/attendance/requests');
+        expect(r.html).not.toContain('href="https://portal.example.test/my-time"');
+      } else {
+        expect(r.html).toContain('href="https://portal.example.test/my-time"');
+        expect(r.text).toContain('https://portal.example.test/my-time');
+      }
     }
   });
 
@@ -135,11 +142,14 @@ describe('wording per email', () => {
     expect(r.text).not.toContain('Supervisor:');
   });
 
-  it('B shows who approved, the note and waiting for admin', () => {
-    const r = renderTimeEditEmail(base({ kind: 'supervisor_approved', note: 'She was on the call.' }));
-    expect(r.html).toContain('Waiting for admin approval');
-    expect(r.text).toContain('Approved by:     Jose Ramirez, supervisor');
-    expect(r.text).toContain('Supervisor note: "She was on the call."');
+  it('supervisor action-needed asks for review and points at Time Approvals', () => {
+    const r = renderTimeEditEmail(base({ kind: 'supervisor_action_needed', supervisorCopied: false }));
+    expect(r.subject).toBe('Time correction waiting on your review');
+    expect(r.html).toContain('Waiting for supervisor approval');
+    expect(r.html).toContain('Open Time Approvals');
+    expect(r.text).toContain('needs your review');
+    expect(r.text).not.toContain('filed in your name');
+    expect(r.text).not.toContain('Your supervisor is copied');
   });
 
   it('C is approved, names the admin and the admin note, and links the timesheet', () => {

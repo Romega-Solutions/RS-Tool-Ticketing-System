@@ -1,9 +1,9 @@
-// The five time-correction emails (pure, no I/O):
-//   received            the request was filed
-//   supervisor_approved the supervisor approved; it now waits on an admin
-//   approved            an admin approved and the timesheet was updated
-//   declined_admin      an admin declined (final)
-//   declined_supervisor the supervisor declined (final)
+// The time-correction emails (pure, no I/O):
+//   received                  the request was filed (to the requester)
+//   supervisor_action_needed  a supervisor must review (to the supervisor)
+//   approved                  final admin approval; the timesheet was updated
+//   declined_admin            an admin declined (final)
+//   declined_supervisor       the supervisor declined (final)
 // Layout: table based, inline styles, one font stack, a hidden preheader and a
 // plain-text twin that carries the same facts. All dates and times are Manila.
 
@@ -29,7 +29,7 @@ const FOOT_HI = '#ffffff';
 
 export type TimeEditEmailKind =
   | 'received'
-  | 'supervisor_approved'
+  | 'supervisor_action_needed'
   | 'approved'
   | 'declined_admin'
   | 'declined_supervisor';
@@ -56,7 +56,7 @@ export type TimeEditEmailData = {
   waitingFor?: 'supervisor' | 'admin';
   /** The requester's supervisor, when one is recorded. */
   supervisorName?: string | null;
-  /** Who made the decision (for approved / declined / supervisor_approved). */
+  /** Who made the decision (for approved / declined). */
   deciderName?: string | null;
   /** The decider's note. */
   note?: string | null;
@@ -200,6 +200,8 @@ type Spec = {
   /** A highlighted reason block (declines). */
   noteBlock?: { title: string; who: string; text: string };
   button: string;
+  /** Portal path for the CTA (no leading slash required). Defaults to my-time. */
+  buttonPath: string;
 };
 
 function filedRows(data: TimeEditEmailData, requestUrl: string): Row[] {
@@ -218,7 +220,7 @@ function filedRows(data: TimeEditEmailData, requestUrl: string): Row[] {
   return rows;
 }
 
-function buildSpec(data: TimeEditEmailData, requestUrl: string): Spec {
+function buildSpec(data: TimeEditEmailData, myTimeUrl: string): Spec {
   const employee: Row[] = [
     textRow('Employee', data.requesterName),
     textRow('Shift date', fmtShiftDate(data.shiftDate)),
@@ -231,27 +233,29 @@ function buildSpec(data: TimeEditEmailData, requestUrl: string): Spec {
       const adminStep = data.waitingFor === 'admin';
       const rows = [...employee];
       if (!adminStep && data.supervisorName) rows.push(textRow('Supervisor', data.supervisorName));
-      rows.push(...filedRows(data, requestUrl));
+      rows.push(...filedRows(data, myTimeUrl));
       return {
-        subject: 'We received your time correction request',
-        headline: 'We received your time correction request',
-        preheader: 'We received your time correction request.',
+        subject: 'Your time correction was received',
+        headline: 'Your time correction was received',
+        preheader: 'Your time correction was received.',
         chip: adminStep ? 'wait_admin' : 'wait_supervisor',
         rows,
         button: 'View my request',
+        buttonPath: 'my-time',
       };
     }
-    case 'supervisor_approved': {
-      const rows = [...employee, textRow('Approved by', `${decider}, supervisor`)];
-      if (note) rows.push({ label: 'Supervisor note', html: quoted(note), text: `"${note}"` });
-      rows.push(...filedRows(data, requestUrl));
+    case 'supervisor_action_needed': {
+      const approvalsUrl = myTimeUrl.replace(/\/my-time$/, '/attendance/requests');
+      const rows = [...employee];
+      rows.push(...filedRows(data, approvalsUrl));
       return {
-        subject: 'Your supervisor approved your request',
-        headline: 'Your supervisor approved your request',
-        preheader: 'Your supervisor approved your request. It now needs an admin.',
-        chip: 'wait_admin',
+        subject: 'Time correction waiting on your review',
+        headline: 'Time correction waiting on your review',
+        preheader: 'A time correction needs your review in Time Approvals.',
+        chip: 'wait_supervisor',
         rows,
-        button: 'View my request',
+        button: 'Open Time Approvals',
+        buttonPath: 'attendance/requests',
       };
     }
     case 'approved': {
@@ -264,27 +268,30 @@ function buildSpec(data: TimeEditEmailData, requestUrl: string): Spec {
         chip: 'approved',
         rows,
         button: 'View my timesheet',
+        buttonPath: 'my-time',
       };
     }
     case 'declined_admin':
       return {
-        subject: 'Your time correction was declined by an admin',
+        subject: 'Your time correction was declined',
         headline: 'Your time correction was declined',
         preheader: 'Your time correction was declined. See the reason inside.',
         chip: 'declined',
         rows: [...employee, textRow('Declined by', `${decider}, admin`)],
         noteBlock: note ? { title: 'Reason', who: 'Admin', text: note } : undefined,
         button: 'View my request',
+        buttonPath: 'my-time',
       };
     case 'declined_supervisor':
       return {
-        subject: 'Your time correction was declined by your supervisor',
+        subject: 'Your time correction was declined',
         headline: 'Your time correction was declined',
         preheader: 'Your supervisor declined your request. See the reason inside.',
         chip: 'declined',
         rows: [...employee, textRow('Declined by', `${decider}, supervisor`)],
         noteBlock: note ? { title: 'Reason', who: 'Supervisor', text: note } : undefined,
         button: 'View my request',
+        buttonPath: 'my-time',
       };
   }
 }
@@ -373,7 +380,13 @@ function buttonHtml(url: string, label: string): string {
 const ADDRESS = '222 Pacific Coast Hwy, #10, El Segundo, CA 90245';
 const SITE = 'https://www.romega-solutions.com';
 
-function whyLine(copied: boolean): string {
+function whyLine(kind: TimeEditEmailKind, copied: boolean): string {
+  if (kind === 'supervisor_action_needed') {
+    return (
+      'You are getting this email because a time correction request needs your review. ' +
+      'Please do not reply to this automated message.'
+    );
+  }
   return (
     'You are getting this email because a time correction request was filed in your name.' +
     `${copied ? ' Your supervisor is copied.' : ''} Please do not reply to this automated message.`
@@ -384,11 +397,12 @@ function whyLine(copied: boolean): string {
 
 export function renderTimeEditEmail(data: TimeEditEmailData): RenderedTimeEditEmail {
   const base = data.baseUrl.replace(/\/+$/, '');
-  const requestUrl = `${base}/my-time`;
+  const myTimeUrl = `${base}/my-time`;
   const logoUrl = `${base}${LOGO_PATH}`;
-  const spec = buildSpec(data, requestUrl);
+  const spec = buildSpec(data, myTimeUrl);
+  const ctaUrl = `${base}/${spec.buttonPath.replace(/^\/+/, '')}`;
   const { original, requested } = computeTimes(data);
-  const why = whyLine(data.supervisorCopied);
+  const why = whyLine(data.kind, data.supervisorCopied);
 
   const rowsHtml = spec.rows.map(rowHtml).join('');
   const html =
@@ -415,7 +429,7 @@ export function renderTimeEditEmail(data: TimeEditEmailData): RenderedTimeEditEm
     `<table role="presentation" cellpadding="0" cellspacing="0" width="100%">${rowsHtml}</table></td></tr></table>` +
     `<div style="margin-top:14px">${timesTableHtml(original, requested)}</div>` +
     `${spec.noteBlock ? noteBlockHtml(spec.noteBlock) : ''}` +
-    `${buttonHtml(requestUrl, spec.button)}` +
+    `${buttonHtml(ctaUrl, spec.button)}` +
     `</td></tr>` +
     `<tr><td bgcolor="${FOOT_BG}" align="center" class="px" style="background-color:${FOOT_BG};padding:28px 32px;${F}">` +
     `<p style="margin:0;${F};font-size:14px;line-height:22px;font-weight:700;color:${FOOT_HI}">Romega Solutions</p>` +
@@ -437,8 +451,8 @@ export function renderTimeEditEmail(data: TimeEditEmailData): RenderedTimeEditEm
   lines.push(tline('Original', original, false));
   lines.push(tline('Requested', requested, true));
   lines.push('All dates and times are Manila time (UTC+8).', '');
-  lines.push(`${spec.button}: ${requestUrl}`);
-  lines.push(`Button not working? Copy this link: ${requestUrl}`, '');
+  lines.push(`${spec.button}: ${ctaUrl}`);
+  lines.push(`Button not working? Copy this link: ${ctaUrl}`, '');
   lines.push('--', 'Romega Solutions', ADDRESS, 'www.romega-solutions.com', '', why, '');
 
   return { subject: spec.subject, preheader: spec.preheader, html, text: lines.join('\n') };
