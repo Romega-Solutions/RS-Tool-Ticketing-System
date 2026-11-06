@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { botRoute } from '@/lib/bot-api/auth';
+import { me } from '@/lib/bot-api/read';
+const { admin } = vi.hoisted(() => ({admin:vi.fn()}));
+vi.mock('@/lib/supabase/admin', () => ({createAdminClient:admin}));
 import { rateHit } from '@/lib/bot-api/rate-limit';
 import { fixture, mockDb } from './helpers/bot-api';
 
@@ -15,6 +19,18 @@ describe('atomic private read budget', () => {
     const { key } = fixture(), { db, rpc } = mockDb(); rpc.mockResolvedValue({ data: 121 });
     await expect(rateHit(db, key, Number(now))).rejects.toMatchObject({ retryAfter: retry });
     expect(rpc.mock.calls[0][1].p_window).toBe(window);
+  });
+  it('charges each 304 against the minute budget before rejecting the next conditional', async () => {
+    const f = fixture(), m = mockDb([], c => c.table === 'api_keys' && !c.steps.some(s => s.method === 'update') ? {data:f.key} : {});
+    admin.mockReturnValue(m.db); let count = 0;
+    m.rpc.mockImplementation(async () => ({data:++count})); f.key.rate_read_per_min = 2;
+    const route = botRoute('tasks:read',me,'/api/bot/v1/me');
+    const request = (tag?:string) => new Request('http://local/api/bot/v1/me',{headers:{Authorization:`Bearer ${f.token}`,...(tag?{'If-None-Match':tag}:{})}});
+    const first = await route(request()); expect(first.status).toBe(200);
+    expect((await route(request(first.headers.get('ETag')!))).status).toBe(304);
+    const denied = await route(request(first.headers.get('ETag')!)); expect(denied.status).toBe(429);
+    expect(Number(denied.headers.get('Retry-After'))).toBeGreaterThanOrEqual(1);
+    expect(count).toBe(3);
   });
   it.each([{ error: true }, { data: null }, { data: 0 }, { data: '1' }])('fails closed on storage or protocol failure', async response => {
     const { key } = fixture(), { db, rpc } = mockDb(); rpc.mockResolvedValue(response);

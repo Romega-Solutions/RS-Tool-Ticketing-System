@@ -3,7 +3,7 @@
   "info": {
     "title": "Scoped read-only portal API (v0)",
     "version": "0.1.0",
-    "description": "Server-to-server Bearer access only. All seven GETs require tasks:read and explicit project grants. No cookies/CORS. Default 120 reads/minute including me/304. Unknown/duplicate query parameters fail 400. No business writes. Strong ETags cover complete selected representations, fields/filter/paging/full/truncation, excluding rid. Private/no-store responses; no shared caches. IP filtering is off. Text sanitization is not PII redaction. HEAD/OPTIONS and other methods produce audited 405; they are not additional read operations."
+    "description": "Server-to-server Bearer access only. All seven GETs require tasks:read and explicit project grants. No cookies/CORS. Default 120 reads/minute including me/304. Unknown/duplicate query parameters fail 400. No business writes. Strong ETags cover complete selected representations, fields/filter/paging/full/truncation, excluding rid. Private/no-store responses; no shared caches. IP filtering is off. Text sanitization is not PII redaction. HEAD/OPTIONS and other methods produce audited 405; they are not additional read operations.\nBusiness timestamps use UTC ISO Z with six fractional digits (microsecond precision). Since accepts ISO offsets and is normalised to UTC before timestamp comparison. Sorting and cursors use typed timestamp views, not legacy text order."
   },
   "security": [
     {
@@ -2319,7 +2319,7 @@
           "type": "string",
           "format": "date-time"
         },
-        "description": "Strictly after ISO timestamp, not an ETag. Does not include child changes in a task watermark."
+        "description": "Strictly after ISO timestamp, not an ETag. Does not include child changes in a task watermark. Offsets are converted to UTC; comparisons use timestamptz, not text."
       },
       "conditional": {
         "name": "If-None-Match",
@@ -2327,7 +2327,7 @@
         "schema": {
           "type": "string"
         },
-        "description": "Strong representation ETag. Authorization, rate budget and audit run before an empty 304."
+        "description": "Strong ETag match returns 304 after authorization, rate counting and required audit. The wildcard * matches any authorized representation; weak W/ tags never match and return 200."
       },
       "id": {
         "name": "id",

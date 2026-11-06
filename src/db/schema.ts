@@ -909,7 +909,7 @@ export const apiKeys = pgTable('api_keys', {
   check('api_keys_scopes_check', sql`${t.scopes} = ARRAY['tasks:read']::text[]`),
   check('api_keys_project_ids_check', sql`array_position(${t.projectIds}, NULL) IS NULL AND coalesce(array_ndims(${t.projectIds}), 1) = 1 AND 0 < ALL(${t.projectIds})`),
   check('api_keys_rate_read_per_min_check', sql`${t.rateReadPerMin} > 0`),
-]);
+]).enableRLS();
 export const apiAuditLog = pgTable('api_audit_log', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
   keyId: bigint('key_id', { mode: 'number' }).references(() => apiKeys.id, { onDelete: 'set null' }),
@@ -918,11 +918,11 @@ export const apiAuditLog = pgTable('api_audit_log', {
   taskId: integer('task_id'), status: smallint('status').notNull(), errorCode: text('error_code'),
   durationMs: integer('duration_ms'), ip: text('ip'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-}, t => [index('api_audit_log_created_idx').on(t.createdAt.desc()), index('api_audit_log_key_created_idx').on(t.keyId, t.createdAt.desc())]);
+}, t => [index('api_audit_log_created_idx').on(t.createdAt.desc()), index('api_audit_log_key_created_idx').on(t.keyId, t.createdAt.desc())]).enableRLS();
 export const apiRateCounters = pgTable('api_rate_counters', {
   keyId: bigint('key_id', { mode: 'number' }).notNull().references(() => apiKeys.id, { onDelete: 'cascade' }),
   bucket: text('bucket').notNull(), windowStart: timestamp('window_start', { withTimezone: true }).notNull(),
   count: integer('count').notNull().default(0),
 }, t => [primaryKey({ columns: [t.keyId, t.bucket, t.windowStart] }),
   check('api_rate_counters_bucket_check', sql`${t.bucket} = 'read:minute'`),
-  check('api_rate_counters_count_check', sql`${t.count} >= 0`)]);
+  check('api_rate_counters_count_check', sql`${t.count} >= 0`)]).enableRLS();

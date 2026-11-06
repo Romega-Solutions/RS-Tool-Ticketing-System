@@ -4,18 +4,18 @@ import type { ReadContext } from '@/lib/bot-api/auth';
 import { fixture, mockDb, step, type Call, type DbResult } from './helpers/bot-api';
 
 type List = { cols: string[]; rows: unknown[][]; next: string | null };
-const stamp = '2026-01-01T00:00:00Z';
+const stamp = '2026-01-01T00:00:00.000000Z';
 const item = { id: 5, project_id: 1, sequence_id: 1, name: '<b>Title</b>', priority: 'high', state_id: 1,
-  target_date: '2026-01-02', updated_at: stamp, project_states: { project_id: 1, name: 'Ready' }, description: '<p>Text</p>', email: 'hidden@example.invalid' };
+  target_date: '2026-01-02', updated_at_ts: stamp, project_states: { project_id: 1, name: 'Ready' }, description: '<p>Text</p>', email: 'hidden@example.invalid' };
 function defaultResponse(c: Call): DbResult {
   const single = c.steps.some(s => s.method === 'maybeSingle');
   if (c.table === 'projects') return { data: single ? { id: 1 } : [{ id: 1, identifier: 'PROJ', name: '<p>Project</p>' }] };
   if (c.table === 'project_states') return { data: single ? { id: 1 } : [{ id: 1, name: '<b>Ready</b>', group: 'started', sequence: 0 }] };
-  if (c.table === 'work_items') return { data: single ? item : [item] };
+  if (['work_items','bot_api_work_items'].includes(c.table)) return { data: single ? item : [item] };
   if (c.table === 'work_item_links') return { data: [{ id: 1, title: '<p>Doc</p>', url: 'https://example.invalid' }], count: 1 };
   if (c.table === 'work_item_assignees') return { data: [{ id: 1, user_id: 1, users: { id: 1, name: '<b>Member</b>', email: 'hidden@example.invalid' } }] };
-  if (c.table === 'work_item_comments') return { data: [{ id: 1, parent_id: 4, author_id: 1, users: { name: 'Member' }, body: '<p>Comment</p>', created_at: stamp, updated_at: stamp, edited_at: null, deleted_at: null }], count: 1 };
-  if (c.table === 'work_item_activity') return { data: [{ id: 1, actor_id: 1, users: { name: 'Member' }, action: 'edited', from_value: 'hidden@example.invalid', to_value: 'private text', created_at: stamp }], count: 1 };
+  if (['work_item_comments','bot_api_work_item_comments'].includes(c.table)) return { data: [{ id: 1, parent_id: 4, author_id: 1, users: { name: 'Member' }, body: '<p>Comment</p>', created_at: stamp, updated_at_ts: stamp, edited_at: null, deleted_at: null }], count: 1 };
+  if (['work_item_activity','bot_api_work_item_activity'].includes(c.table)) return { data: [{ id: 1, actor_id: 1, users: { name: 'Member' }, action: 'edited', from_value: 'hidden@example.invalid', to_value: 'private text', created_at_ts: stamp }], count: 1 };
   return { data: [] };
 }
 function context(path: string, params: Record<string,string> = {}, resolve = defaultResponse) {
@@ -42,7 +42,7 @@ describe('bounded read-only adapters', () => {
     expect(step(s.calls[0], 'eq','id',5)).toBe(true);
     expect(step(s.calls[0], 'eq','archived',0)).toBe(true);
     expect(step(s.calls[0], 'eq','projects.archived',0)).toBe(true);
-    for (const c of s.calls.filter(c => c.table.startsWith('work_item_'))) {
+    for (const c of s.calls.filter(c => c.table.startsWith('work_item_') || c.table.startsWith('bot_api_work_item_'))) {
       expect(step(c,'eq','work_item_id',5)).toBe(true);
       expect(step(c,'in','work_items.project_id',[1])).toBe(true);
       expect(step(c,'eq','work_items.archived',0)).toBe(true);
@@ -51,7 +51,7 @@ describe('bounded read-only adapters', () => {
   });
   it.each(['missing','archived','foreign','empty'])('returns indistinguishable 404 before child queries: %s', async kind => {
     for (const handler of [task,comments,activity]) {
-      const s = context('tasks/5',{ id: '5' }, c => c.table === 'work_items' ? { data: null } : defaultResponse(c));
+      const s = context('tasks/5',{ id: '5' }, c => ['work_items','bot_api_work_items'].includes(c.table) ? { data: null } : defaultResponse(c));
       if (kind === 'empty') s.c.key.project_ids = [];
       await expect(handler(s.c)).rejects.toMatchObject({ status: 404, code: 'not_found', msg: 'Not found' });
       expect(s.calls.length).toBe(1);
@@ -63,7 +63,7 @@ describe('bounded read-only adapters', () => {
     const r = await projects(s.c); expect((r.data as List).rows).toEqual([]); expect(step(s.calls[0],'in','id',[])).toBe(true);
   });
   it('queries limit+1 and returns keyset pages bound to filters and fields', async () => {
-    const s = context('tasks?project=1&limit=1&fields=id,name',{}, c => c.table === 'work_items' ? { data: [item,{...item,id:6}] } : defaultResponse(c));
+    const s = context('tasks?project=1&limit=1&fields=id,name',{}, c => ['work_items','bot_api_work_items'].includes(c.table) ? { data: [item,{...item,id:6}] } : defaultResponse(c));
     const r = await tasks(s.c), data = r.data as List;
     expect(data.rows).toEqual([[5,'Title']]); expect(typeof data.next).toBe('string');
     expect(step(s.calls.at(-1)!,'limit',2)).toBe(true);
@@ -77,9 +77,9 @@ describe('bounded read-only adapters', () => {
     await tasks(s.c); const c = s.calls.at(-1)!;
     expect(step(c,'eq','project_id',1)).toBe(true); expect(step(c,'in','project_id',[1])).toBe(true);
     expect(step(c,'eq','state_id',1)).toBe(true); expect(step(c,'eq','priority','high')).toBe(true);
-    expect(step(c,'lt','target_date','2026-02-01')).toBe(true); expect(step(c,'gt','updated_at',stamp)).toBe(true);
+    expect(step(c,'lt','target_date','2026-02-01')).toBe(true); expect(step(c,'gt','updated_at_ts',new Date(stamp).toISOString())).toBe(true);
     expect(step(c,'filter','name','imatch','a%_b')).toBe(true);
-    expect(step(c,'order','updated_at')).toBe(true); expect(step(c,'order','id')).toBe(true); expect(step(c,'limit',101)).toBe(true);
+    expect(step(c,'order','updated_at_ts')).toBe(true); expect(step(c,'order','id')).toBe(true); expect(step(c,'limit',101)).toBe(true);
   });
   it('treats every search metacharacter as literal text, never a wildcard or expression', () => {
     for (const value of ['*','%','_','\\','.*','[test]','x|y','(?i)','a,b','a"b','a:b']) {
@@ -96,13 +96,32 @@ describe('bounded read-only adapters', () => {
   });
   it('rejects a state outside the selected project', async () => {
     const s = context('tasks?project=1&state=9',{}, c => c.table === 'project_states' ? { data: null } : defaultResponse(c));
-    await expect(tasks(s.c)).rejects.toMatchObject({ status:400 }); expect(s.calls.some(c => c.table === 'work_items')).toBe(false);
+    await expect(tasks(s.c)).rejects.toMatchObject({ status:400 }); expect(s.calls.some(c => ['work_items','bot_api_work_items'].includes(c.table))).toBe(false);
   });
   it('preserves deletion footprint and parent, while including edit/deletion deltas', async () => {
-    const s = context(`tasks/5/comments?since=${stamp}`,{ id:'5' }, c => c.table === 'work_item_comments' ? { data: [{id:1,parent_id:4,author_id:1,body:'private deleted body',created_at:stamp,updated_at:stamp,edited_at:stamp,deleted_at:stamp}] } : defaultResponse(c));
+    const s = context(`tasks/5/comments?since=${stamp}`,{ id:'5' }, c => ['work_item_comments','bot_api_work_item_comments'].includes(c.table) ? { data: [{id:1,parent_id:4,author_id:1,body:'private deleted body',created_at:stamp,updated_at_ts:stamp,edited_at:stamp,deleted_at:stamp}] } : defaultResponse(c));
     const r = await comments(s.c), list = r.data as List, row = Object.fromEntries(list.cols.map((c,i) => [c,list.rows[0][i]]));
     expect(row.body).toBe(''); expect(row.parent_id).toBe(4); expect(row.deleted_at).toBe(stamp); expect(row.edited_at).toBe(stamp);
-    expect(step(s.calls.at(-1)!,'gt','updated_at',stamp)).toBe(true); expect(step(s.calls.at(-1)!,'order','updated_at')).toBe(true);
+    expect(step(s.calls.at(-1)!,'gt','updated_at_ts',new Date(stamp).toISOString())).toBe(true); expect(step(s.calls.at(-1)!,'order','updated_at_ts')).toBe(true);
+  });
+  it.each([
+    ['tasks?project=1', tasks, {}, 'bot_api_work_items', 'updated_at_ts', 'upd'],
+    ['tasks/5/comments', comments, {id:'5'}, 'bot_api_work_item_comments', 'updated_at_ts', 'updated_at'],
+    ['tasks/5/activity', activity, {id:'5'}, 'bot_api_work_item_activity', 'created_at_ts', 'created_at'],
+  ] as const)('normalises offset since and preserves microseconds from cast views: %s', async (path, handler, params, table, column, output) => {
+    const rows = [
+      {...item, id:5, created_at:'2026-01-01 00:00:00.000001+00', updated_at:'2026-01-01 00:00:00.000001+00', [column]:'2026-01-01T00:00:00.000001+00:00'},
+      {...item, id:6, created_at:'2026-01-01T00:00:00.000Z', updated_at:'2026-01-01T00:00:00.000Z', [column]:'2026-01-01T00:00:01+00:00'},
+    ];
+    const query = `${path}${path.includes('?')?'&':'?'}since=2026-01-01T08:00:00%2B08:00&limit=1`;
+    const s = context(query, params, c => c.table === table ? {data:rows} : defaultResponse(c));
+    const result = (await handler(s.c)).data as List;
+    expect(step(s.calls.at(-1)!,'gt',column,'2026-01-01T00:00:00.000Z')).toBe(true);
+    expect(step(s.calls.at(-1)!,'order',column)).toBe(true);
+    expect(result.rows[0][result.cols.indexOf(output)]).toBe('2026-01-01T00:00:00.000001Z');
+    const next = context(`${query}&cursor=${result.next}`,params,c => c.table === table ? {data:rows} : defaultResponse(c));
+    await handler(next.c);
+    expect(step(next.calls.at(-1)!,'or',`${column}.gt.2026-01-01T00:00:00.000001Z,and(${column}.eq.2026-01-01T00:00:00.000001Z,id.gt.5)`)).toBe(true);
   });
   it('never exposes user-written history values; approved numeric identifiers only', async () => {
     const s = context('tasks/5/activity',{ id:'5' }); const r = await activity(s.c), list = r.data as List;
@@ -113,7 +132,7 @@ describe('bounded read-only adapters', () => {
   it('bounds descriptions, links, assignees and safe nested text without fetching URLs', async () => {
     const fetch = vi.spyOn(globalThis,'fetch');
     const s = context('tasks/5?full=1',{id:'5'}, c => {
-      if (c.table === 'work_items') return { data: { ...item, description:'x'.repeat(16001) } };
+      if (['work_items','bot_api_work_items'].includes(c.table)) return { data: { ...item, description:'x'.repeat(16001) } };
       if (c.table === 'work_item_links') return { data:Array.from({length:101},(_,i)=>({id:i+1,title:'Doc',url:i===0?'javascript:bad':'https://example.invalid'})), count:101 };
       if (c.table === 'work_item_assignees') return { data:Array.from({length:101},()=>({user_id:1,users:{name:'Member'}})) };
       return defaultResponse(c);
@@ -140,7 +159,7 @@ describe('bounded read-only adapters', () => {
     const selected = context('tasks?project=1&fields=id'); expect((await tasks(selected.c)).untrusted).toEqual([]);
   });
   it('does not reveal a name through an inconsistent foreign state relation', async () => {
-    const s = context('tasks?project=1',{}, c => c.table === 'work_items' ? { data:[{...item,project_states:{project_id:2,name:'private state'}}] } : defaultResponse(c));
+    const s = context('tasks?project=1',{}, c => ['work_items','bot_api_work_items'].includes(c.table) ? { data:[{...item,project_states:{project_id:2,name:'private state'}}] } : defaultResponse(c));
     expect(JSON.stringify(await tasks(s.c)).includes('private state')).toBe(false);
   });
   it('rejects unknown fields or params on non-task endpoints', async () => {

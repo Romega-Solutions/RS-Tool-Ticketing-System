@@ -22,7 +22,8 @@ It is transactional, additive and rerunnable; incompatible existing columns,
 constraints, defaults, indexes or policies abort instead of being silently
 accepted. Do not run the migration generator. Rollback is separately provided
 in `docs/migrations/0021-bot-api-keys-rollback.sql` and **destroys private
-credential, audit and rate data**. Never run it automatically on shared systems.
+credential, audit and rate data**. It drops the three read views, two functions
+(rate-hit and lifecycle insert/update guard), and three credential/audit/counter tables. Never run it automatically on shared systems.
 No existing business tables or grants are modified. Live/staging ACLs require
 separate approved verification; local evidence is not production evidence.
 
@@ -61,6 +62,10 @@ it by supplying expiry. Rotation is a single REST insert: an internal
 SECURITY INVOKER table trigger locks the predecessor, copies only its read grant,
 project ids/read limit/label, and shortens its expiry to the earlier of its
 existing expiry and now plus 24 hours. A failed insertion rolls back the clamp.
+The same lifecycle function guards updates: expiry can only shrink, revocation
+cannot be cleared, and hash, prefix and predecessor are immutable. A second
+rotation is rejected while a non-revoked successor exists (even if expired).
+Revoke that successor before rotating the predecessor again.
 No key-management RPC is exposed. Revoked/expired predecessors cannot rotate.
 Preserve old rows and their audit history. Schedule rotation privately before
 expiry; after the replacement works, explicitly revoke the old key immediately
@@ -87,7 +92,11 @@ Lists use `{cols,rows,next}`, default 25/max 100. Fields are an output allowlist
 not SQL; unknown/duplicate params or fields fail 400. Tasks require numeric
 `project`; optional `state` must belong to it. Priority is one of `none`,
 `urgent`, `high`, `medium`, `low`. `due_before` is an ISO date, strictly before;
-`since` is an ISO timestamp, strictly after. `q` is a literal name substring
+`since` is an ISO timestamp, strictly after; offsets are parsed and converted to UTC.
+Service-role-only security-invoker views cast legacy text dates to timestamptz
+for chronological comparisons, ordering and cursors without changing business
+column types. Returned business timestamps and time cursors use UTC ISO Z with
+six fractional digits, preserving database microseconds. `q` is a literal name substring
 (maximum 200 characters); All pattern metacharacters (including `*`, `%`, `_` and backslash) are literal;
 the bounded value is regex-escaped for a case-insensitive substring predicate. No raw text is put
 in audit. Project/task missing, archived or foreign reads have identical 404s.
@@ -111,7 +120,8 @@ unknown actions' values are discarded.
 Strong ETags cover the selected representation, filters/fields/page/full mode,
 links/counts/truncation, not the request id or only updated_at. Send
 `If-None-Match` to get an empty 304 when unchanged. Authorization runs before
-comparison; 304 still consumes rate and audit. Responses use
+comparison; 304 still consumes rate and audit. `If-None-Match: *` matches any
+authorized representation; weak `W/` tags never match (a full 200 is returned). Responses use
 `Cache-Control: private, no-store` and `Vary: Authorization`: callers may manage
 tags explicitly, but must not use a shared cache. There are no CORS headers.
 HEAD/OPTIONS/unsupported methods return audited 405 (`Allow: GET`) and no data.
