@@ -70,13 +70,14 @@ database URL from:
 npx --yes supabase@latest status --workdir remote-staging-db -o env
 ```
 
-Use the local values for:
+The server `createAdminClient()` uses `NEXT_PUBLIC_SUPABASE_URL` and
+`SUPABASE_SECRET_KEY`. Use the local values for:
 
 ```text
 NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-SUPABASE_SERVICE_ROLE_KEY
+SUPABASE_SECRET_KEY
 DATABASE_URL
 ```
 
@@ -84,12 +85,12 @@ Do not replace the root `.env`; `.env.local` wins for local development only.
 
 ## 3. Test every migration locally
 
-1. Add/review the SQL file in `docs/migrations/`.
+1. Add/review the canonical numbered SQL file in `drizzle/`. Keep rollback/precheck notes in `docs/migrations/`.
 
 2. Apply only that file to local Docker Postgres:
 
    ```powershell
-   Get-Content docs/migrations/<your-migration>.sql -Raw |
+   Get-Content drizzle/<your-migration>.sql -Raw |
      docker exec -i supabase_db_remote-staging-db psql -U postgres -d postgres --single-transaction --set ON_ERROR_STOP=1
    ```
 
@@ -107,8 +108,10 @@ Do not replace the root `.env`; `.env.local` wins for local development only.
 
 ## Important rules
 
-- The SQL files in `docs/migrations/` are the current migration path. Do not
-  run `drizzle-kit generate` or `drizzle-kit migrate` yet.
+- Numbered SQL files in `drizzle/` are canonical (including newer 0018 onward).
+  `docs/migrations/` holds rollback/precheck material, not duplicate creation SQL.
+  The journal stops at 0007; use the numbered SQL inventory, not the journal.
+  Do not run `drizzle-kit generate` or `drizzle-kit migrate` yet.
 - Do **not** run the SQL printed by `db diff`. `--from local --to staging`
   shows how to undo local changes so local matches staging; it is for review.
 - One change needs one canonical migration file. Do not keep two files that
