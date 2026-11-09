@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean, index, uniqueIndex, primaryKey, check, timestamp, smallint } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, serial, jsonb, numeric, unique, boolean, index, uniqueIndex, primaryKey, check, timestamp, smallint, bigserial, bigint, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id:            serial('id').primaryKey(),
@@ -883,3 +883,46 @@ export const sowEndReminders = pgTable('sow_end_reminders', {
   check('sow_end_reminders_milestone_check', sql`${t.milestoneDays} IN (75, 60, 45)`),
   check('sow_end_reminders_status_check', sql`${t.status} IN ('pending', 'sent', 'failed', 'skipped')`),
 ]).enableRLS();
+
+
+// Server-only credential metadata. Canonical SQL also enables RLS and role ACLs.
+export const apiKeys = pgTable('api_keys', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  label: text('label').notNull(),
+  keyPrefix: text('key_prefix').notNull().unique(),
+  keyHash: text('key_hash').notNull(),
+  scopes: text('scopes').array().notNull().default(sql`ARRAY['tasks:read']::text[]`),
+  projectIds: integer('project_ids').array().notNull().default(sql`'{}'`),
+  rateReadPerMin: integer('rate_read_per_min').notNull().default(120),
+  createdBy: integer('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull().default(sql`now() + interval '90 days'`),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  revokedBy: integer('revoked_by').references(() => users.id, { onDelete: 'set null' }),
+  revokeReason: text('revoke_reason'),
+  rotatedFromId: bigint('rotated_from_id', { mode: 'number' }).references((): AnyPgColumn => apiKeys.id, { onDelete: 'set null' }),
+}, t => [
+  check('api_keys_label_check', sql`length(${t.label}) BETWEEN 1 AND 200`),
+  check('api_keys_key_prefix_check', sql`${t.keyPrefix} ~ '^[A-Za-z0-9_-]{8}$'`),
+  check('api_keys_key_hash_check', sql`${t.keyHash} ~ '^[a-f0-9]{64}$'`),
+  check('api_keys_scopes_check', sql`${t.scopes} = ARRAY['tasks:read']::text[]`),
+  check('api_keys_project_ids_check', sql`array_position(${t.projectIds}, NULL) IS NULL AND coalesce(array_ndims(${t.projectIds}), 1) = 1 AND 0 < ALL(${t.projectIds})`),
+  check('api_keys_rate_read_per_min_check', sql`${t.rateReadPerMin} > 0`),
+]).enableRLS();
+export const apiAuditLog = pgTable('api_audit_log', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  keyId: bigint('key_id', { mode: 'number' }).references(() => apiKeys.id, { onDelete: 'set null' }),
+  keyPrefix: text('key_prefix'), botLabel: text('bot_label'),
+  requestId: text('request_id').notNull(), method: text('method').notNull(), route: text('route').notNull(),
+  taskId: integer('task_id'), status: smallint('status').notNull(), errorCode: text('error_code'),
+  durationMs: integer('duration_ms'), ip: text('ip'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [index('api_audit_log_created_idx').on(t.createdAt.desc()), index('api_audit_log_key_created_idx').on(t.keyId, t.createdAt.desc())]).enableRLS();
+export const apiRateCounters = pgTable('api_rate_counters', {
+  keyId: bigint('key_id', { mode: 'number' }).notNull().references(() => apiKeys.id, { onDelete: 'cascade' }),
+  bucket: text('bucket').notNull(), windowStart: timestamp('window_start', { withTimezone: true }).notNull(),
+  count: integer('count').notNull().default(0),
+}, t => [primaryKey({ columns: [t.keyId, t.bucket, t.windowStart] }),
+  check('api_rate_counters_bucket_check', sql`${t.bucket} = 'read:minute'`),
+  check('api_rate_counters_count_check', sql`${t.count} >= 0`)]).enableRLS();
