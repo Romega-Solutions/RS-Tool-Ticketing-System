@@ -84,3 +84,6 @@ plane-snapshot.json
 .impeccable/live/deferred-svelte-component-accepts.json
 .impeccable/live/*.png
 # impeccable-ignore-end
+
+# Preview seed: local structure snapshots (no personal data, but keep them out of git)
+scripts/preview-seed/*.json
